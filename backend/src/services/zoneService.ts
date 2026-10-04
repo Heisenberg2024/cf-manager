@@ -1,70 +1,15 @@
 import { Account } from '../models/account';
-import { getCfClient, getAuthHeaders } from './cfFactory';
+import { getCfClient, accountRequest } from './cfFactory';
+import { readZoneSettings, writeZoneSettings } from './zoneSettings';
 import { clearCache } from './accountRouter';
-import { appLogger } from './logger';
-import { getHttpAgentForAccount } from './proxyService';
 
-/** 支持的 Zone 设置项映射 */
-const SETTING_PATHS: Record<string, string> = {
-  ssl: 'ssl',
-  always_use_https: 'always_use_https',
-  security_level: 'security_level',
-  automatic_https_rewrites: 'automatic_https_rewrites',
-  cache_level: 'cache_level',
-  browser_cache_ttl: 'browser_cache_ttl',
-  development_mode: 'development_mode',
-  minify: 'minify',
-  brotli: 'brotli',
-  zero_rtt: '0rtt',
-};
-
-/** CF REST API 基地址 */
-const CF_API_BASE = 'https://api.cloudflare.com/client/v4';
-
-/** 直接调用 CF REST API 的辅助函数 */
-async function cfZoneApi(
-  account: Account,
-  method: string,
-  path: string,
-  body?: unknown
-): Promise<any> {
-  const headers = getAuthHeaders(account);
-  const httpAgent = getHttpAgentForAccount(account);
-  const resp = await fetch(`${CF_API_BASE}${path}`, {
-    method,
-    headers: { 'Content-Type': 'application/json', ...headers },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    ...(httpAgent ? { agent: httpAgent } : {}),
-  });
-  if (!resp.ok) {
-    const respBody = await resp.text();
-    throw new Error(`CF API error ${resp.status}: ${respBody}`);
-  }
-  const data = await resp.json() as any;
-  return data?.result ?? data;
+async function cfZoneApi(account: Account, method: string, path: string, body?: unknown): Promise<any> {
+  const data = await accountRequest(account)(path, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  return data.result ?? data;
 }
 
-/**
- * 获取 Zone 设置（修复版）。
- * 一次性调用 GET /zones/:zoneId/settings 获取全部设置，再过滤出需要的字段。
- */
-export async function getZoneSettings(account: Account, zoneId: string): Promise<Record<string, any>> {
-  try {
-    const allSettings = await cfZoneApi(account, 'GET', `/zones/${zoneId}/settings`);
-    // allSettings 是一个数组，每项 { id, value, ... }
-    const settingsMap: Record<string, any> = {};
-    if (Array.isArray(allSettings)) {
-      for (const item of allSettings) {
-        if (item.id && item.id in SETTING_PATHS) {
-          settingsMap[item.id] = item.value;
-        }
-      }
-    }
-    return settingsMap;
-  } catch (err) {
-    appLogger.warn(`Failed to fetch zone settings for zone ${zoneId}: ${err}`);
-    return {};
-  }
+export async function getZoneSettings(account: Account, zoneId: string) {
+  return readZoneSettings(accountRequest(account), zoneId);
 }
 
 /** 创建 Zone */
@@ -94,31 +39,8 @@ export async function deleteZone(account: Account, zoneId: string): Promise<void
   await cf.zones.delete({ zone_id: zoneId } as any);
 }
 
-/** 更新 Zone 设置（批量，best-effort） */
-export async function updateZoneSettings(
-  account: Account,
-  zoneId: string,
-  settings: Record<string, any>
-): Promise<{ updated: string[]; failed: string[] }> {
-  const updated: string[] = [];
-  const failed: string[] = [];
-
-  for (const [key, value] of Object.entries(settings)) {
-    const path = SETTING_PATHS[key];
-    if (!path) {
-      failed.push(key);
-      continue;
-    }
-    try {
-      await cfZoneApi(account, 'PATCH', `/zones/${zoneId}/settings/${path}`, { value });
-      updated.push(key);
-    } catch (err) {
-      appLogger.warn(`Failed to update zone setting ${key} for zone ${zoneId}: ${err}`);
-      failed.push(key);
-    }
-  }
-
-  return { updated, failed };
+export async function updateZoneSettings(account: Account, zoneId: string, settings: Record<string, unknown>) {
+  return writeZoneSettings(accountRequest(account), zoneId, settings);
 }
 
 /** 清除 Zone 缓存 */

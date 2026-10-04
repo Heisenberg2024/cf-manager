@@ -1,3 +1,5 @@
+import { mapConcurrent } from '../utils/concurrent';
+import { errorDetails } from '../services/cfErrors';
 import { Router, Request, Response, NextFunction } from 'express';
 import {
   getCatalogSources, getEnabledCatalogSources, getCatalogSourceById,
@@ -354,7 +356,8 @@ router.post('/deploy-batch', async (req: Request, res: Response, next: NextFunct
     const template = await findTemplate(firstDeployment.templateId);
     if (!template) { res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Template not found' } }); return; }
 
-    const results = await Promise.allSettled(deployments.map(async (d: any) => {
+    const results = await mapConcurrent(deployments, 3, async (d: any) => {
+      try {
       const account = getAccountById(parseInt(d.accountId, 10));
       if (!account) return { accountId: d.accountId, name: d.name, success: false, error: 'Account not found' };
 
@@ -391,12 +394,9 @@ router.post('/deploy-batch', async (req: Request, res: Response, next: NextFunct
         error: result.success ? undefined : (result.error || '部署失败'),
         warnings: result.warnings,
       };
-    }));
-
-    const output = results.map((r: any) =>
-      r.status === 'fulfilled' ? r.value : { success: false, error: r.reason?.message || '未知错误' }
-    );
-    res.json(output);
+      } catch (error) { return { accountId: d.accountId, name: d.name, success: false, error: errorDetails(error).message }; }
+    });
+    res.json(results);
   } catch (err) { next(err); }
 });
 

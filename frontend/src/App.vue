@@ -4,15 +4,6 @@
       <n-message-provider>
         <n-notification-provider>
           <n-loading-bar-provider>
-            <!-- 炫彩环境流体光晕背景层（磨砂折射必备底板） -->
-            <div class="ambient-glow-layer" aria-hidden="true">
-              <div class="ambient-orb orb-1"></div>
-              <div class="ambient-orb orb-2"></div>
-              <div class="ambient-orb orb-3"></div>
-              <div class="ambient-orb orb-4"></div>
-              <div class="ambient-orb orb-5"></div>
-            </div>
-
             <!-- 初始加载 -->
             <div v-if="authChecking" style="display: flex; justify-content: center; align-items: center; height: 100vh">
               <n-spin size="large" />
@@ -59,9 +50,7 @@
                 </n-layout-header>
                 <n-layout-content content-style="padding: 20px; height: 100%; box-sizing: border-box; display: flex; flex-direction: column;" style="height: calc(100vh - 48px - 32px); overflow-y: hidden;">
                   <router-view v-slot="{ Component }">
-                    <transition name="page-fade-slide" mode="out-in">
-                      <component :is="Component" />
-                    </transition>
+                    <component :is="Component" />
                   </router-view>
                 </n-layout-content>
                 <n-layout-footer bordered style="height: 32px; display: flex; align-items: center; justify-content: flex-end; padding: 0 16px; font-size: 12px; color: #999">
@@ -74,9 +63,7 @@
             <div v-else class="mobile-layout">
               <div class="mobile-content">
                 <router-view v-slot="{ Component }">
-                  <transition name="page-fade-slide" mode="out-in">
-                    <component :is="Component" />
-                  </transition>
+                  <component :is="Component" />
                 </router-view>
                 <div class="app-footer" v-if="appVersion">CF Manager v{{ appVersion }}<template v-if="appCommit"> · {{ appCommit }}</template></div>
               </div>
@@ -398,7 +385,7 @@ watch([isDark, themeOverrides], () => {
   width: 48px;
   height: 48px;
   border-radius: 12px;
-  background: linear-gradient(135deg, var(--theme-primary), var(--theme-primary-hover));
+  background: var(--theme-primary);
   color: #fff;
   display: flex;
   align-items: center;
@@ -434,7 +421,7 @@ watch([isDark, themeOverrides], () => {
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: linear-gradient(135deg, var(--theme-primary), var(--theme-primary-hover));
+  background: var(--theme-primary);
   color: #fff;
   font-weight: 700;
   font-size: 14px;

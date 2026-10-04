@@ -151,11 +151,13 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { useMessage } from 'naive-ui';
+import { createRequestScope } from '../utils/requestScope';
 import { useI18n } from 'vue-i18n';
 import { browserRenderApi, type RenderMode, type BrowserEngine } from '../api/browserRender';
 import { accountsApi } from '../api/accounts';
 
 const { t } = useI18n();
+const requests = createRequestScope();
 const message = useMessage();
 const url = ref('');
 const selectedAccount = ref<string>('auto');
@@ -226,8 +228,10 @@ function formatSeconds(s: number): string {
 }
 
 async function fetchUsage() {
+  const request = requests.begin('fetchUsage');
   try {
     const { data } = await browserRenderApi.getQuota();
+    if (!request.current()) return;
     usageList.value = (data || [])
       .map((acct: any) => {
         const br = (acct.resources || []).find((r: any) => r.resource === 'browser_render_seconds');
@@ -235,6 +239,7 @@ async function fetchUsage() {
       })
       .filter(Boolean) as UsageItem[];
   } catch {
+    if (!request.current()) return;
     usageList.value = [];
   }
 }

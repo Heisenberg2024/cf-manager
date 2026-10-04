@@ -36,6 +36,7 @@ RUN node scripts/gen-version.js backend
 COPY shared/model-pricing.json ./src/data/model-pricing.json
 COPY shared/catalog.schema.json ./src/services/catalog.schema.json
 COPY shared/catalogValidator.ts ./src/services/catalogValidator.ts
+COPY shared/cfErrors.ts shared/accountDiscovery.ts shared/credentialManager.ts shared/zoneSettings.ts ./src/services/
 # catalog 校验器由 ajv standalone 预编译生成（运行时避免 new Function，兼容 Cloudflare）。
 COPY scripts/gen-catalog-validator.js ./scripts/gen-catalog-validator.js
 RUN CATALOG_SCHEMA_PATH=/app/src/services/catalog.schema.json \
@@ -57,23 +58,25 @@ COPY --from=backend-builder /app/dist ./dist
 # Frontend: built static assets (served by Express via express.static)
 COPY --from=frontend-builder /app/dist ./public
 
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data/logs && chown -R node:node /app/data
 
-# su-exec：以 root 启动 entrypoint（修复 ./data 宿主属主），再 drop 到 node 启动 node 进程。
-# 避免宿主挂载目录属主不是 1000:1000 时 better-sqlite3 EACCES 导致容器秒退。
+# su-exec 仅用于用户显式选择 root 启动时的数据卷修复与降权。
+# 默认 non-root 启动不调用它，也不需要 CHOWN/SETUID/SETGID capabilities。
 RUN apk add --no-cache su-exec
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 ENV PORT=3000
 ENV DB_PATH=/app/data/cf-manager.db
+ENV LOG_DIR=/app/data/logs
 
 EXPOSE 3000
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
     CMD wget -qO- http://localhost:3000/api/health || exit 1
 
-# entrypoint.sh 会以 root 启动并 chown /app/data，再用 su-exec drop 到 node 启动进程。
+# 默认非 root；显式 --user 0 的传统部署仍可在 entrypoint 中修正数据卷权限。
+USER node
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 CMD ["node", "dist/index.js"]

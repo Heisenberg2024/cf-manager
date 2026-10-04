@@ -13,9 +13,11 @@
           {{ t('accounts.exportDemoDisabled') }}
         </n-tooltip>
         <n-button v-else @click="openExportModal">{{ t('accounts.exportCsv') }}</n-button>
-        <n-button type="primary" @click="showAddModal = true">{{ t('accounts.addAccount') }}</n-button>
+        <n-button type="primary" @click="credentialPanel?.open()">{{ t('accounts.addAccount') }}</n-button>
       </n-space>
     </n-space>
+
+    <CredentialPanel ref="credentialPanel" @changed="accountStore.fetchAccounts()" />
 
     <n-space align="center" :size="12" style="margin-bottom: 12px; flex-shrink: 0;">
       <n-button-group size="small">
@@ -62,30 +64,13 @@
       v-model:checked-row-keys="checkedRowKeys"
     />
 
-    <n-modal v-model:show="showAddModal" preset="dialog" :title="editingId === null ? t('accounts.addModalTitle') : t('accounts.editModalTitle')" style="width: 500px; max-width: 95vw">
+    <n-modal v-model:show="showAddModal" preset="dialog" :title="t('accounts.editModalTitle')" style="width: 500px; max-width: 95vw">
       <n-form :model="form" label-placement="left" label-width="100">
         <n-form-item :label="t('accounts.accountName')">
           <n-input v-model:value="form.name" :placeholder="t('accounts.accountNamePlaceholder')" />
         </n-form-item>
-        <n-form-item :label="t('accounts.authType')">
-          <n-select v-model:value="form.auth_type" :options="authTypeOptions" />
-        </n-form-item>
-        <n-form-item v-if="form.auth_type === 'token'" :label="t('accounts.apiToken')">
-          <n-input v-model:value="form.api_token" type="password" show-password-on="click" :placeholder="editingId === null ? t('accounts.apiTokenPlaceholder') : t('accounts.apiTokenEditPlaceholder')" />
-        </n-form-item>
-        <n-form-item v-if="form.auth_type === 'global_key'" :label="t('accounts.email')">
-          <n-input v-model:value="form.email" :placeholder="editingId === null ? t('accounts.emailPlaceholder') : (editingOriginalEmail ? t('accounts.emailEditWithOriginal', { email: editingOriginalEmail }) : t('accounts.emailEditPlaceholder'))" />
-        </n-form-item>
-        <n-form-item v-if="form.auth_type === 'global_key'" :label="t('accounts.apiKey')">
-          <n-input v-model:value="form.api_key" type="password" show-password-on="click" :placeholder="editingId === null ? t('accounts.apiKeyPlaceholder') : t('accounts.apiKeyEditPlaceholder')" />
-        </n-form-item>
-        <n-form-item v-if="editingId === null" :label="t('accounts.enableFeatures')">
-          <n-checkbox-group v-model:value="form.features">
-            <n-space>
-              <n-checkbox v-for="f in featureOptions" :key="f.value" :value="f.value" :label="f.label" />
-            </n-space>
-          </n-checkbox-group>
-        </n-form-item>
+        <n-form-item label="Account ID"><n-input v-model:value="form.account_id" :disabled="/^[a-f\d]{32}$/i.test(editingOriginalAccountId)" :placeholder="t('credentials.accountIdHint')" /></n-form-item>
+        <n-text depth="3">{{ t('credentials.sharedWarning') }}</n-text>
         <n-form-item :label="t('accounts.workerPlan')">
           <n-select v-model:value="form.worker_plan" :options="workerPlanOptions" style="width: 180px" />
           <n-text depth="3" style="margin-left: 8px; font-size: 12px">{{ t('accounts.workerPlanHint') }}</n-text>
@@ -224,59 +209,6 @@
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showCredModal" preset="dialog" :title="t('accounts.credModalTitle')" style="width: 560px; max-width: 95vw">
-      <n-spin :show="credLoading">
-        <n-space vertical :size="12" v-if="credData">
-          <n-alert type="warning" :bordered="false">
-            {{ t('accounts.credWarning') }}
-          </n-alert>
-          <n-descriptions label-placement="left" bordered :column="1" size="small">
-            <n-descriptions-item :label="t('accounts.accountName')">{{ credData.name }}</n-descriptions-item>
-            <n-descriptions-item label="Account ID">
-              <n-text :style="{ fontFamily: 'monospace' }">{{ credData.account_id || '-' }}</n-text>
-            </n-descriptions-item>
-            <n-descriptions-item :label="t('accounts.authType')">
-              <n-tag size="small" :type="credData.auth_type === 'token' ? 'info' : 'warning'">
-                {{ credData.auth_type === 'token' ? t('accounts.authTypeToken') : t('accounts.authTypeKey') }}
-              </n-tag>
-            </n-descriptions-item>
-            <n-descriptions-item v-if="credData.auth_type === 'global_key'" :label="t('accounts.email')">
-              {{ credData.email || '-' }}
-            </n-descriptions-item>
-            <n-descriptions-item v-if="credData.auth_type === 'token'" :label="t('accounts.apiToken')">
-              <n-input
-                :value="credData.api_token || ''"
-                type="password"
-                show-password-on="click"
-                readonly
-                :style="{ fontFamily: 'monospace' }"
-              />
-            </n-descriptions-item>
-            <n-descriptions-item v-if="credData.auth_type === 'global_key'" :label="t('accounts.apiKey')">
-              <n-input
-                :value="credData.api_key || ''"
-                type="password"
-                show-password-on="click"
-                readonly
-                :style="{ fontFamily: 'monospace' }"
-              />
-            </n-descriptions-item>
-            <n-descriptions-item v-if="!isWorkerPlatform" :label="t('accounts.proxyUrl')">
-              <n-text :style="{ fontFamily: 'monospace' }">{{ credData.proxy_url || '—' }}</n-text>
-            </n-descriptions-item>
-            <n-descriptions-item v-if="!isWorkerPlatform && credData.proxy_url" :label="t('accounts.proxyStatus')">
-              <n-tag :type="credData.proxy_enabled ? 'success' : 'default'" size="small">
-                {{ credData.proxy_enabled ? t('common.enabled') : t('common.disabled') }}
-              </n-tag>
-            </n-descriptions-item>
-          </n-descriptions>
-        </n-space>
-      </n-spin>
-      <template #action>
-        <n-button @click="showCredModal = false">{{ t('common.close') }}</n-button>
-      </template>
-    </n-modal>
-
     <!-- 批量设置功能 -->
     <n-modal v-model:show="showBatchFeaturesModal" preset="dialog" :title="t('accounts.batchFeaturesModalTitle')" style="width: 420px; max-width: 95vw">
       <n-checkbox-group v-model:value="batchFeatures">
@@ -349,11 +281,12 @@
 <script setup lang="ts">
 import { ref, h, computed, onMounted, onBeforeUnmount } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { NButton, NSpace, NProgress, NTag, NDropdown, useMessage } from 'naive-ui';
+import { NButton, NSpace, NSwitch, NProgress, NTag, NDropdown, useMessage } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
 import type { UploadFileInfo } from 'naive-ui';
 import { useAccountStore } from '../stores/accountStore';
 import AutoFitTable from '../components/AutoFitTable.vue';
+import CredentialPanel from '../components/CredentialPanel.vue';
 import { accountsApi, type AccountExportParams } from '../api/accounts';
 import { dialog } from '../utils/discreteApi';
 import { settingsApi } from '../api/settings';
@@ -363,10 +296,11 @@ const { t } = useI18n();
 type BatchOpResult = { summary: { total: number; success: number; skipped: number; error: number }; results: Array<{ id: number; name: string; status: 'success' | 'skipped' | 'error'; message?: string }> };
 
 const accountStore = useAccountStore();
+const credentialPanel = ref<InstanceType<typeof CredentialPanel> | null>(null);
 const message = useMessage();
 const showAddModal = ref(false);
 const editingId = ref<number | null>(null);
-const editingOriginalEmail = ref<string>('');
+const editingOriginalAccountId = ref('');
 const showFeatureModal = ref(false);
 const showImportModal = ref(false);
 const showBatchResultModal = ref(false);
@@ -427,35 +361,6 @@ const batchOpResultColumns = computed<DataTableColumns<any>>(() => [
   { title: t('common.message'), key: 'message', width: 180, minWidth: 100, ellipsis: { tooltip: true }, render: (row) => row.message || '-' },
 ]);
 
-// 查看 API 凭证
-const showCredModal = ref(false);
-const credLoading = ref(false);
-const credData = ref<{
-  id: number;
-  name: string;
-  auth_type: 'token' | 'global_key';
-  account_id: string | null;
-  email: string | null;
-  api_token: string | null;
-  api_key: string | null;
-  proxy_url: string;
-  proxy_enabled: number;
-} | null>(null);
-
-async function handleViewCredentials(row: any) {
-  showCredModal.value = true;
-  credLoading.value = true;
-  credData.value = null;
-  try {
-    credData.value = await accountStore.getCredentials(row.id);
-  } catch (e: any) {
-    message.error(t('accounts.msg.getCredFailed', { error: e?.message || e }));
-    showCredModal.value = false;
-  } finally {
-    credLoading.value = false;
-  }
-}
-
 const importFile = computed<File | null>(() => {
   const item = importFileList.value[0];
   return item?.file ?? null;
@@ -507,20 +412,7 @@ const featureLabelMap = computed<Record<string, string>>(() => ({
   storage: t('common.featureLabels.storage'),
 }));
 
-const form = ref({
-  name: '',
-  auth_type: 'token',
-  api_token: '',
-  api_key: '',
-  email: '',
-  features: ['ai', 'workers', 'browser_render', 'dns', 'storage'] as string[],
-  worker_plan: 'free',
-});
-
-const authTypeOptions = computed(() => [
-  { label: t('accounts.authTypeToken'), value: 'token' },
-  { label: t('accounts.authTypeKey'), value: 'global_key' },
-]);
+const form = ref({ name: '', account_id: '', worker_plan: 'free' });
 
 // 账号的 Cloudflare Workers 计划类型：付费模型只路由到 paid/enterprise 账号（不标即视为免费）
 const workerPlanOptions = computed(() => [
@@ -529,54 +421,21 @@ const workerPlanOptions = computed(() => [
   { label: t('accounts.planEnterprise'), value: 'enterprise' },
 ]);
 
-function resetForm() {
-  form.value = { name: '', auth_type: 'token', api_token: '', api_key: '', email: '', features: ['ai', 'workers', 'browser_render', 'dns', 'storage'], worker_plan: 'free' };
-}
-
 async function handleSubmit() {
-  if (!form.value.name) {
-    message.warning(t('accounts.msg.nameRequired'));
-    return;
-  }
+  if (editingId.value === null || !form.value.name.trim()) return;
   submitting.value = true;
   try {
-    const { features, ...rest } = form.value;
-    const payload: any = { name: rest.name, auth_type: rest.auth_type, worker_plan: rest.worker_plan };
-    // 仅发送用户实际填写的凭证字段；空串一律剔除，避免覆盖原凭证
-    if (rest.auth_type === 'token') {
-      if (rest.api_token) payload.api_token = rest.api_token;
-    } else {
-    if (rest.api_key) payload.api_key = rest.api_key;
-    if (rest.email) payload.email = rest.email;
-  }
-  if (editingId.value === null) {
-      // 添加模式：凭证必填（后端校验）
-      await accountStore.createAccount({ ...payload, enabled_features: features.join(',') });
-      message.success(t('accounts.msg.addSuccess'));
-    } else {
-      await accountStore.updateAccount(editingId.value, payload);
-      message.success(t('accounts.msg.updateSuccess'));
-    }
+    await accountStore.updateAccount(editingId.value, { name: form.value.name.trim(), account_id: form.value.account_id !== editingOriginalAccountId.value ? form.value.account_id : undefined, worker_plan: form.value.worker_plan });
     showAddModal.value = false;
-    resetForm();
-    editingId.value = null;
-  } finally {
-    submitting.value = false;
-  }
+    await credentialPanel.value?.load();
+    message.success(t('accounts.msg.updateSuccess'));
+  } finally { submitting.value = false; }
 }
 
 function openAccountEditor(row: any) {
   editingId.value = row.id;
-  editingOriginalEmail.value = row.email || '';
-  form.value = {
-    name: row.name,
-    auth_type: row.auth_type,
-    api_token: '',
-    api_key: '',
-    email: '',
-    features: parseFeatures(row.enabled_features),
-    worker_plan: row.worker_plan || 'free',
-  };
+  editingOriginalAccountId.value = row.account_id || '';
+  form.value = { name: row.name, account_id: row.account_id || '', worker_plan: row.worker_plan || 'free' };
   showAddModal.value = true;
 }
 
@@ -623,6 +482,7 @@ async function handleSaveProxy() {
 
 async function handleTest(row: any) {
   await accountStore.testAccount(row.id);
+  await credentialPanel.value?.load();
   message.success(t('accounts.msg.testSuccess'));
 }
 
@@ -740,15 +600,13 @@ const batchResultColumns = computed<DataTableColumns<any>>(() => [
 
 async function handleDelete(row: any) {
   await accountStore.deleteAccount(row.id);
+  await credentialPanel.value?.load();
   message.success(t('accounts.msg.deleted'));
 }
 
 // 操作列「更多」下拉菜单路由
 function handleActionMenu(key: string, row: any) {
   switch (key) {
-    case 'cred':
-      handleViewCredentials(row);
-      break;
     case 'features':
       openFeatureEditor(row);
       break;
@@ -761,7 +619,7 @@ function handleActionMenu(key: string, row: any) {
     case 'delete':
       dialog.warning({
         title: t('accounts.msg.deleteAccountTitle'),
-        content: t('accounts.msg.deleteAccountConfirm', { name: row.name }),
+        content: `${t('accounts.msg.deleteAccountConfirm', { name: row.name })} (${row.account_id || row.id}) ${t('credentials.bindingOnly')}`,
         positiveText: t('common.delete'),
         negativeText: t('common.cancel'),
         onPositiveClick: () => handleDelete(row),
@@ -878,7 +736,7 @@ const importResultColumns = computed<DataTableColumns<any>>(() => [
 ]);
 
 function parseFeatures(raw: string | undefined): string[] {
-  return (raw || 'ai,workers,browser_render,dns,storage').split(',').filter(Boolean);
+  return (raw ?? 'ai,workers,browser_render,dns,storage').split(',').filter(Boolean);
 }
 
 const columns = computed<DataTableColumns<any>>(() => {
@@ -886,6 +744,8 @@ const columns = computed<DataTableColumns<any>>(() => {
   { type: 'selection', width: 40, fixed: 'left' },
   { title: 'ID', key: 'id', width: 60 },
   { title: t('accounts.table.name'), key: 'name', width: 150 },
+  { title: t('credentials.name'), key: 'credential_name', width: 150 },
+  { title: t('credentials.enabled'), key: 'is_enabled', width: 110, render: row => h(NSwitch, { value: row.is_enabled !== 0, disabled: row.is_demo, onUpdateValue: async (enabled: boolean) => { await accountStore.updateAccount(row.id, { is_enabled: enabled ? 1 : 0 }); await credentialPanel.value?.load(); } }) },
   { title: 'Account ID', key: 'account_id', width: 180, ellipsis: { tooltip: true }, render: (row) => h('span', { style: { fontFamily: 'var(--mono)', fontSize: '12px', color: 'var(--app-text-secondary)' } }, row.account_id || '-') },
   { title: t('accounts.table.authType'), key: 'auth_type', width: 120, render: (row) => h(NTag, { size: 'small', type: row.auth_type === 'token' ? 'info' : 'warning' }, { default: () => row.auth_type === 'token' ? 'Token' : 'Key' }) },
   { title: t('accounts.workerPlan'), key: 'worker_plan', width: 90, render: (row) => {
@@ -961,7 +821,6 @@ const columns = computed<DataTableColumns<any>>(() => {
         return aiResource?.exhausted;
       })();
       const moreOptions = [
-        { label: t('accounts.table.viewCred'), key: 'cred', disabled: !!row.is_demo },
         { label: t('accounts.table.featureSwitch'), key: 'features', disabled: !!row.is_demo },
         ...(isWorkerPlatform.value ? [] : [{ label: t('accounts.table.setProxy'), key: 'proxy', disabled: !!row.is_demo }]),
         ...(isExhausted ? [{ label: t('accounts.table.clearExhausted'), key: 'clearExhausted', disabled: !!row.is_demo }] : []),

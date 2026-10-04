@@ -4,12 +4,13 @@ import compression from 'compression';
 import path from 'path';
 import fs from 'fs';
 import { config } from './config';
-import { initDb } from './db';
+import { initDb, getDb } from './db';
 import { authMiddleware } from './middleware/auth';
 import { errorHandler } from './middleware/errorHandler';
 import { v1ErrorHandler } from './middleware/v1ErrorHandler';
 import { responseWrapper } from './middleware/responseWrapper';
 import accountsRouter from './routes/accounts';
+import credentialsRouter from './routes/credentials';
 import dnsRouter from './routes/dns';
 import workersRouter from './routes/workers';
 import browserRenderRouter from './routes/browserRender';
@@ -39,7 +40,7 @@ const app = express();
 
 app.use(cors({
   origin: true, // Allow all origins (or specify your frontend URL)
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Account-ID'],
   credentials: false,
 }));
@@ -51,7 +52,12 @@ app.use(canonicalizeMiddleware);
 
 // Health check — before auth so Docker healthcheck works without API_SECRET
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok' });
+  try {
+    getDb().prepare('SELECT 1').get();
+    res.json({ status: 'ok', db_connected: true });
+  } catch {
+    res.status(503).json({ status: 'unavailable', db_connected: false });
+  }
 });
 
 // ---- Static frontend serving (Docker all-in-one mode) ----
@@ -98,6 +104,7 @@ app.use('/api', apiRequestLogger);
 app.use('/api', responseWrapper);
 
 app.use('/api/accounts', accountsRouter);
+app.use('/api/credentials', credentialsRouter);
 app.use('/api/dns', dnsRouter);
 app.use('/api/workers', workersRouter);
 app.use('/api/browser-render', browserRenderRouter);
@@ -176,4 +183,7 @@ process.on('unhandledRejection', (err) => {
   appLogger.error(`[UNHANDLED_REJECTION] ${err}`);
 });
 
-start().catch((err) => appLogger.error(`[STARTUP] ${err}`));
+start().catch((err) => {
+  appLogger.error(`[STARTUP] ${err}`);
+  process.exitCode = 1;
+});

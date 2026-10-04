@@ -4,7 +4,7 @@
     <n-space justify="space-between" align="center" :wrap="true" style="margin-bottom: 12px">
       <n-h2 style="margin: 0">{{ t('dns.title') }}</n-h2>
       <n-space>
-        <n-button size="small" @click="dnsStore.fetchDomains()" :loading="dnsStore.loading">{{ t('common.refresh') }}</n-button>
+        <n-button size="small" @click="dnsStore.fetchDomains(true)" :loading="dnsStore.domainsLoading">{{ t('common.refresh') }}</n-button>
         <n-button size="small" type="primary" @click="showAddDomainModal = true">{{ t('dns.addDomain') }}</n-button>
       </n-space>
     </n-space>
@@ -50,7 +50,7 @@
             </n-button>
           </template>
 
-          <n-spin :show="dnsStore.loading" style="flex: 1 1 0%; min-height: 0; display: flex; flex-direction: column;">
+          <n-spin :show="dnsStore.domainsLoading" style="flex: 1 1 0%; min-height: 0; display: flex; flex-direction: column;">
             <!-- 所有账户模式：分组折叠 -->
             <template v-if="selectedAccount === '__all__'">
               <n-collapse v-if="groupedDomains.length > 0" :default-expanded-names="expandedGroups">
@@ -68,15 +68,15 @@
                   <n-list hoverable clickable>
                     <n-list-item
                       v-for="d in group.domains"
-                      :key="d.name"
-                      @click="selectDomain(d.name)"
-                      :style="{ background: dnsStore.currentDomain === d.name ? 'var(--n-color-hover)' : '' }"
+                      :key="zoneKey(d)"
+                      @click="selectDomain(d)"
+                      :style="{ background: dnsStore.currentDomain === d.name && dnsStore.currentContext.accountId === d.cfAccountId ? 'var(--n-color-hover)' : '' }"
                     >
                       <div style="display: flex; align-items: flex-start; gap: 8px; width: 100%">
                         <n-checkbox
                           v-if="!isDemoDomain(d)"
-                          :checked="selectedDomains.has(d.name)"
-                          @update:checked="(v: boolean) => toggleDomainSelect(d.name, v)"
+                          :checked="selectedDomains.has(zoneKey(d))"
+                          @update:checked="(v: boolean) => toggleDomainSelect(zoneKey(d), v)"
                           @click.stop
                         />
                         <div style="flex: 1; min-width: 0">
@@ -99,15 +99,15 @@
               <n-list v-if="filteredDomains.length > 0" hoverable clickable>
                 <n-list-item
                   v-for="d in filteredDomains"
-                  :key="d.name"
-                  @click="selectDomain(d.name)"
-                  :style="{ background: dnsStore.currentDomain === d.name ? 'var(--n-color-hover)' : '' }"
+                  :key="zoneKey(d)"
+                  @click="selectDomain(d)"
+                  :style="{ background: dnsStore.currentDomain === d.name && dnsStore.currentContext.accountId === d.cfAccountId ? 'var(--n-color-hover)' : '' }"
                 >
                   <div style="display: flex; align-items: flex-start; gap: 8px; width: 100%">
                     <n-checkbox
                       v-if="!isDemoDomain(d)"
-                      :checked="selectedDomains.has(d.name)"
-                      @update:checked="(v: boolean) => toggleDomainSelect(d.name, v)"
+                      :checked="selectedDomains.has(zoneKey(d))"
+                      @update:checked="(v: boolean) => toggleDomainSelect(zoneKey(d), v)"
                       @click.stop
                     />
                     <div style="flex: 1; min-width: 0">
@@ -122,7 +122,7 @@
               </n-list>
             </template>
 
-            <n-empty v-if="!dnsStore.loading && filteredDomains.length === 0" :description="t('dns.noDomain')" style="margin: 20px 0">
+            <n-empty v-if="!dnsStore.domainsLoading && filteredDomains.length === 0" :description="t('dns.noDomain')" style="margin: 20px 0">
               <template #extra>
                 <n-button size="small" type="primary" @click="showAddDomainModal = true">{{ t('dns.addDomainBtn') }}</n-button>
               </template>
@@ -151,21 +151,33 @@
           >
             <!-- Tab 1: DNS 记录 -->
             <n-tab-pane name="records" :tab="t('dns.records')">
-              <div style="display: flex; justify-content: flex-end; margin-bottom: 8px; flex-shrink: 0;">
+              <n-alert v-if="dnsStore.recordsError" type="error" :bordered="false">{{ dnsStore.recordsError }}</n-alert>
+              <n-space align="center" style="margin-bottom: 8px; flex-shrink: 0">
+                <n-button size="small" :disabled="batchRunning" @click="selectPageRecords">{{ t('dns.batch.selectPage') }}</n-button>
+                <n-button size="small" :disabled="batchRunning" @click="selectedRecordIds = dnsStore.records.map(r => r.id)">{{ t('dns.batch.selectAll', { count: dnsStore.records.length }) }}</n-button>
+                <n-button size="small" :disabled="batchRunning" @click="selectedRecordIds = []">{{ t('common.clearSelection') }}</n-button>
+                <n-text>{{ t('dns.batch.selected', { count: selectedRecordIds.length }) }}</n-text>
+                <n-button size="small" :disabled="!selectedRecordIds.length || currentDomainIsDemo || batchRunning" @click="showBatchRecordEdit = true">{{ t('dns.batch.edit') }}</n-button>
+                <n-button size="small" type="error" :disabled="!selectedRecordIds.length || currentDomainIsDemo || batchRunning" @click="confirmRecordBatch('delete')">{{ t('common.delete') }}</n-button>
+                <n-button size="small" :loading="dnsStore.loading" @click="dnsStore.fetchRecords(dnsStore.currentDomain)">{{ t('common.refresh') }}</n-button>
                 <n-button size="small" type="primary" @click="openAddRecordModal">{{ t('dns.addRecord') }}</n-button>
-              </div>
+              </n-space>
+              <n-progress v-if="batchRunning" type="line" :percentage="Math.round(batchCompleted / Math.max(batchTotal, 1) * 100)" :show-indicator="true" />
               <AutoFitTable
                 style="flex: 1 1 0%; min-height: 0; margin-top: 0;"
                 :columns="recordColumns"
                 :data="dnsStore.records"
                 :loading="dnsStore.loading"
                 :scroll-x="680"
-                :pagination="{ pageSize: 20 }"
+                :pagination="{ page: recordPage, pageSize: recordPageSize, showSizePicker: true, pageSizes: [20, 50, 100], onUpdatePage: (page: number) => recordPage = page, onUpdatePageSize: (size: number) => { recordPageSize = size; recordPage = 1; } }"
+                :row-key="(row: any) => row.id"
+                v-model:checked-row-keys="selectedRecordIds"
               />
             </n-tab-pane>
 
             <!-- Tab 2: Zone 设置 -->
             <n-tab-pane name="settings" :tab="t('dns.zoneSettings')">
+              <n-alert v-if="dnsStore.settingsError" type="error" :bordered="false">{{ dnsStore.settingsError }}</n-alert>
               <n-spin :show="dnsStore.settingsLoading">
                 <div class="dns-tab-form-scroll">
                   <n-grid :cols="24" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
@@ -178,16 +190,16 @@
                         </div>
                         <n-form label-placement="left" label-width="120" size="small" :disabled="dnsStore.settingsLoading">
                           <n-form-item :label="t('dns.sslMode')">
-                            <n-select v-model:value="zoneForm.ssl" :options="sslOptions" />
+                            <n-select v-model:value="zoneForm.ssl" :disabled="!settingEditable('ssl')" :options="sslOptions" />
                           </n-form-item>
                           <n-form-item :label="t('dns.alwaysHttps')">
-                            <n-switch v-model:value="zoneForm.always_use_https" :checked-value="'on'" :unchecked-value="'off'" />
+                            <n-switch v-model:value="zoneForm.always_use_https" :disabled="!settingEditable('always_use_https')" :checked-value="'on'" :unchecked-value="'off'" />
                           </n-form-item>
                           <n-form-item :label="t('dns.autoHttpsRewrite')">
-                            <n-switch v-model:value="zoneForm.automatic_https_rewrites" :checked-value="'on'" :unchecked-value="'off'" />
+                            <n-switch v-model:value="zoneForm.automatic_https_rewrites" :disabled="!settingEditable('automatic_https_rewrites')" :checked-value="'on'" :unchecked-value="'off'" />
                           </n-form-item>
                           <n-form-item :label="t('dns.securityLevel')">
-                            <n-select v-model:value="zoneForm.security_level" :options="securityOptions" />
+                            <n-select v-model:value="zoneForm.security_level" :disabled="!settingEditable('security_level')" :options="securityOptions" />
                           </n-form-item>
                         </n-form>
                       </div>
@@ -201,18 +213,27 @@
                           <span class="group-card-title">{{ t('dns.performance') }}</span>
                         </div>
                         <n-form label-placement="left" label-width="120" size="small" :disabled="dnsStore.settingsLoading">
-                          <n-form-item :label="t('dns.autoMinify')">
+                          <n-form-item v-if="dnsStore.zoneSettings.minify !== undefined" :label="`${t('dns.autoMinify')} (deprecated)`">
                             <n-space :size="12">
-                              <n-checkbox v-model:checked="minifyJs">JS</n-checkbox>
-                              <n-checkbox v-model:checked="minifyCss">CSS</n-checkbox>
-                              <n-checkbox v-model:checked="minifyHtml">HTML</n-checkbox>
+                              <n-checkbox v-model:checked="minifyJs" disabled>JS</n-checkbox>
+                              <n-checkbox v-model:checked="minifyCss" disabled>CSS</n-checkbox>
+                              <n-checkbox v-model:checked="minifyHtml" disabled>HTML</n-checkbox>
                             </n-space>
                           </n-form-item>
-                          <n-form-item :label="t('dns.brotli')">
-                            <n-switch v-model:value="zoneForm.brotli" :checked-value="'on'" :unchecked-value="'off'" />
+                          <n-form-item v-if="dnsStore.zoneSettings.brotli !== undefined" :label="`${t('dns.brotli')} (deprecated)`">
+                            <n-switch v-model:value="zoneForm.brotli" :disabled="!settingEditable('brotli')" :checked-value="'on'" :unchecked-value="'off'" />
                           </n-form-item>
                           <n-form-item :label="t('dns.zeroRtt')">
-                            <n-switch v-model:value="zoneForm.zero_rtt" :checked-value="'on'" :unchecked-value="'off'" />
+                            <n-switch v-model:value="zoneForm.zero_rtt" :disabled="!settingEditable('zero_rtt')" :checked-value="'on'" :unchecked-value="'off'" />
+                          </n-form-item>
+                          <n-form-item v-if="dnsStore.zoneSettings.http2 !== undefined" label="HTTP/2">
+                            <n-switch v-model:value="zoneForm.http2" :disabled="!settingEditable('http2')" checked-value="on" unchecked-value="off" />
+                          </n-form-item>
+                          <n-form-item v-if="dnsStore.zoneSettings.http3 !== undefined" label="HTTP/3">
+                            <n-switch v-model:value="zoneForm.http3" :disabled="!settingEditable('http3')" checked-value="on" unchecked-value="off" />
+                          </n-form-item>
+                          <n-form-item v-if="dnsStore.zoneSettings.always_online !== undefined" label="Always Online">
+                            <n-switch v-model:value="zoneForm.always_online" :disabled="!settingEditable('always_online')" checked-value="on" unchecked-value="off" />
                           </n-form-item>
                         </n-form>
                       </div>
@@ -240,14 +261,14 @@
                       </div>
                       <n-form label-placement="left" label-width="120" size="small">
                         <n-form-item :label="t('dns.cacheLevel')">
-                          <n-select v-model:value="zoneForm.cache_level" :options="cacheLevelOptions" />
+                          <n-select v-model:value="zoneForm.cache_level" :disabled="!settingEditable('cache_level')" :options="cacheLevelOptions" />
                         </n-form-item>
                         <n-form-item :label="t('dns.browserCacheTtl')">
-                          <n-select v-model:value="zoneForm.browser_cache_ttl" :options="browserTtlOptions" />
+                          <n-select v-model:value="zoneForm.browser_cache_ttl" :disabled="!settingEditable('browser_cache_ttl')" :options="browserTtlOptions" />
                         </n-form-item>
                         <n-form-item :label="t('dns.devMode')">
                           <n-space align="center">
-                            <n-switch v-model:value="zoneForm.development_mode" :checked-value="'on'" :unchecked-value="'off'" />
+                            <n-switch v-model:value="zoneForm.development_mode" :disabled="!settingEditable('development_mode')" :checked-value="'on'" :unchecked-value="'off'" />
                             <n-text depth="3" style="font-size: 12px">{{ t('dns.devModeHint') }}</n-text>
                           </n-space>
                         </n-form-item>
@@ -339,9 +360,11 @@
         <n-form-item :label="t('dns.recordName')" path="name">
           <n-input v-model:value="newRecord.name" :placeholder="t('dns.recordNamePlaceholder')" />
         </n-form-item>
-        <n-form-item v-if="newRecord.type === 'MX'" :label="t('dns.priority')">
+        <n-form-item v-if="newRecord.type === 'MX' || newRecord.type === 'SRV'" :label="t('dns.priority')">
           <n-input-number v-model:value="newRecord.priority" :min="0" :max="65535" />
         </n-form-item>
+        <n-form-item v-if="newRecord.type === 'SRV'" label="Weight"><n-input-number v-model:value="newRecord.weight" :min="0" :max="65535" /></n-form-item>
+        <n-form-item v-if="newRecord.type === 'SRV'" label="Port"><n-input-number v-model:value="newRecord.port" :min="1" :max="65535" /></n-form-item>
         <n-form-item :label="t('dns.recordContent')" path="content">
           <n-input v-model:value="newRecord.content" :placeholder="t('dns.recordContentPlaceholder')" />
         </n-form-item>
@@ -352,7 +375,7 @@
           </n-space>
         </n-form-item>
         <n-form-item :label="t('dns.proxied')">
-          <n-switch v-model:value="newRecord.proxied" />
+          <n-switch v-model:value="newRecord.proxied" :disabled="!['A', 'AAAA', 'CNAME'].includes(newRecord.type)" />
         </n-form-item>
       </n-form>
       <template #action>
@@ -414,6 +437,19 @@
         <n-button @click="showResultModal = false">{{ t('common.close') }}</n-button>
       </template>
     </n-modal>
+    <n-modal v-model:show="showBatchRecordEdit" preset="dialog" :title="t('dns.batch.edit')" style="width: 480px; max-width: 95vw">
+      <n-text>{{ t('dns.batch.selected', { count: selectedRecordIds.length }) }}</n-text>
+      <n-form label-placement="left" label-width="100" style="margin-top: 12px">
+        <n-form-item label="TTL"><n-input-number v-model:value="batchTtl" :min="1" :max="86400" /><n-button style="margin-left: 8px" :disabled="batchTtl !== 1 && batchTtl < 60" @click="confirmRecordBatch('ttl')">{{ t('common.save') }}</n-button></n-form-item>
+        <n-form-item label="Proxy"><n-select v-model:value="batchProxy" :options="[{ label: 'On', value: 'on' }, { label: 'Off', value: 'off' }]" /><n-button style="margin-left: 8px" @click="confirmRecordBatch('proxy')">{{ t('common.save') }}</n-button></n-form-item>
+      </n-form>
+      <n-text depth="3">{{ t('dns.batch.proxyHint') }}</n-text>
+    </n-modal>
+    <n-modal v-model:show="showRecordBatchResult" preset="dialog" :title="t('dns.batch.result')" style="width: 760px; max-width: 95vw">
+      <n-text>{{ t('dns.batch.summary', { total: recordBatchResults.length, success: recordBatchResults.filter(r => r.success).length, failed: recordBatchResults.filter(r => !r.success).length }) }}</n-text>
+      <n-data-table :columns="recordBatchResultColumns" :data="recordBatchResults" :max-height="320" size="small" />
+      <template #action><n-button @click="showRecordBatchResult = false">{{ t('common.close') }}</n-button></template>
+    </n-modal>
   </div>
 </template>
 
@@ -426,6 +462,9 @@ import { useDnsStore } from '../stores/dnsStore';
 import AutoFitTable from '../components/AutoFitTable.vue';
 import { dnsApi } from '../api/dns';
 import { accountsApi } from '../api/accounts';
+import { buildDnsRecord } from '../utils/dnsRecord';
+import { runBatch, type BatchResult } from '../utils/batchOperation';
+import type { ZoneContext } from '../api/dns';
 import { loadDemoAccounts, isDemoAccount } from '../utils/demoAccounts';
 
 const { t } = useI18n();
@@ -463,7 +502,7 @@ const filteredDomains = computed(() => {
   if (selectedAccount.value && selectedAccount.value !== '__all__') {
     const opt = accountOptions.value.find(o => o.value === selectedAccount.value);
     if (opt) {
-      list = list.filter((d: any) => d.accountName === opt.label);
+      list = list.filter((d: any) => String(d.cfAccountId) === opt.value);
     }
   }
   // 域名搜索过滤
@@ -480,7 +519,7 @@ const groupedDomains = computed(() => {
   if (selectedAccount.value && selectedAccount.value !== '__all__') {
     const opt = accountOptions.value.find(o => o.value === selectedAccount.value);
     if (opt) {
-      list = list.filter((d: any) => d.accountName === opt.label);
+      list = list.filter((d: any) => String(d.cfAccountId) === opt.value);
     }
   }
   // 域名搜索过滤
@@ -490,7 +529,7 @@ const groupedDomains = computed(() => {
   }
   const groups: Record<string, any[]> = {};
   for (const d of list) {
-    const key = d.accountName || 'Unknown';
+    const key = `${d.accountName || 'Unknown'} (${d.cfAccountId})`;
     if (!groups[key]) groups[key] = [];
     groups[key].push(d);
   }
@@ -498,7 +537,7 @@ const groupedDomains = computed(() => {
 });
 
 const currentDomainInfo = computed(() =>
-  allDomains.value.find((d: any) => d.name === dnsStore.currentDomain)
+  allDomains.value.find((d: any) => d.name === dnsStore.currentDomain && d.cfAccountId === dnsStore.currentContext.accountId && d.id === dnsStore.currentContext.zoneId)
 );
 
 function isDemoDomain(d: any): boolean {
@@ -533,13 +572,16 @@ function toggleDomainSelect(name: string, checked: boolean) {
   selectedDomains.value = new Set(selectedDomains.value);
 }
 
-function selectDomain(domain: string) {
-  dnsStore.fetchRecords(domain);
+function zoneKey(zone: any): string { return `${zone.cfAccountId}:${zone.id}`; }
+function selectDomain(zone: any) {
+  dnsStore.fetchRecords(zone.name, { accountId: zone.cfAccountId, zoneId: zone.id });
   activeTab.value = 'records';
 }
 
 function onAccountChange(val: string) {
   saveAccount(val);
+  dnsStore.clearSelection();
+  selectedRecordIds.value = [];
   selectedDomains.value = new Set();
   if (val === '__all__') {
     expandedGroups.value = groupedDomains.value.map(g => g.accountName);
@@ -561,7 +603,9 @@ const showAddRecordModal = ref(false);
 const addingRecord = ref(false);
 const editingRecordId = ref<string | null>(null);
 const recordFormRef = ref<FormInst | null>(null);
-const newRecord = ref<any>({ type: 'A', name: '', content: '', ttl: 300, proxied: true, priority: 10 });
+const recordTarget = ref<{ domain: string; context: ZoneContext }>({ domain: '', context: {} });
+function captureTarget() { return { domain: dnsStore.currentDomain, context: { ...dnsStore.currentContext } }; }
+const newRecord = ref<any>({ type: 'A', name: '', content: '', ttl: 300, proxied: true, priority: 10, weight: 0, port: 443 });
 const recordRules: FormRules = {
   type: { required: true, message: t('dns.recordTypeRequired'), trigger: 'change' },
   name: { required: true, message: t('dns.recordNameRequired'), trigger: 'blur' },
@@ -570,6 +614,8 @@ const recordRules: FormRules = {
 
 const typeOptions = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'SRV', 'NS', 'PTR'].map(t => ({ label: t, value: t }));
 
+watch(() => newRecord.value.type, type => { if (!['A', 'AAAA', 'CNAME'].includes(type)) newRecord.value.proxied = false; });
+
 // 关闭代理时，若 TTL 仍是「自动」（1），恢复为默认 300，避免输入框被 clamp 成 60
 watch(() => newRecord.value.proxied, (proxied) => {
   if (!proxied && newRecord.value.ttl === 1) {
@@ -577,24 +623,14 @@ watch(() => newRecord.value.proxied, (proxied) => {
   }
 });
 
-function buildRecordPayload(): Record<string, any> {
-  const payload: Record<string, any> = {
-    type: newRecord.value.type,
-    name: newRecord.value.name,
-    content: newRecord.value.content,
-    // 代理（橙云）记录的 TTL 由 Cloudflare 强制为「自动」（1），忽略自定义值
-    ttl: newRecord.value.proxied ? 1 : newRecord.value.ttl,
-    proxied: newRecord.value.proxied,
-  };
-  if (newRecord.value.type === 'MX') {
-    payload.priority = newRecord.value.priority;
-  }
-  return payload;
+function buildRecordPayload() {
+  return buildDnsRecord(newRecord.value, recordTarget.value.domain);
 }
 
 function openAddRecordModal() {
+  recordTarget.value = captureTarget();
   editingRecordId.value = null;
-  newRecord.value = { type: 'A', name: '', content: '', ttl: 300, proxied: true, priority: 10 };
+  newRecord.value = { type: 'A', name: '', content: '', ttl: 300, proxied: true, priority: 10, weight: 0, port: 443 };
   showAddRecordModal.value = true;
 }
 
@@ -607,18 +643,19 @@ async function handleSubmitRecord() {
   }
   addingRecord.value = true;
   try {
+    const target = { domain: recordTarget.value.domain, context: { ...recordTarget.value.context } };
     const payload = buildRecordPayload();
     if (editingRecordId.value) {
-      await dnsApi.updateRecord(dnsStore.currentDomain, editingRecordId.value, payload);
+      await dnsApi.updateRecord(target.domain, editingRecordId.value, payload, target.context);
       message.success(t('dns.msg.recordUpdated'));
     } else {
-      await dnsApi.createRecord(dnsStore.currentDomain, payload);
+      await dnsApi.createRecord(target.domain, payload, target.context);
       message.success(t('dns.msg.recordAdded'));
     }
     showAddRecordModal.value = false;
     editingRecordId.value = null;
-    newRecord.value = { type: 'A', name: '', content: '', ttl: 300, proxied: true, priority: 10 };
-    dnsStore.fetchRecords(dnsStore.currentDomain);
+    newRecord.value = { type: 'A', name: '', content: '', ttl: 300, proxied: true, priority: 10, weight: 0, port: 443 };
+    if (dnsStore.isCurrent(target.domain, target.context)) await dnsStore.fetchRecords(target.domain, target.context);
   } catch (err: any) {
     message.error(err?.response?.data?.error?.message || t('dns.msg.saveFailed'));
   } finally {
@@ -626,12 +663,12 @@ async function handleSubmitRecord() {
   }
 }
 
-async function handleDeleteRecord(row: any) {
+async function handleDeleteRecord(row: any, target = captureTarget()) {
   if (!dnsStore.currentDomain) return;
   try {
-    await dnsApi.deleteRecord(dnsStore.currentDomain, row.id);
+    await dnsApi.deleteRecord(target.domain, row.id, target.context);
     message.success(t('dns.msg.recordDeleted'));
-    dnsStore.fetchRecords(dnsStore.currentDomain);
+    if (dnsStore.isCurrent(target.domain, target.context)) await dnsStore.fetchRecords(target.domain, target.context);
   } catch (err: any) {
     message.error(err?.response?.data?.error?.message || t('dns.msg.deleteFailed'));
   }
@@ -640,8 +677,9 @@ async function handleDeleteRecord(row: any) {
 async function handleProxyToggle(row: any, proxied: boolean) {
   if (!dnsStore.currentDomain) return;
   try {
-    await dnsApi.updateProxy(dnsStore.currentDomain, row.id, proxied);
-    row.proxied = proxied;
+    const target = captureTarget();
+    await dnsApi.updateProxy(target.domain, row.id, proxied, target.context);
+    if (dnsStore.isCurrent(target.domain, target.context)) await dnsStore.fetchRecords(target.domain, target.context);
     message.success(t('dns.msg.proxyUpdated'));
   } catch (err: any) {
     message.error(err?.response?.data?.error?.message || t('dns.msg.updateFailed'));
@@ -653,14 +691,67 @@ const currentDomainIsDemo = computed(() => {
   return d ? isDemoDomain(d) : false;
 });
 
-const recordColumns: DataTableColumns<any> = [
+interface DnsRow { id: string; type: string; name: string; content: string; ttl: number; proxied: boolean }
+const selectedRecordIds = ref<string[]>([]);
+const recordPage = ref(1);
+const recordPageSize = ref(20);
+const batchRunning = ref(false);
+const batchCompleted = ref(0);
+const batchTotal = ref(0);
+const showBatchRecordEdit = ref(false);
+const showRecordBatchResult = ref(false);
+const recordBatchResults = ref<Array<BatchResult<DnsRow, unknown>>>([]);
+const batchTtl = ref(300);
+const batchProxy = ref('on');
+watch(() => [dnsStore.currentDomain, dnsStore.currentContext.accountId, dnsStore.currentContext.zoneId], () => { selectedRecordIds.value = []; recordPage.value = 1; showAddRecordModal.value = false; });
+function selectPageRecords() {
+  selectedRecordIds.value = dnsStore.records.slice((recordPage.value - 1) * recordPageSize.value, recordPage.value * recordPageSize.value).map(row => row.id);
+}
+function confirmRecordBatch(action: 'delete' | 'ttl' | 'proxy') {
+  const ids = new Set(selectedRecordIds.value);
+  const rows: DnsRow[] = dnsStore.records.filter(row => ids.has(row.id)).map(row => ({ ...row }));
+  if (!rows.length || batchRunning.value || currentDomainIsDemo.value) return;
+  const target = captureTarget();
+  const ttl = batchTtl.value;
+  const proxied = batchProxy.value === 'on';
+  dialog.warning({
+    title: action === 'delete' ? t('common.delete') : t('dns.batch.edit'),
+    content: t('dns.batch.confirm', { action: action === 'delete' ? t('common.delete') : action === 'ttl' ? `TTL ${ttl}` : `Proxy ${proxied ? 'on' : 'off'}`, count: rows.length, domain: target.domain, account: currentDomainInfo.value?.accountName || target.context.accountId, records: rows.slice(0, 8).map(row => `${row.type} ${row.name} → ${row.content}`).join('; '), more: rows.length > 8 ? t('dns.batch.more', { count: rows.length - 8 }) : '' }),
+    positiveText: t('common.confirm'), negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      showBatchRecordEdit.value = false;
+      batchRunning.value = true; batchCompleted.value = 0; batchTotal.value = rows.length;
+      try {
+        recordBatchResults.value = await runBatch(rows, async row => {
+          if (action === 'delete') return dnsApi.deleteRecord(target.domain, row.id, target.context);
+          if (action === 'proxy') {
+            if (!['A', 'AAAA', 'CNAME'].includes(row.type)) throw new Error(t('dns.batch.proxyUnsupported', { name: row.name, type: row.type }));
+            return dnsApi.updateRecord(target.domain, row.id, { proxied, ...(proxied ? { ttl: 1 } : {}) }, target.context);
+          }
+          if (row.proxied && ttl !== 1) throw new Error(t('dns.batch.proxyTtl', { name: row.name }));
+          return dnsApi.updateRecord(target.domain, row.id, { ttl }, target.context);
+        }, count => { batchCompleted.value = count; });
+        if (dnsStore.isCurrent(target.domain, target.context)) { await dnsStore.fetchRecords(target.domain, target.context); selectedRecordIds.value = []; }
+        showRecordBatchResult.value = true;
+      } finally { batchRunning.value = false; }
+    },
+  });
+}
+const recordBatchResultColumns = computed<DataTableColumns<BatchResult<DnsRow, unknown>>>(() => [
+  { title: t('dns.recordName'), key: 'name', render: row => `${row.item.type} ${row.item.name}` },
+  { title: t('common.result'), key: 'success', render: row => row.success ? t('common.success') : t('common.error') },
+  { title: t('common.message'), key: 'error' },
+]);
+
+const recordColumns = computed<DataTableColumns<any>>(() => [
+  { type: 'selection', width: 40, disabled: () => currentDomainIsDemo.value || batchRunning.value },
   { title: t('dns.recordType'), key: 'type', width: 80, render: (row) => h(NTag, { size: 'small', type: 'info' }, { default: () => row.type }) },
   { title: t('dns.recordName'), key: 'name', width: 180, ellipsis: { tooltip: true } },
   { title: t('dns.recordContent'), key: 'content', minWidth: 180, ellipsis: { tooltip: true } },
   { title: t('dns.ttl'), key: 'ttl', width: 80, render: (row) => row.ttl === 1 ? t('dns.ttlAuto') : String(row.ttl) },
   {
     title: t('dns.proxied'), key: 'proxied', width: 80,
-    render: (row) => h(NSwitch, { value: row.proxied, onUpdateValue: (v: boolean) => handleProxyToggle(row, v), size: 'small' }),
+    render: (row) => h(NSwitch, { value: row.proxied, disabled: currentDomainIsDemo.value || !['A', 'AAAA', 'CNAME'].includes(row.type) || batchRunning.value, onUpdateValue: (v: boolean) => handleProxyToggle(row, v), size: 'small' }),
   },
   {
     title: t('common.actions'), key: 'actions', width: 120,
@@ -669,18 +760,19 @@ const recordColumns: DataTableColumns<any> = [
       h(NButton, {
         size: 'tiny', type: 'error', quaternary: true,
         onClick: () => {
+          const target = captureTarget();
           dialog.warning({
             title: t('dns.msg.deleteConfirm'),
             content: t('dns.msg.deleteRecordConfirm', { type: row.type, name: row.name, content: row.content }),
             positiveText: t('common.delete'),
             negativeText: t('common.cancel'),
-            onPositiveClick: () => handleDeleteRecord(row),
+            onPositiveClick: () => handleDeleteRecord(row, target),
           });
         }
       }, { default: () => t('common.delete') }),
     ]),
   },
-];
+]);
 
 // 将 Cloudflare 返回的完整 FQDN 名称转为相对名称（与新增时的填写习惯一致）
 function toRecordName(name: string, zone: string): string {
@@ -693,14 +785,17 @@ function toRecordName(name: string, zone: string): string {
 }
 
 function handleEditRecord(row: any) {
+  recordTarget.value = captureTarget();
   editingRecordId.value = row.id;
   newRecord.value = {
     type: row.type,
     name: toRecordName(row.name, dnsStore.currentDomain),
-    content: row.content,
+    content: row.type === 'SRV' ? row.data?.target || '' : row.content,
     ttl: row.ttl,
     proxied: row.proxied,
-    priority: row.priority || 10,
+    priority: row.data?.priority ?? row.priority ?? 10,
+    weight: row.data?.weight ?? 0,
+    port: row.data?.port ?? 443,
   };
   showAddRecordModal.value = true;
 }
@@ -716,7 +811,7 @@ const sslOptions = [
   { label: 'Off', value: 'off' },
   { label: 'Flexible', value: 'flexible' },
   { label: 'Full', value: 'full' },
-  { label: 'Full (Strict)', value: 'full_strict' },
+  { label: 'Full (Strict)', value: 'strict' },
 ];
 const securityOptions = [
   { label: 'Off', value: 'off' },
@@ -727,8 +822,8 @@ const securityOptions = [
   { label: 'Under Attack', value: 'under_attack' },
 ];
 const cacheLevelOptions = [
-  { label: 'Off', value: 'off' },
-  { label: 'Simplify', value: 'simplify' },
+  { label: 'Basic', value: 'basic' },
+  { label: 'Simplified', value: 'simplified' },
   { label: 'Aggressive', value: 'aggressive' },
 ];
 const browserTtlOptions = [
@@ -741,48 +836,24 @@ const browserTtlOptions = [
 ];
 
 function syncZoneForm() {
-  const s = dnsStore.zoneSettings;
-  zoneForm.ssl = s.ssl || 'full_strict';
-  zoneForm.always_use_https = s.always_use_https || 'on';
-  zoneForm.automatic_https_rewrites = s.automatic_https_rewrites || 'on';
-  zoneForm.security_level = s.security_level || 'medium';
-  zoneForm.cache_level = s.cache_level || 'aggressive';
-  zoneForm.browser_cache_ttl = s.browser_cache_ttl ?? 14400;
-  zoneForm.development_mode = s.development_mode || 'off';
-  zoneForm.brotli = s.brotli || 'on';
-  zoneForm.zero_rtt = s.zero_rtt || 'on';
-  minifyJs.value = s.minify?.js ?? true;
-  minifyCss.value = s.minify?.css ?? true;
-  minifyHtml.value = s.minify?.html ?? false;
+  for (const key of Object.keys(zoneForm)) delete zoneForm[key];
+  for (const [key, value] of Object.entries(dnsStore.zoneSettings)) if (key !== '__meta') zoneForm[key] = value;
+  minifyJs.value = dnsStore.zoneSettings.minify?.js === 'on';
+  minifyCss.value = dnsStore.zoneSettings.minify?.css === 'on';
+  minifyHtml.value = dnsStore.zoneSettings.minify?.html === 'on';
 }
-
+function settingEditable(key: string): boolean { return !dnsStore.settingsLoading && !dnsStore.settingsError && dnsStore.zoneSettings.__meta?.[key]?.editable === true; }
+watch(() => dnsStore.zoneSettings, syncZoneForm);
 async function handleSaveSettings() {
   if (!dnsStore.currentDomain) return;
+  const domain = dnsStore.currentDomain;
   savingSettings.value = true;
   try {
-    const settings: Record<string, any> = {
-      ssl: zoneForm.ssl,
-      always_use_https: zoneForm.always_use_https,
-      automatic_https_rewrites: zoneForm.automatic_https_rewrites,
-      security_level: zoneForm.security_level,
-      cache_level: zoneForm.cache_level,
-      browser_cache_ttl: zoneForm.browser_cache_ttl,
-      development_mode: zoneForm.development_mode,
-      brotli: zoneForm.brotli,
-      zero_rtt: zoneForm.zero_rtt,
-      minify: { js: minifyJs.value, css: minifyCss.value, html: minifyHtml.value },
-    };
-    const result = await dnsStore.updateZoneSettings(dnsStore.currentDomain, settings);
-    if (result.failed?.length) {
-      message.warning(t('dns.msg.settingsPartialFail', { failed: result.failed.join(', ') }));
-    } else {
-      message.success(t('dns.msg.settingsUpdated'));
-    }
-  } catch (err: any) {
-    message.error(err?.response?.data?.error?.message || t('dns.msg.saveFailed'));
-  } finally {
-    savingSettings.value = false;
-  }
+    const settings = Object.fromEntries(Object.entries(zoneForm).filter(([key, value]) => settingEditable(key) && JSON.stringify(value) !== JSON.stringify(dnsStore.zoneSettings[key])));
+    const result = await dnsStore.updateZoneSettings(domain, settings);
+    if (result.failed?.length) message.warning(Object.entries(result.errors || {}).map(([key, error]) => `${key}: ${error}`).join('; '));
+    else message.success(t('dns.msg.settingsUpdated'));
+  } finally { savingSettings.value = false; }
 }
 
 // ===== 缓存清除 =====
@@ -890,11 +961,11 @@ function copyNS(ns: string[]) {
 
 // ===== 批量删除域名 =====
 function handleBatchDelete() {
-  const domains = Array.from(selectedDomains.value);
+  const domains = allDomains.value.filter(d => selectedDomains.value.has(zoneKey(d))).map(d => ({ name: d.name, accountId: d.cfAccountId, zoneId: d.id }));
   if (!domains.length) return;
   dialog.warning({
     title: t('dns.msg.batchDeleteTitle'),
-    content: t('dns.msg.batchDeleteConfirm', { count: domains.length }),
+    content: `${t('dns.msg.batchDeleteConfirm', { count: domains.length })} ${domains.map(d => `${d.name} (Account ${d.accountId})`).join(', ')}`,
     positiveText: t('common.delete'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {

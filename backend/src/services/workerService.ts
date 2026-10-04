@@ -639,21 +639,11 @@ export async function listDeployments(account: Account, scriptName: string): Pro
 }
 
 // ============ Cloudflare Resources (for Pages bindings) ============
-// P1-12/13: KV 命名空间列表 TTL 缓存（单进程内存；创建/删除后至多 60s 内可见，避免每次刷新打 CF）
-const KV_LIST_TTL_MS = 60 * 1000;
-const kvListCache = new Map<string, { data: any[]; fetchedAt: number }>();
+// Always read the remote list. Explicit refresh and successful writes cannot return stale namespaces.
 export async function listKvNamespaces(account: Account): Promise<any[]> {
-  const cacheKey = String(account.account_id);
-  const cached = kvListCache.get(cacheKey);
-  if (cached && Date.now() - cached.fetchedAt < KV_LIST_TTL_MS) {
-    return cached.data;
-  }
   const cf = getCfClient(account);
   const items: any[] = [];
-  for await (const ns of cf.kv.namespaces.list({ account_id: account.account_id! })) {
-    items.push(ns);
-  }
-  kvListCache.set(cacheKey, { data: items, fetchedAt: Date.now() });
+  for await (const ns of cf.kv.namespaces.list({ account_id: account.account_id! })) items.push(ns);
   return items;
 }
 

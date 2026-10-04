@@ -1,4 +1,5 @@
 import apiClient from './client';
+import type { ZoneContext } from './dns';
 
 export interface WizardPayload {
   mode: 'create' | 'reuse';
@@ -21,8 +22,8 @@ export const tunnelsApi = {
   updateConfig: (accountId: number, tunnelId: string, ingress: any[]) => apiClient.put(`/tunnels/accounts/${accountId}/tunnels/${tunnelId}/config`, { ingress }),
   runWizard: (accountId: number, payload: WizardPayload) => apiClient.post(`/tunnels/accounts/${accountId}/wizard`, payload),
   // 通用规则引擎
-  listRules: (domain: string, phase: string) => apiClient.get(`/dns/domains/${domain}/rules/${phase}`),
-  createRule: (domain: string, phase: string, rule: any) => apiClient.post(`/dns/domains/${domain}/rules/${phase}`, rule),
-  updateRule: (domain: string, phase: string, ruleId: string, rule: any) => apiClient.put(`/dns/domains/${domain}/rules/${phase}/${ruleId}`, rule),
-  deleteRule: (domain: string, phase: string, ruleId: string) => apiClient.delete(`/dns/domains/${domain}/rules/${phase}/${ruleId}`),
+  listRules: (domain: string, phase: string, context: ZoneContext = {}) => apiClient.get(`/dns/domains/${domain}/rules/${phase}`, { params: context }),
+  createRule: (domain: string, phase: string, rule: any, context: ZoneContext = {}) => apiClient.post(`/dns/domains/${domain}/rules/${phase}`, rule, { params: context }),
+  updateRule: (domain: string, phase: string, ruleId: string, rule: any, context: ZoneContext = {}) => apiClient.put(`/dns/domains/${domain}/rules/${phase}/${ruleId}`, rule, { params: context }),
+  deleteRule: (domain: string, phase: string, ruleId: string, context: ZoneContext = {}) => apiClient.delete(`/dns/domains/${domain}/rules/${phase}/${ruleId}`, { params: context }),
 };

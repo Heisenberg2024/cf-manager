@@ -189,6 +189,8 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, h } from 'vue';
+import { confirmOperation } from '../utils/confirmOperation';
+import { createRequestScope } from '../utils/requestScope';
 import { useI18n } from 'vue-i18n';
 import { NTag, NSpace, NButton, NA, useMessage } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
@@ -215,6 +217,7 @@ const visible = computed({
 });
 const workerName = computed(() => props.worker?.name || '');
 const accountId = computed(() => props.worker?.cfAccountId || 0);
+const requests = createRequestScope(() => `${props.show}:${accountId.value}:${workerName.value}`);
 
 function drawerWidth(desktopWidth: number): number {
   return window.innerWidth <= 768 ? Math.min(window.innerWidth, desktopWidth) : desktopWidth;
@@ -310,6 +313,7 @@ const resourceNameMap = ref<Record<string, string>>({});
 
 async function buildResourceNameMap() {
   const map: Record<string, string> = {};
+  const request = requests.begin('buildResourceNameMap');
   try {
     const promises = [
       workersApi.getKvNamespaces(accountId.value).catch(() => null),
@@ -333,11 +337,11 @@ async function buildResourceNameMap() {
     for (const ns of kvList) { if (ns.id) map[ns.id] = ns.title || ns.id; }
     for (const db of d1List) { const key = db.uuid || db.id; if (key) map[key] = db.name || key; }
     for (const b of r2List) { if (b.name) map[b.name] = b.name; }
-  } catch {
+  } catch { if (!request.current()) return;
     resourceNameMap.value = {};
     return;
   }
-  resourceNameMap.value = map;
+  if (request.current()) resourceNameMap.value = map;
 }
 
 function resolveResourceName(id: string): { id: string; name: string } {
@@ -346,18 +350,20 @@ function resolveResourceName(id: string): { id: string; name: string } {
 
 async function loadBindings() {
   bindingsLoading.value = true;
+  const request = requests.begin('loadBindings');
   try {
     const [{ data }, _] = await Promise.all([
       workersApi.getPagesProject(accountId.value, workerName.value),
       buildResourceNameMap(),
     ]);
-    console.log('[Bindings] deployment_configs:', JSON.stringify(data?.deployment_configs));
+    if (!request.current()) return;
     bindingsList.value = parseBindings(data?.deployment_configs);
   } catch (e) {
-    console.error('[Bindings] loadBindings failed:', e);
+    if (!request.current()) return;
+    message.error((e as { errorMessage?: string; message?: string }).errorMessage || t('common.networkError'));
     bindingsList.value = [];
   }
-  finally { bindingsLoading.value = false; }
+  finally { if (request.current()) bindingsLoading.value = false; }
 }
 
 async function openBindingModal() {
@@ -379,6 +385,7 @@ async function onBindingTypeChange(type: string) {
 async function loadBindingResources(type: string) {
   bindingResourcesLoading.value = true;
   bindingResources.value = [];
+  const request = requests.begin('loadBindingResources', () => `${props.show}:${accountId.value}:${workerName.value}:${bindingForm.value.type}`);
   try {
     let resp: any;
     if (type === 'kv_namespaces') resp = await workersApi.getKvNamespaces(accountId.value);
@@ -386,6 +393,7 @@ async function loadBindingResources(type: string) {
     else if (type === 'r2_buckets') {
       resp = await workersApi.getR2Buckets(accountId.value, { _silent: true } as any);
     }
+    if (!request.current()) return;
     bindingResources.value = Array.isArray(resp?.data) ? resp.data : [];
   } catch (err: any) {
     const msg = err?.response?.data?.error?.message || err?.message || '';
@@ -393,9 +401,10 @@ async function loadBindingResources(type: string) {
       message.warning(t('pagesSettings.msg.r2NotEnabled'));
       r2Available.value = false;
     }
+    if (!request.current()) return;
     bindingResources.value = [];
   }
-  finally { bindingResourcesLoading.value = false; }
+  finally { if (request.current()) bindingResourcesLoading.value = false; }
 }
 
 async function handleAddBinding() {
@@ -425,6 +434,9 @@ async function handleAddBinding() {
 }
 
 async function handleDeleteBinding(row: any) {
+  const request = requests.begin('handleDeleteBinding');
+  if (!await confirmOperation(t('common.delete'), row.name || row.hostname || row.pattern || row.id, `Account ${accountId.value} / ${workerName.value}`)) return;
+  if (!request.current()) return;
   const { data } = await workersApi.getPagesProject(accountId.value, workerName.value);
   const configs = data?.deployment_configs || {};
   const production = configs.production || {};
@@ -479,8 +491,10 @@ async function checkR2Availability() {
 
 async function loadPagesProject() {
   pagesProjectLoading.value = true;
+  const request = requests.begin('loadPagesProject');
   try {
     const { data } = await workersApi.getPagesProject(accountId.value, workerName.value);
+    if (!request.current()) return;
     pagesProject.value = data;
     const envVars = data?.deployment_configs?.production?.env_vars || {};
     pagesEnvVars.value = Object.entries(envVars).map(([key, val]: [string, any]) => ({
@@ -488,17 +502,19 @@ async function loadPagesProject() {
       type: val?.type || 'plain_text',
       value: val?.type === 'plain_text' ? val?.value : '******',
     }));
-  } catch { pagesProject.value = null; pagesEnvVars.value = []; }
-  finally { pagesProjectLoading.value = false; }
+  } catch { if (!request.current()) return; pagesProject.value = null; pagesEnvVars.value = []; }
+  finally { if (request.current()) pagesProjectLoading.value = false; }
 }
 
 async function loadPagesDomains() {
   pagesDomainsLoading.value = true;
+  const request = requests.begin('loadPagesDomains');
   try {
     const { data } = await workersApi.getPagesDomains(accountId.value, workerName.value);
+    if (!request.current()) return;
     pagesDomains.value = Array.isArray(data) ? data : [];
-  } catch { pagesDomains.value = []; }
-  finally { pagesDomainsLoading.value = false; }
+  } catch { if (!request.current()) return; pagesDomains.value = []; }
+  finally { if (request.current()) pagesDomainsLoading.value = false; }
 }
 
 async function openPagesDomainModal() {
@@ -506,11 +522,13 @@ async function openPagesDomainModal() {
   pagesDomainSubdomain.value = '';
   showPagesDomainModal.value = true;
   managedDomainsLoading.value = true;
+  const request = requests.begin('openPagesDomainModal');
   try {
     const { data } = await workersApi.getZones(accountId.value);
+    if (!request.current()) return;
     managedDomains.value = Array.isArray(data) ? data : [];
-  } catch { managedDomains.value = []; }
-  finally { managedDomainsLoading.value = false; }
+  } catch { if (!request.current()) return; managedDomains.value = []; }
+  finally { if (request.current()) managedDomainsLoading.value = false; }
 }
 
 async function handleAddPagesDomain() {
@@ -527,6 +545,9 @@ async function handleAddPagesDomain() {
 }
 
 async function handleRemovePagesDomain(row: any) {
+  const request = requests.begin('handleRemovePagesDomain');
+  if (!await confirmOperation(t('common.delete'), row.name || row.hostname || row.pattern || row.id, `Account ${accountId.value} / ${workerName.value}`)) return;
+  if (!request.current()) return;
   await workersApi.removePagesDomain(accountId.value, workerName.value, row.name || row.hostname);
   message.success(t('pagesSettings.msg.domainDeleted'));
   loadPagesDomains();
@@ -560,6 +581,9 @@ function handleEditPagesEnv(row: any) {
 }
 
 async function handleDeletePagesEnv(row: any) {
+  const request = requests.begin('handleDeletePagesEnv');
+  if (!await confirmOperation(t('common.delete'), row.name || row.hostname || row.pattern || row.id, `Account ${accountId.value} / ${workerName.value}`)) return;
+  if (!request.current()) return;
   try {
     // CF PATCH deployment_configs.env_vars 是 merge 语义：
     // - {key: null} → 删除该键（实测确认）
@@ -577,13 +601,15 @@ async function handleDeletePagesEnv(row: any) {
 
 async function loadPagesDeployments() {
   pagesDeploymentsLoading.value = true;
+  const request = requests.begin('loadPagesDeployments');
   try {
     const { data } = await workersApi.getPagesDeployments(accountId.value, workerName.value);
+    if (!request.current()) return;
     pagesDeployments.value = Array.isArray(data) ? data : [];
-  } catch { pagesDeployments.value = []; }
+  } catch { if (!request.current()) return; pagesDeployments.value = []; }
   finally {
-    pagesDeploymentsLoading.value = false;
-    checkedDeploymentIds.value = [];
+    if (request.current()) pagesDeploymentsLoading.value = false;
+    if (request.current()) checkedDeploymentIds.value = [];
   }
 }
 
@@ -593,7 +619,8 @@ function handleCheckedKeysChange(keys: string[]) {
 
 // 全选当前页（仅勾选 data-table 当前分页展示的记录）
 function checkAllCurrentPage() {
-  checkedDeploymentIds.value = pagesDeployments.value.map(d => d.id);
+  const { page, pageSize } = pagesDeploymentPagination.value;
+  checkedDeploymentIds.value = pagesDeployments.value.slice((page - 1) * pageSize, page * pageSize).map(d => d.id);
 }
 
 async function handleBatchDeleteDeployments() {
@@ -688,6 +715,7 @@ const pagesDeploymentColumns = computed<DataTableColumns<any>>(() => [
 watch(
   () => [props.show, props.worker?.name, props.worker?.cfAccountId] as const,
   () => {
+    requests.invalidate();
     if (props.show && props.worker) {
       loadPagesProject();
       loadPagesDomains();

@@ -121,7 +121,7 @@ const hasResources = computed(() => props.resources && props.resources.length > 
   border: 1px solid var(--glass-border-subtle);
   border-radius: 8px;
   cursor: pointer;
-  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: border-color 0.15s ease;
   background-color: var(--app-bg-card);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
@@ -131,7 +131,6 @@ const hasResources = computed(() => props.resources && props.resources.length > 
 .compact-card:hover {
   background-color: var(--app-bg-hover);
   border-color: var(--theme-primary);
-  transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 

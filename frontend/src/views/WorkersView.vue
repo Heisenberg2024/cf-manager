@@ -60,6 +60,7 @@
     <AutoFitTable
       :columns="columns"
       :data="workerStore.workers"
+      :row-key="(row: any) => `${row.cfAccountId}:${row.type}:${row.id || row.name}`"
       :loading="workerStore.loading"
       :scroll-x="700"
       :pagination="false"
@@ -100,11 +101,13 @@
     <!-- 设置抽屉（Worker / Pages 拆分到子组件） -->
     <WorkerSettingsDrawer
       v-if="settingsWorker && settingsWorker.type === 'worker'"
+      :key="`${settingsWorker.cfAccountId}:${settingsWorker.name}`"
       v-model:show="showSettingsDrawer"
       :worker="settingsWorker"
     />
     <WorkerPagesSettingsDrawer
       v-else-if="settingsWorker && settingsWorker.type === 'pages'"
+      :key="`${settingsWorker.cfAccountId}:${settingsWorker.name}`"
       v-model:show="showSettingsDrawer"
       :worker="settingsWorker"
     />
@@ -127,7 +130,6 @@ import { NButton, NSpace, NTag, useMessage, NPopconfirm } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 import { useWorkerStore } from '../stores/workerStore';
-import { useAccountStore } from '../stores/accountStore';
 import { accountsApi } from '../api/accounts';
 import { workersApi } from '../api/workers';
 import { formatCN } from '../utils/dateFormat';
@@ -139,7 +141,6 @@ import AutoFitTable from '../components/AutoFitTable.vue';
 
 const { t } = useI18n();
 const workerStore = useWorkerStore();
-const accountStore = useAccountStore();
 const message = useMessage();
 
 function drawerWidth(desktopWidth: number): number {
@@ -199,7 +200,7 @@ function openSettings(row: any) {
 const allAccounts = ref<any[]>([]);
 async function loadAllAccounts() {
   try {
-    const { data } = await accountsApi.getAll({ pageSize: 10000 });
+    const { data } = await accountsApi.getAll();
     allAccounts.value = data.accounts || [];
   } catch { allAccounts.value = []; }
 }
@@ -297,7 +298,6 @@ const columns = computed<DataTableColumns<any>>(() => {
 
 onMounted(async () => {
   await loadDemoAccounts();
-  accountStore.fetchAccounts();
   loadAllAccounts();
   await workerStore.fetchSummary();
   const list = workerStore.summary || [];

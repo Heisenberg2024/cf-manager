@@ -1,3 +1,5 @@
+import { mapConcurrent } from '../utils/concurrent';
+import { errorDetails } from './cfErrors';
 import { Account } from '../models/account';
 import { getCfClient } from './cfFactory';
 
@@ -149,10 +151,9 @@ export async function deleteR2Object(account: Account, bucketName: string, key: 
   await cf.r2.buckets.objects.delete(bucketName, key, { account_id: acctId(account) });
 }
 
-export async function bulkDeleteR2Objects(account: Account, bucketName: string, keys: string[]): Promise<void> {
-  const BATCH_SIZE = 10;
-  for (let i = 0; i < keys.length; i += BATCH_SIZE) {
-    const batch = keys.slice(i, i + BATCH_SIZE);
-    await Promise.all(batch.map(key => deleteR2Object(account, bucketName, key)));
-  }
+export async function bulkDeleteR2Objects(account: Account, bucketName: string, keys: string[]) {
+  return mapConcurrent(keys, 3, async key => {
+    try { await deleteR2Object(account, bucketName, key); return { key, success: true }; }
+    catch (error) { return { key, success: false, error: errorDetails(error).message }; }
+  });
 }

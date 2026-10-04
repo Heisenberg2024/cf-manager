@@ -346,11 +346,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, h, onMounted } from 'vue';
+import { ref, reactive, computed, h, onMounted, watch, onBeforeUnmount } from 'vue';
 import AutoFitTable from '../components/AutoFitTable.vue';
 import { useI18n } from 'vue-i18n';
 import DOMPurify from 'dompurify';
 import { NButton, NSpace, NTag, NPopconfirm } from 'naive-ui';
+import { cacheRuleParameters, headerRuleParameters } from '../utils/rulePayload';
+import { createRequestScope } from '../utils/requestScope';
 import { tunnelsApi } from '../api/tunnels';
 import { dnsApi } from '../api/dns';
 import { message } from '../utils/discreteApi';
@@ -359,6 +361,7 @@ const { t } = useI18n();
 
 // ============ 隧道管理 ============
 const selectedAccountId = ref<number | null>(null);
+const requests = createRequestScope(() => String(selectedAccountId.value));
 const accounts = ref<Array<{ id: number; name: string; account_id: string }>>([]);
 const tunnels = ref<any[]>([]);
 const loadingAccounts = ref(false);
@@ -387,17 +390,24 @@ async function loadAccounts() {
 async function loadTunnels() {
   if (!selectedAccountId.value) { tunnels.value = []; return; }
   loadingTunnels.value = true;
+  const request = requests.begin('loadTunnels');
   try {
     const { data } = await tunnelsApi.listTunnels(selectedAccountId.value);
+    if (!request.current()) return;
     tunnels.value = data;
   } catch {
+    if (!request.current()) return;
     tunnels.value = [];
   } finally {
-    loadingTunnels.value = false;
+    if (request.current()) loadingTunnels.value = false;
   }
 }
 
 async function onAccountChange() {
+  requests.invalidate(); tunnels.value = []; loadingTunnels.value = false;
+  showConfigModal.value = false; showTokenModal.value = false; showConnectionsModal.value = false;
+  showWizardModal.value = false; showCreateModal.value = false; tokenValue.value = ''; tunnelZones.value = [];
+
   await loadTunnels();
 }
 
@@ -428,11 +438,14 @@ const tokenValue = ref('');
 
 async function showToken(tunnelId: string) {
   if (!selectedAccountId.value) return;
+  const request = requests.begin('showToken');
   try {
     const { data } = await tunnelsApi.getToken(selectedAccountId.value, tunnelId);
+    if (!request.current()) return;
     tokenValue.value = data.token;
     showTokenModal.value = true;
   } catch {
+    if (!request.current()) return;
     // error handled by interceptor
   }
 }
@@ -454,11 +467,14 @@ const connectionColumns = computed(() => [
 
 async function showConnections(tunnelId: string) {
   if (!selectedAccountId.value) return;
+  const request = requests.begin('showConnections');
   try {
     const { data } = await tunnelsApi.getConnections(selectedAccountId.value, tunnelId);
+    if (!request.current()) return;
     connections.value = data;
     showConnectionsModal.value = true;
   } catch {
+    if (!request.current()) return;
     // error handled by interceptor
   }
 }
@@ -498,11 +514,13 @@ async function openConfig(tunnelId: string, name: string) {
   configTunnelName.value = name;
   showConfigModal.value = true;
   loadingConfig.value = true;
+  const request = requests.begin('openConfig');
   try {
     const [configRes, zonesRes] = await Promise.all([
       tunnelsApi.getConfig(selectedAccountId.value, tunnelId),
       tunnelsApi.getZones(selectedAccountId.value),
     ]);
+    if (!request.current()) return;
     tunnelZones.value = zonesRes.data || [];
     const ingress = configRes.data || [];
     ingressEntries.value = ingress.map((e: any) => {
@@ -528,10 +546,11 @@ async function openConfig(tunnelId: string, name: string) {
       ingressEntries.value = [{ domain: '', subdomain: '', path: '', protocol: 'custom', port: 0, customService: 'http_status:404' }];
     }
   } catch {
+    if (!request.current()) return;
     ingressEntries.value = [{ domain: '', subdomain: '', path: '', protocol: 'custom', port: 0, customService: 'http_status:404' }];
     tunnelZones.value = [];
   } finally {
-    loadingConfig.value = false;
+    if (request.current()) loadingConfig.value = false;
   }
 }
 
@@ -685,11 +704,14 @@ const rulePhaseOptions = computed(() => [
   { label: t('tunnels.rulePhases.rateLimit'), value: 'http_ratelimit' },
 ]);
 const domains = ref<any[]>([]);
+const selectedZone = computed(() => domains.value.find(d => `${d.cfAccountId}:${d.id}` === selectedDomain.value));
+const selectedDomainName = computed<string>(() => selectedZone.value?.name || '');
+const ruleContext = computed(() => ({ accountId: selectedZone.value?.cfAccountId, zoneId: selectedZone.value?.id }));
 const rules = ref<any[]>([]);
 const loadingRules = ref(false);
 
 const domainOptions = computed(() =>
-  domains.value.map((d) => ({ label: typeof d === 'string' ? d : d.name, value: typeof d === 'string' ? d : d.name }))
+  domains.value.map((d) => ({ label: `${d.name} (${d.accountName} / ${d.cfAccountId})`, value: `${d.cfAccountId}:${d.id}` }))
 );
 
 // 账户级 Phase 检测
@@ -710,21 +732,26 @@ async function onDomainChange() {
 }
 
 async function loadRules() {
-  if (!selectedDomain.value || !selectedRulePhase.value) { rules.value = []; return; }
+  if (!selectedDomainName.value || !selectedRulePhase.value) { rules.value = []; return; }
   loadingRules.value = true;
+  const request = requests.begin('loadRules', () => `${selectedDomain.value}:${selectedRulePhase.value}`);
   try {
-    const { data } = await tunnelsApi.listRules(selectedDomain.value, selectedRulePhase.value);
+    const { data } = await tunnelsApi.listRules(selectedDomainName.value, selectedRulePhase.value, ruleContext.value);
+    if (!request.current()) return;
     rules.value = data;
   } catch {
+    if (!request.current()) return;
     rules.value = [];
   } finally {
-    loadingRules.value = false;
+    if (request.current()) loadingRules.value = false;
   }
 }
 
 // 规则表单
 const showRuleModal = ref(false);
 const editingRuleId = ref<string | null>(null);
+const originalRuleParams = ref<Record<string, unknown>>({});
+const originalRuleEnabled = ref(true);
 const ruleSubmitting = ref(false);
 const ruleForm = reactive({
   matchType: 'hostname' as 'hostname' | 'pathPrefix' | 'pathRegex' | 'hostAndPath' | 'custom',
@@ -750,7 +777,7 @@ const ruleForm = reactive({
   cacheTtlValue: 3600,
   // 速率限制
   ratelimitAction: 'block' as 'block' | 'challenge' | 'js_challenge',
-  ratelimitChars: ['ip'] as string[],
+  ratelimitChars: ['ip.src'] as string[],
   ratelimitPeriod: 60,
   ratelimitCount: 100,
   ratelimitMitigation: 60,
@@ -779,8 +806,7 @@ const rewriteTypeOptions = computed(() => [
 
 const headerOpOptions = computed(() => [
   { label: t('tunnels.headerSet'), value: 'set' },
-  { label: t('tunnels.headerAdd'), value: 'add' },
-  { label: t('tunnels.headerRemove'), value: 'remove' },
+    { label: t('tunnels.headerRemove'), value: 'remove' },
 ]);
 
 const ttlModeOptions = computed(() => [
@@ -795,8 +821,8 @@ const ratelimitActionOptions = computed(() => [
 ]);
 
 const ratelimitDimensionOptions = computed(() => [
-  { label: t('tunnels.ratelimitIp'), value: 'ip' },
-  { label: t('tunnels.ratelimitPath'), value: 'uri.path' },
+  { label: t('tunnels.ratelimitIp'), value: 'ip.src' },
+  { label: t('tunnels.ratelimitPath'), value: 'http.request.uri.path' },
   { label: t('tunnels.ratelimitHost'), value: 'http.host' },
 ]);
 
@@ -829,8 +855,8 @@ const actionJsonPlaceholder = computed(() => {
 
 // 根据 subdomain + selectedDomain 计算 hostname
 const ruleHostname = computed(() => {
-  if (!selectedDomain.value) return '';
-  return ruleForm.subdomain ? `${ruleForm.subdomain}.${selectedDomain.value}` : selectedDomain.value;
+  if (!selectedDomainName.value) return '';
+  return ruleForm.subdomain ? `${ruleForm.subdomain}.${selectedDomainName.value}` : selectedDomainName.value;
 });
 
 const ruleExpressionPreview = computed(() => {
@@ -855,6 +881,7 @@ const ruleExpressionPreview = computed(() => {
 });
 
 function openAddRule() {
+  originalRuleParams.value = {}; originalRuleEnabled.value = true;
   editingRuleId.value = null;
   ruleForm.matchType = 'hostname';
   ruleForm.subdomain = '';
@@ -883,6 +910,7 @@ function openAddRule() {
 }
 
 function openEditRule(row: any) {
+  originalRuleParams.value = { ...(row.action_parameters || {}) }; originalRuleEnabled.value = row.enabled !== false;
   editingRuleId.value = row.id;
   ruleForm.expression = row.expression || '';
   ruleForm.description = row.description || '';
@@ -927,41 +955,31 @@ function openEditRule(row: any) {
     ruleForm.rewriteValue = ap.uri.query.expression;
   }
 
-  // Header 转换
-  const headerScope = ap.headers?.request || ap.headers?.response;
-  if (headerScope) {
-    if (headerScope.set) {
-      ruleForm.headerOp = 'set';
-      const [k, v] = Object.entries(headerScope.set)[0];
-      ruleForm.headerName = k; ruleForm.headerValue = v as string;
-    } else if (headerScope.add) {
-      ruleForm.headerOp = 'add';
-      const [k, v] = Object.entries(headerScope.add)[0];
-      ruleForm.headerName = k; ruleForm.headerValue = v as string;
-    } else if (headerScope.remove) {
-      ruleForm.headerOp = 'remove';
-      ruleForm.headerName = (headerScope.remove[0] as string) || '';
-    }
+  // Real CF header operations are keyed by header name, without request/response wrappers.
+  const headers = Object.entries(ap.headers || {}) as Array<[string, { operation: string; value?: string; expression?: string }]>;
+  if (headers.length === 1 && !headers[0][1].expression) {
+    ruleForm.headerName = headers[0][0]; ruleForm.headerOp = headers[0][1].operation as 'set' | 'remove';
+    ruleForm.headerValue = headers[0][1].value || '';
   }
 
   // 缓存设置
   if (typeof ap.cache === 'boolean') {
     ruleForm.cacheEnabled = ap.cache;
-    if (ap.edge_ttl?.mode === 'override' && ap.edge_ttl?.value != null) {
+    if (ap.edge_ttl?.mode === 'override_origin' && ap.edge_ttl?.default != null) {
       ruleForm.cacheTtlMode = 'custom';
-      ruleForm.cacheTtlValue = ap.edge_ttl.value;
+      ruleForm.cacheTtlValue = ap.edge_ttl.default;
     } else {
       ruleForm.cacheTtlMode = 'respect_origin';
     }
   }
 
   // 速率限制
-  if (ap.characteristics || ap.period || ap.requests_per_period) {
+  if (row.ratelimit?.characteristics || row.ratelimit?.period || row.ratelimit?.requests_per_period) {
     ruleForm.ratelimitAction = row.action || 'block';
-    ruleForm.ratelimitChars = ap.characteristics || ['ip'];
-    ruleForm.ratelimitPeriod = ap.period || 60;
-    ruleForm.ratelimitCount = ap.requests_per_period || 100;
-    ruleForm.ratelimitMitigation = ap.mitigation_timeout || 60;
+    ruleForm.ratelimitChars = row.ratelimit?.characteristics?.filter((field: string) => field !== 'cf.colo.id') || ['ip.src'];
+    ruleForm.ratelimitPeriod = row.ratelimit?.period || 60;
+    ruleForm.ratelimitCount = row.ratelimit?.requests_per_period || 100;
+    ruleForm.ratelimitMitigation = row.ratelimit?.mitigation_timeout ?? 60;
   }
 
   // 无法解析到结构化字段时，启用高级模式
@@ -970,7 +988,7 @@ function openEditRule(row: any) {
     ['route', 'redirect', 'block'].includes(row.action);
   if (!hasStructured && row.action) {
     ruleForm.showAdvancedJson = true;
-    ruleForm.actionJson = JSON.stringify({ action: row.action, action_parameters: ap });
+    ruleForm.actionJson = JSON.stringify({ action: row.action, action_parameters: ap, ...(row.ratelimit ? { ratelimit: row.ratelimit } : {}) });
   }
 
   // 尝试从表达式解析出匹配类型和值
@@ -995,12 +1013,12 @@ function openEditRule(row: any) {
   }
 
   // 从 hostname 中拆分出 subdomain
-  if (hostMatch && selectedDomain.value) {
+  if (hostMatch && selectedDomainName.value) {
     const fullHost = hostMatch[1];
-    if (fullHost === selectedDomain.value) {
+    if (fullHost === selectedDomainName.value) {
       ruleForm.subdomain = '';
-    } else if (fullHost.endsWith('.' + selectedDomain.value)) {
-      ruleForm.subdomain = fullHost.slice(0, -(selectedDomain.value.length + 1));
+    } else if (fullHost.endsWith('.' + selectedDomainName.value)) {
+      ruleForm.subdomain = fullHost.slice(0, -(selectedDomainName.value.length + 1));
     } else {
       ruleForm.subdomain = '';
       ruleForm.matchType = 'custom';
@@ -1017,7 +1035,7 @@ function buildExpression(): string {
   return ruleExpressionPreview.value;
 }
 async function submitRule() {
-  if (!selectedDomain.value || !selectedRulePhase.value) return;
+  if (!selectedDomainName.value || !selectedRulePhase.value) return;
   const phase = selectedRulePhase.value;
   // 回源规则需要端口
   if (phase === 'http_request_origin' && !ruleForm.port) return;
@@ -1028,6 +1046,7 @@ async function submitRule() {
     // 根据 phase 确定 action 和 action_parameters
     let action = 'route';
     let action_parameters: any = {};
+    let ratelimit: Record<string, unknown> | undefined;
     if (phase === 'http_request_origin') {
       action = 'route';
       action_parameters = { origin: { port: ruleForm.port } };
@@ -1042,6 +1061,7 @@ async function submitRule() {
       const parsed = JSON.parse(ruleForm.actionJson);
       action = parsed.action || action;
       action_parameters = parsed.action_parameters || action_parameters;
+      ratelimit = parsed.ratelimit;
     } else if (phase === 'http_request_transform') {
       // URL 重写
       action = 'rewrite';
@@ -1050,27 +1070,15 @@ async function submitRule() {
     } else if (phase === 'http_request_late_transform' || phase === 'http_response_headers_transform') {
       // Header 转换
       action = 'rewrite';
-      const scope = phase === 'http_request_late_transform' ? 'request' : 'response';
-      const opKey = ruleForm.headerOp; // 'set' | 'add' | 'remove'
-      if (opKey === 'remove') {
-        action_parameters = { headers: { [scope]: { remove: [ruleForm.headerName] } } };
-      } else {
-        action_parameters = { headers: { [scope]: { [opKey]: { [ruleForm.headerName]: ruleForm.headerValue || '' } } } };
-      }
+      action_parameters = headerRuleParameters(ruleForm.headerName, ruleForm.headerOp === 'remove' ? 'remove' : 'set', ruleForm.headerValue || '');
     } else if (phase === 'http_request_cache_settings') {
-      // 缓存设置
       action = 'set_cache_settings';
-      action_parameters = { cache: ruleForm.cacheEnabled };
-      if (ruleForm.cacheTtlMode === 'custom') {
-        action_parameters.edge_ttl = { mode: 'override', value: ruleForm.cacheTtlValue };
-      } else {
-        action_parameters.edge_ttl = { mode: 'respect_origin_ttl' };
-      }
+      action_parameters = cacheRuleParameters(ruleForm.cacheEnabled, ruleForm.cacheTtlMode, ruleForm.cacheTtlValue, originalRuleParams.value);
     } else if (phase === 'http_ratelimit') {
       // 速率限制
       action = ruleForm.ratelimitAction;
-      action_parameters = {
-        characteristics: ruleForm.ratelimitChars,
+      ratelimit = {
+        characteristics: [...new Set(['cf.colo.id', ...ruleForm.ratelimitChars])],
         period: ruleForm.ratelimitPeriod,
         requests_per_period: ruleForm.ratelimitCount,
         mitigation_timeout: ruleForm.ratelimitMitigation,
@@ -1079,14 +1087,14 @@ async function submitRule() {
     const payload = {
       expression,
       action,
-      action_parameters,
+      action_parameters: ruleForm.showAdvancedJson ? action_parameters : { ...originalRuleParams.value, ...action_parameters }, ratelimit, enabled: originalRuleEnabled.value,
       description: ruleForm.description || undefined,
     };
     if (editingRuleId.value) {
-      await tunnelsApi.updateRule(selectedDomain.value, phase, editingRuleId.value, payload);
+      await tunnelsApi.updateRule(selectedDomainName.value, phase, editingRuleId.value, payload, ruleContext.value);
       message.success(t('tunnels.msg.ruleUpdated'));
     } else {
-      await tunnelsApi.createRule(selectedDomain.value, phase, payload);
+      await tunnelsApi.createRule(selectedDomainName.value, phase, payload, ruleContext.value);
       message.success(t('tunnels.msg.ruleCreated'));
     }
     showRuleModal.value = false;
@@ -1099,9 +1107,9 @@ async function submitRule() {
 }
 
 async function deleteRule(ruleId: string) {
-  if (!selectedDomain.value || !selectedRulePhase.value) return;
+  if (!selectedDomainName.value || !selectedRulePhase.value) return;
   try {
-    await tunnelsApi.deleteRule(selectedDomain.value, selectedRulePhase.value, ruleId);
+    await tunnelsApi.deleteRule(selectedDomainName.value, selectedRulePhase.value, ruleId, ruleContext.value);
     message.success(t('tunnels.msg.ruleDeleted'));
     await loadRules();
   } catch {
@@ -1130,6 +1138,9 @@ const ruleColumns = computed(() => [
     }),
   },
 ]);
+
+watch(() => [selectedDomain.value, selectedRulePhase.value], () => { rules.value = []; showRuleModal.value = false; });
+onBeforeUnmount(() => requests.invalidate());
 
 // ============ 初始化 ============
 onMounted(async () => {

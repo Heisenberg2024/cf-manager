@@ -19,6 +19,11 @@ const root = path.resolve(__dirname, '..');
 
 // 每个条目: 源文件 -> 需要复制到的所有目标相对路径（相对仓库根目录）
 const jobs = [
+  ...['cfErrors', 'accountDiscovery', 'credentialManager', 'zoneSettings'].map(name => ({
+    name,
+    source: `shared/${name}.ts`,
+    targets: [`backend/src/services/${name}.ts`, `worker/src/services/${name}.ts`],
+  })),
   {
     name: 'model-pricing',
     source: 'shared/model-pricing.json',

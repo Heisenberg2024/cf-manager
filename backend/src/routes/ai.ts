@@ -5,6 +5,7 @@ import { getAiUsageToday } from '../services/aiService';
 import { setQuota, getQuotaByAccount } from '../models/quotaUsage';
 import { invalidateAiCache } from '../services/accountRouter';
 import { mapConcurrent } from '../utils/concurrent';
+import { appLogger } from '../services/logger';
 
 const router = Router();
 
@@ -39,7 +40,7 @@ router.get('/usage', async (_req: Request, res: Response, next: NextFunction) =>
           };
         } else {
           // CF 返回 0 或负数：回退到本地数据库的值
-          console.warn(`[AI Usage] CF returned 0 for ${account.name}, using local estimate`);
+          appLogger.warn(`[AI Usage] CF returned 0 for ${account.name}, using local estimate`);
           const localQuota = getQuotaByAccount(account.id, 'ai_neurons', today);
           return {
             accountId: account.account_id,
@@ -50,7 +51,7 @@ router.get('/usage', async (_req: Request, res: Response, next: NextFunction) =>
           };
         }
       } catch (err: any) {
-        console.error(`[AI Usage] Failed for ${account.name}:`, err.message);
+        appLogger.error(`[AI Usage] Failed for ${account.name}: ${err.message}`);
         // CF 调用失败：返回本地数据库的值
         const localQuota = getQuotaByAccount(account.id, 'ai_neurons', today);
         return {

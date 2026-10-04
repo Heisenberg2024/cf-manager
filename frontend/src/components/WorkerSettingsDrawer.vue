@@ -313,6 +313,8 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, h } from 'vue';
+import { confirmOperation } from '../utils/confirmOperation';
+import { createRequestScope } from '../utils/requestScope';
 import { useI18n } from 'vue-i18n';
 import { NTag, NSpace, NButton, NA, useMessage } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
@@ -344,6 +346,7 @@ const visible = computed({
 });
 const workerName = computed(() => props.worker?.name || '');
 const accountId = computed(() => props.worker?.cfAccountId || 0);
+const requests = createRequestScope(() => `${props.show}:${accountId.value}:${workerName.value}`);
 
 function drawerWidth(desktopWidth: number): number {
   return window.innerWidth <= 768 ? Math.min(window.innerWidth, desktopWidth) : desktopWidth;
@@ -455,11 +458,13 @@ const zoneIdOptions = computed(() =>
 async function loadZones() {
   if (zones.value.length) return; // 已加载过则跳过
   zonesLoading.value = true;
+  const request = requests.begin('loadZones');
   try {
     const { data } = await workersApi.getZones(accountId.value);
+    if (!request.current()) return;
     zones.value = Array.isArray(data) ? data : [];
-  } catch { zones.value = []; }
-  finally { zonesLoading.value = false; }
+  } catch { if (!request.current()) return; zones.value = []; }
+  finally { if (request.current()) zonesLoading.value = false; }
 }
 
 async function openDomainModal() {
@@ -502,12 +507,14 @@ const syncResults = ref<any[]>([]);
 
 async function loadSecrets() {
   secretsLoading.value = true;
+  const request = requests.begin('loadSecrets');
   try {
     // 合并显示所有环境变量：明文（getWorkerConfig）+ 机密（config vars + secrets API 补充）
     const [cfg, sec] = await Promise.all([
       workersApi.getWorkerConfig(accountId.value, workerName.value),
       workersApi.getSecrets(accountId.value, workerName.value),
     ]);
+    if (!request.current()) return;
     const cfgVars = (cfg?.data?.vars || []) as any[];
     const secList = (Array.isArray(sec?.data) ? sec.data : []) as any[];
     const merged: any[] = [
@@ -515,8 +522,8 @@ async function loadSecrets() {
       ...secList.filter((s: any) => !cfgVars.some((v: any) => v.name === s.name)).map((s: any) => ({ name: s.name, type: 'secret_text', value: '' })),
     ];
     secrets.value = merged;
-  } catch { secrets.value = []; }
-  finally { secretsLoading.value = false; }
+  } catch { if (!request.current()) return; secrets.value = []; }
+  finally { if (request.current()) secretsLoading.value = false; }
 }
 
 // 统一 type 选择：明文 / 机密
@@ -545,7 +552,7 @@ async function handleSaveVar() {
       const currentVars = (cfg?.data?.vars || []) as any[];
       const nextVars = currentVars
         .filter((v: any) => v.name !== form.name)
-        .map((v: any) => ({ name: v.name, value: '', secret: !!v.secret, keep: !!v.secret }));
+        .map((v: any) => ({ name: v.name, value: v.secret ? '' : (v.value ?? ''), secret: !!v.secret, keep: !!v.secret }));
       nextVars.push({ name: form.name, value: form.value, secret: false, keep: false });
       await workersApi.batchDeploy(
         [{ accountId: accountId.value, workerName: workerName.value }],
@@ -565,6 +572,9 @@ async function handleSaveVar() {
 
 // 删除变量：明文走 batchDeploy 移除（机密 keep），机密走 deleteSecret
 async function handleDeleteVar(row: any) {
+  const request = requests.begin('handleDeleteVar');
+  if (!await confirmOperation(t('common.delete'), row.name || row.hostname || row.pattern || row.id, `Account ${accountId.value} / ${workerName.value}`)) return;
+  if (!request.current()) return;
   secretSaving.value = true;
   try {
     if (row.type === 'plain_text') {
@@ -572,7 +582,7 @@ async function handleDeleteVar(row: any) {
       const currentVars = (cfg?.data?.vars || []) as any[];
       const nextVars = currentVars
         .filter((v: any) => v.name !== row.name)
-        .map((v: any) => ({ name: v.name, value: '', secret: !!v.secret, keep: !!v.secret }));
+        .map((v: any) => ({ name: v.name, value: v.secret ? '' : (v.value ?? ''), secret: !!v.secret, keep: !!v.secret }));
       await workersApi.batchDeploy(
         [{ accountId: accountId.value, workerName: workerName.value }],
         { isRedeploy: true, vars: nextVars },
@@ -589,13 +599,15 @@ async function handleDeleteVar(row: any) {
 
 async function loadSchedules() {
   schedulesLoading.value = true;
+  const request = requests.begin('loadSchedules');
   try {
     const { data } = await workersApi.getSchedules(accountId.value, workerName.value);
+    if (!request.current()) return;
     const result = data as any;
     schedules.value = result?.schedules || [];
     cronExpressions.value = schedules.value.map((s: any) => s.cron);
-  } catch { schedules.value = []; cronExpressions.value = []; }
-  finally { schedulesLoading.value = false; }
+  } catch { if (!request.current()) return; schedules.value = []; cronExpressions.value = []; }
+  finally { if (request.current()) schedulesLoading.value = false; }
 }
 
 async function saveSchedules() {
@@ -617,11 +629,13 @@ async function saveSchedules() {
 
 async function loadDomains() {
   domainsLoading.value = true;
+  const request = requests.begin('loadDomains');
   try {
     const { data } = await workersApi.getDomains(accountId.value, workerName.value);
+    if (!request.current()) return;
     domains.value = Array.isArray(data) ? data : [];
-  } catch { domains.value = []; }
-  finally { domainsLoading.value = false; }
+  } catch { if (!request.current()) return; domains.value = []; }
+  finally { if (request.current()) domainsLoading.value = false; }
 }
 
 async function handleAddDomain() {
@@ -637,6 +651,9 @@ async function handleAddDomain() {
 }
 
 async function handleDeleteDomain(row: any) {
+  const request = requests.begin('handleDeleteDomain');
+  if (!await confirmOperation(t('common.delete'), row.name || row.hostname || row.pattern || row.id, `Account ${accountId.value} / ${workerName.value}`)) return;
+  if (!request.current()) return;
   await workersApi.deleteDomain(accountId.value, workerName.value, row.id);
   message.success(t('workerSettings.msg.domainDeleted'));
   loadDomains();
@@ -644,11 +661,13 @@ async function handleDeleteDomain(row: any) {
 
 async function loadSubdomain() {
   subdomainLoading.value = true;
+  const request = requests.begin('loadSubdomain');
   try {
     const { data } = await workersApi.getSubdomain(accountId.value, workerName.value);
+    if (!request.current()) return;
     subdomainInfo.value = data;
-  } catch { subdomainInfo.value = null; }
-  finally { subdomainLoading.value = false; }
+  } catch { if (!request.current()) return; subdomainInfo.value = null; }
+  finally { if (request.current()) subdomainLoading.value = false; }
 }
 
 async function toggleSubdomain(val: boolean) {
@@ -662,11 +681,13 @@ async function toggleSubdomain(val: boolean) {
 
 async function loadScriptSettings() {
   scriptSettingsLoading.value = true;
+  const request = requests.begin('loadScriptSettings');
   try {
     const { data } = await workersApi.getSettings(accountId.value, workerName.value);
+    if (!request.current()) return;
     scriptSettings.value = data;
-  } catch { scriptSettings.value = null; }
-  finally { scriptSettingsLoading.value = false; }
+  } catch { if (!request.current()) return; scriptSettings.value = null; }
+  finally { if (request.current()) scriptSettingsLoading.value = false; }
 }
 
 async function updateScriptSetting(key: string, value: any) {
@@ -681,11 +702,13 @@ async function updateScriptSetting(key: string, value: any) {
 async function loadRoutes() {
   if (!routeZoneId.value) { message.warning(t('workerSettings.msg.zoneRequired')); return; }
   routesLoading.value = true;
+  const request = requests.begin('loadRoutes', () => `${props.show}:${accountId.value}:${workerName.value}:${routeZoneId.value}`);
   try {
     const { data } = await workersApi.getRoutes(accountId.value, workerName.value, routeZoneId.value);
+    if (!request.current()) return;
     routes.value = Array.isArray(data) ? data : [];
-  } catch { routes.value = []; }
-  finally { routesLoading.value = false; }
+  } catch { if (!request.current()) return; routes.value = []; }
+  finally { if (request.current()) routesLoading.value = false; }
 }
 
 async function openRouteModal() {
@@ -716,6 +739,9 @@ async function handleAddRoute() {
 }
 
 async function handleDeleteRoute(row: any) {
+  const request = requests.begin('handleDeleteRoute');
+  if (!await confirmOperation(t('common.delete'), row.name || row.hostname || row.pattern || row.id, `Account ${accountId.value} / ${workerName.value}`)) return;
+  if (!request.current()) return;
   if (!routeZoneId.value) return;
   await workersApi.deleteRoute(accountId.value, workerName.value, row.id, routeZoneId.value);
   message.success(t('workerSettings.msg.routeDeleted'));
@@ -724,11 +750,13 @@ async function handleDeleteRoute(row: any) {
 
 async function loadScriptContent() {
   contentLoading.value = true;
+  const request = requests.begin('loadScriptContent');
   try {
     const { data } = await workersApi.getContent(accountId.value, workerName.value);
+    if (!request.current()) return;
     scriptContent.value = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
   } catch (e: any) { scriptContent.value = t('workerSettings.msg.loadFailed', { error: e?.errorMessage || e?.message || '' }); }
-  finally { contentLoading.value = false; }
+  finally { if (request.current()) contentLoading.value = false; }
 }
 
 async function copyScript() {
@@ -743,12 +771,14 @@ async function copyScript() {
 
 async function loadDeployments() {
   deploymentsLoading.value = true;
+  const request = requests.begin('loadDeployments');
   try {
     const { data } = await workersApi.getDeployments(accountId.value, workerName.value);
+    if (!request.current()) return;
     const result = data as any;
     deployments.value = result?.items || result?.deployments || (Array.isArray(data) ? data : []);
-  } catch { deployments.value = []; }
-  finally { deploymentsLoading.value = false; }
+  } catch { if (!request.current()) return; deployments.value = []; }
+  finally { if (request.current()) deploymentsLoading.value = false; }
 }
 
 // ============ Environment Sync ============
@@ -847,6 +877,7 @@ const deploymentColumns = computed<DataTableColumns<any>>(() => [
 watch(
   () => [props.show, props.worker?.name, props.worker?.cfAccountId] as const,
   () => {
+    requests.invalidate();
   if (props.show && props.worker) {
     zones.value = []; // 重置 zones，新 worker 重新加载
     loadSecrets();

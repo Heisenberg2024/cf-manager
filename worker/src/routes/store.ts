@@ -1,3 +1,5 @@
+import { mapConcurrent } from '../utils/concurrent';
+import { errorDetails } from '../services/cfErrors';
 import { Hono } from 'hono';
 import type { Env } from '../types';
 import {
@@ -354,7 +356,7 @@ app.post('/deploy-batch', async (c) => {
   const template = await findTemplate(c, firstDeployment.templateId);
   if (!template) return c.json({ error: { code: 'NOT_FOUND', message: 'Template not found' } }, 404);
 
-  const results = await Promise.all(deployments.map(async (d: any) => {
+  const results = await mapConcurrent(deployments, 3, async (d: any) => {
     try {
       const account = await getAccountById(c.env.DB, d.accountId);
       if (!account) return { accountId: d.accountId, name: d.name, success: false, error: 'Account not found' };
@@ -390,9 +392,9 @@ app.post('/deploy-batch', async (c) => {
         warnings: result.warnings,
       };
     } catch (e: any) {
-      return { accountId: d.accountId, name: d.name, success: false, error: e.message };
+      return { accountId: d.accountId, name: d.name, success: false, error: errorDetails(e).message };
     }
-  }));
+  });
 
   return c.json(results, 200);
 });

@@ -1,5 +1,5 @@
 import type { Account } from '../db/models';
-import { cfFetch } from './cfApi';
+import { cfFetch, cfFetchAll } from './cfApi';
 
 export interface GenericRuleInput {
   description?: string;
@@ -7,6 +7,7 @@ export interface GenericRuleInput {
   action: string;
   action_parameters: any;
   enabled?: boolean;
+  ratelimit?: Record<string, unknown>;
 }
 
 // Account 级 Phase（使用 /accounts/{account_id}/rulesets，kind: 'root'）
@@ -28,15 +29,16 @@ function getRulesetBaseUrl(account: Account, zoneId: string, phase: string): str
 }
 
 /** 获取指定 phase 的 ruleset ID，不存在则创建 */
-export async function getRulesetId(account: Account, zoneId: string, phase: string, key: string): Promise<string> {
+export async function getRulesetId(account: Account, zoneId: string, phase: string, key: string, createIfMissing = true): Promise<string> {
   if (isAccountLevelPhase(phase) && !account.account_id) {
     throw new Error('该规则类型为账户级，但当前账户未设置 Cloudflare Account ID');
   }
   const baseUrl = getRulesetBaseUrl(account, zoneId, phase);
   const accountLevel = isAccountLevelPhase(phase);
-  const list = await cfFetch<{ result: any[] }>(account, `${baseUrl}?per_page=100`, key);
-  const existing = (list.result || []).find((r) => r.phase === phase);
+  const list = await cfFetchAll<any>(account, baseUrl, key);
+  const existing = list.find(r => r.phase === phase);
   if (existing) return existing.id;
+  if (!createIfMissing) throw Object.assign(new Error('Ruleset not found'), { statusCode: 404, code: 'RULESET_NOT_FOUND' });
   const created = await cfFetch<{ result: any }>(account, baseUrl, key, {
     method: 'POST', body: JSON.stringify({
       kind: accountLevel ? 'root' : 'zone',
@@ -49,10 +51,15 @@ export async function getRulesetId(account: Account, zoneId: string, phase: stri
 }
 
 export async function listRules(account: Account, zoneId: string, phase: string, key: string): Promise<any[]> {
+  try {
   const baseUrl = getRulesetBaseUrl(account, zoneId, phase);
-  const rsId = await getRulesetId(account, zoneId, phase, key);
+  const rsId = await getRulesetId(account, zoneId, phase, key, false);
   const rs = await cfFetch<{ result: any }>(account, `${baseUrl}/${rsId}`, key);
   return rs.result.rules ?? [];
+  } catch (error) {
+    if ((error as { code?: string }).code === 'RULESET_NOT_FOUND') return [];
+    throw error;
+  }
 }
 
 export async function createRule(account: Account, zoneId: string, phase: string, input: GenericRuleInput, key: string): Promise<any> {
@@ -61,7 +68,7 @@ export async function createRule(account: Account, zoneId: string, phase: string
   const res = await cfFetch<{ result: any }>(account, `${baseUrl}/${rsId}/rules`, key, {
     method: 'POST', body: JSON.stringify({
       description: input.description, expression: input.expression,
-      action: input.action, action_parameters: input.action_parameters,
+      action: input.action, action_parameters: input.action_parameters, ratelimit: input.ratelimit,
       enabled: input.enabled ?? true,
     }),
   });
@@ -70,12 +77,12 @@ export async function createRule(account: Account, zoneId: string, phase: string
 
 export async function updateRule(account: Account, zoneId: string, phase: string, ruleId: string, input: GenericRuleInput, key: string): Promise<any> {
   const baseUrl = getRulesetBaseUrl(account, zoneId, phase);
-  const rsId = await getRulesetId(account, zoneId, phase, key);
+  const rsId = await getRulesetId(account, zoneId, phase, key, false);
   const res = await cfFetch<{ result: any }>(account, `${baseUrl}/${rsId}/rules/${ruleId}`, key, {
-    method: 'PUT', body: JSON.stringify({
+    method: 'PATCH', body: JSON.stringify({
       description: input.description, expression: input.expression,
-      action: input.action, action_parameters: input.action_parameters,
-      enabled: input.enabled ?? true,
+      action: input.action, action_parameters: input.action_parameters, ratelimit: input.ratelimit,
+      enabled: input.enabled,
     }),
   });
   return res.result;
@@ -83,7 +90,7 @@ export async function updateRule(account: Account, zoneId: string, phase: string
 
 export async function deleteRule(account: Account, zoneId: string, phase: string, ruleId: string, key: string): Promise<any> {
   const baseUrl = getRulesetBaseUrl(account, zoneId, phase);
-  const rsId = await getRulesetId(account, zoneId, phase, key);
+  const rsId = await getRulesetId(account, zoneId, phase, key, false);
   await cfFetch(account, `${baseUrl}/${rsId}/rules/${ruleId}`, key, { method: 'DELETE' });
   return { success: true };
 }

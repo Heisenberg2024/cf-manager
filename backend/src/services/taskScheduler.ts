@@ -1,6 +1,7 @@
 import * as cron from 'node-cron';
 import { getDb } from '../db';
 import { appLogger } from './logger';
+import { getQuotaSummary } from './quotaTracker';
 
 export interface ScheduledTask {
   id: number;
@@ -92,24 +93,18 @@ async function executeTask(task: ScheduledTask): Promise<TaskExecution> {
   const execId = execResult.lastInsertRowid as number;
 
   try {
-    const config = task.config ? JSON.parse(task.config) : {};
     let detail = '';
 
     switch (task.type) {
       case 'quota_report':
-        detail = 'Quota report generated';
+        detail = JSON.stringify(getQuotaSummary());
         break;
       case 'kv_cleanup':
-        detail = `KV cleanup: namespace=${config.namespaceId || 'N/A'}`;
-        break;
       case 'd1_backup':
-        detail = `D1 backup: database=${config.databaseId || 'N/A'}`;
-        break;
       case 'r2_cleanup':
-        detail = `R2 cleanup: bucket=${config.bucket || 'N/A'}, maxAgeDays=${config.maxAgeDays || 30}`;
-        break;
+        throw new Error(`Task ${task.type} is not implemented. No backup or cleanup was performed.`);
       default:
-        detail = `Custom task: ${task.type}`;
+        throw new Error(`Unsupported task type: ${task.type}`);
     }
 
     getDb().prepare('UPDATE task_executions SET status = ?, detail = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?')

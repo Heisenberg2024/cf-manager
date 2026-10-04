@@ -4,6 +4,8 @@
  * Logs are output via console.* and will appear in wrangler/devtools.
  */
 
+import { redact } from './cfErrors';
+
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
@@ -19,7 +21,7 @@ function shouldLog(level: LogLevel): boolean {
 }
 
 function formatMessage(module: string, message: string): string {
-  return `[${module}] ${message}`;
+  return `[${module}] ${redact(message)}`;
 }
 
 export const logger = {

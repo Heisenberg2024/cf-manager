@@ -6,6 +6,7 @@ import { getAccountQuota, ResourceType } from './quotaTracker';
 import { getQuotaTodayByResource } from '../models/quotaUsage';
 import { appLogger } from './logger';
 import pricingData from '../data/model-pricing.json';
+import { mapConcurrent } from '../utils/concurrent';
 
 const ZONES_CACHE_TTL = 300; // 5 minutes
 const QUOTA_CACHE_TTL = 60;  // 1 minute
@@ -27,6 +28,7 @@ interface Zone {
   id: string;
   name: string;
   status: string;
+  paused?: boolean;
   account: { id: string; name: string };
 }
 
@@ -39,35 +41,38 @@ interface AiSnapshotEntry {
 const zonesCache = new NodeCache({ stdTTL: ZONES_CACHE_TTL });
 const quotaCache = new NodeCache({ stdTTL: QUOTA_CACHE_TTL });
 
-export async function getAllZones(): Promise<Array<Zone & { cfAccountId: number; accountName: string }>> {
+export async function getAllZones(refresh = false): Promise<Array<Zone & { cfAccountId: number; accountName: string }>> {
   const cacheKey = 'all_zones';
   const cached = zonesCache.get<Array<Zone & { cfAccountId: number; accountName: string }>>(cacheKey);
-  if (cached) return cached;
+  if (cached && !refresh) return cached;
 
   const accounts = getActiveAccountsByFeature('dns');
 
-  const results = await Promise.all(accounts.map(async (account) => {
+  const results = await mapConcurrent(accounts, 3, async (account) => {
     try {
+      if (!account.account_id) return [];
       const cf = getCfClient(account);
       const zones: Zone[] = [];
-      for await (const zone of cf.zones.list({ per_page: 100 })) {
+      for await (const zone of cf.zones.list({ per_page: 50, account: { id: account.account_id } })) {
         zones.push(zone as any);
       }
-      return zones.map(zone => ({ ...zone, cfAccountId: account.id, accountName: account.name }));
+      return zones.filter(zone => zone.account?.id === account.account_id).map(zone => ({ ...zone, status: zone.paused ? 'paused' : zone.status, cfAccountId: account.id, accountName: account.name }));
     } catch (err) {
       appLogger.error(`Failed to fetch zones for account ${account.name}: ${err}`);
       return [];
     }
-  }));
+  });
   const allZones = results.flat();
 
   zonesCache.set(cacheKey, allZones);
   return allZones;
 }
 
-export async function findAccountByDomain(domain: string): Promise<{ account: Account; zoneId: string }> {
+export async function findAccountByDomain(domain: string, context: { accountId?: number; zoneId?: string } = {}): Promise<{ account: Account; zoneId: string }> {
   const zones = await getAllZones();
-  const zone = zones.find(z => z.name === domain);
+  const matches = zones.filter(z => z.name === domain && (!context.accountId || z.cfAccountId === context.accountId) && (!context.zoneId || z.id === context.zoneId));
+  if (matches.length > 1) throw Object.assign(new Error(`Domain ${domain} has multiple local Account bindings; specify accountId and zoneId`), { statusCode: 409, code: 'AMBIGUOUS_ACCOUNT' });
+  const zone = matches[0];
   if (!zone) {
     throw Object.assign(new Error(`Domain ${domain} not found in any account`), { statusCode: 404, code: 'DOMAIN_NOT_FOUND' });
   }

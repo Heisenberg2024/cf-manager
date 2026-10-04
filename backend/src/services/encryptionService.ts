@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { config } from '../config';
+import { rememberSecret } from './cfErrors';
 
 const ALGORITHM = 'aes-256-gcm';
 // 与 worker（Web Crypto）对齐：IV 固定 12 字节，GCM tag（16 字节）内联于密文末尾。
@@ -47,6 +48,7 @@ function getKey(): Buffer {
 
 // 统一线格式（与 worker 对齐）：ivHex:encHex，其中 enc = ciphertext + GCM tag（内联），IV 12 字节。
 export function encrypt(text: string): string {
+  rememberSecret(text);
   const key = getKey();
   const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
@@ -67,7 +69,9 @@ export function decrypt(encryptedText: string): string {
   }
   try {
     // 3 段 = 旧格式（16 字节 IV + 独立 tag），用于平滑读取旧 backend 历史数据
-    return parts.length === 3 ? decryptLegacy(parts, key) : decryptCurrent(parts, key);
+    const plain = parts.length === 3 ? decryptLegacy(parts, key) : decryptCurrent(parts, key);
+    rememberSecret(plain);
+    return plain;
   } catch (err) {
     // GCM 认证失败（Unsupported state / unable to authenticate data）= 密钥不匹配或密文被篡改
     throw new DecryptError(undefined, err);

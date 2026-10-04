@@ -75,3 +75,16 @@ coverage/
 
 # Ignore CSV files with credentials
 *.csv
+
+.codegraph/
+.docker-test-*/
+
+# Shared service source copies (edit shared/)
+backend/src/services/cfErrors.ts
+worker/src/services/cfErrors.ts
+backend/src/services/accountDiscovery.ts
+worker/src/services/accountDiscovery.ts
+backend/src/services/credentialManager.ts
+worker/src/services/credentialManager.ts
+backend/src/services/zoneSettings.ts
+worker/src/services/zoneSettings.ts

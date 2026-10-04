@@ -1,4 +1,36 @@
 {
+  "credentials": {
+    "title": "凭证管理（{count}）",
+    "relationship": "一个凭证关联多个独立 Cloudflare Account；账户列表展示实际 Account。",
+    "name": "凭证名称",
+    "optionalName": "可选，默认使用账户名称或邮箱",
+    "add": "添加凭证与账户",
+    "edit": "修改凭证",
+    "keepSecret": "留空保留现有凭证",
+    "sharedWarning": "修改凭证会影响其下所有账户；修改账户名称、功能或启用状态只影响该绑定。",
+    "detect": "检测凭证 / 获取账户",
+    "manual": "手动指定 Account ID",
+    "accountIdHint": "请输入 32 位十六进制 Account ID",
+    "fallback": "无法枚举账户时可手动指定 Account ID，保存时验证目标账户访问能力。",
+    "sync": "重新验证 / 同步",
+    "bind": "关联新账户",
+    "syncResult": "账户同步结果",
+    "newCount": "发现 {count} 个尚未绑定的账户；可使用“关联新账户”选择添加。",
+    "checkedAt": "最近检测",
+    "delete": "删除整个凭证",
+    "deleteConfirm": "删除凭证“{name}”及其 {count} 个本地账户绑定：{accounts}。远端 Cloudflare 资源不删除；关联的本地配额将移除。",
+    "bindingOnly": "仅删除本地账户绑定，保留凭证及同凭证下其他账户。",
+    "enabled": "启用账户",
+    "status": {
+      "unknown": "未检测",
+      "active": "有效",
+      "invalid": "无效",
+      "available": "可访问",
+      "unauthorized": "无访问权限",
+      "unavailable": "不可用",
+      "error": "检测失败"
+    }
+  },
   "common": {
     "cancel": "取消",
     "save": "保存",
@@ -295,6 +327,19 @@
     }
   },
   "dns": {
+    "batch": {
+      "selectPage": "选择当前页",
+      "selectAll": "选择全部 {count} 条",
+      "selected": "已选择 {count} 条",
+      "edit": "批量修改",
+      "result": "DNS 批量操作结果",
+      "summary": "共 {total} 条，成功 {success}，失败 {failed}",
+      "confirm": "{action}：账户 {account} / Zone {domain}，共 {count} 条 DNS。记录：{records} {more}。删除无法撤销。",
+      "more": "另有 {count} 条",
+      "proxyUnsupported": "{name}（{type}）不支持代理",
+      "proxyTtl": "{name} 已启用代理，TTL 只能为自动（1）",
+      "proxyHint": "代理仅适用于 A / AAAA / CNAME；已代理记录 TTL 为自动。不适用的记录单独显示失败。"
+    },
     "title": "DNS 管理",
     "addDomain": "+ 添加域名",
     "selectAccount": "选择账户",

@@ -1,3 +1,18 @@
+CREATE TABLE IF NOT EXISTS credentials (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  auth_type TEXT NOT NULL CHECK(auth_type IN ('token', 'global_key')),
+  api_token TEXT,
+  api_key TEXT,
+  email TEXT,
+  fingerprint TEXT UNIQUE,
+  legacy_account_id INTEGER UNIQUE,
+  status TEXT DEFAULT 'unknown',
+  last_checked_at DATETIME,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS accounts (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   name            TEXT NOT NULL,
@@ -12,9 +27,16 @@ CREATE TABLE IF NOT EXISTS accounts (
   worker_plan     TEXT DEFAULT 'free',
   proxy_url       TEXT DEFAULT '',
   proxy_enabled   INTEGER DEFAULT 0,
+  credential_id   INTEGER REFERENCES credentials(id),
+  is_enabled      INTEGER DEFAULT 1,
+  access_status   TEXT DEFAULT 'unknown',
+  last_checked_at DATETIME,
   created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_accounts_credential ON accounts(credential_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_binding ON accounts(credential_id, account_id);
 
 CREATE TABLE IF NOT EXISTS quota_usage (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,

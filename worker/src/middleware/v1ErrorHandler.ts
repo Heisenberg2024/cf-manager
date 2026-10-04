@@ -1,5 +1,7 @@
 import { createMiddleware } from 'hono/factory';
 import type { Env } from '../types';
+import { errorDetails } from '../services/cfErrors';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 /**
  * Error handler for OpenAI-compatible routes (/v1, /api/v1).
@@ -10,15 +12,14 @@ export const v1ErrorHandler = createMiddleware<{ Bindings: Env }>(async (c, next
   try {
     await next();
   } catch (err: any) {
-    const statusCode = err.statusCode || err.status || 500;
-    const code = err.code || 'INTERNAL_ERROR';
-    console.error(`[V1 ${code}] ${c.req.method} ${c.req.path} - ${err.message}`);
+    const { statusCode, code, message } = errorDetails(err);
+    console.error(`[V1 ${code}] ${c.req.method} ${c.req.path} - ${message}`);
     return c.json({
       error: {
-        message: err.message || 'Internal server error',
+        message,
         type: statusCode >= 500 ? 'server_error' : 'invalid_request_error',
         code,
       },
-    }, statusCode as any);
+    }, statusCode as ContentfulStatusCode);
   }
 });

@@ -36,7 +36,7 @@ app.get('/', async (c) => {
   } else {
     accounts = await getActiveAccountsByFeature(c.env.DB, 'workers');
   }
-  const results = await Promise.all(accounts.map(async (account) => {
+  const results = await mapConcurrent(accounts, 3, async (account) => {
     const items: any[] = [];
     const [workersRes, pagesRes] = await Promise.allSettled([
       cfFetch<{ result: any[] }>(account, `/accounts/${account.account_id}/workers/scripts`, c.env.ENCRYPTION_KEY),
@@ -49,7 +49,7 @@ app.get('/', async (c) => {
       items.push(...(pagesRes.value.result || []).map(p => ({ ...p, name: p.name ?? p.id, type: 'pages', cfAccountId: account.id, accountName: account.name })));
     } else { console.error(`[Pages] list failed for ${account.name}: ${pagesRes.reason}`); }
     return items;
-  }));
+  });
   return c.json(results.flat());
 });
 

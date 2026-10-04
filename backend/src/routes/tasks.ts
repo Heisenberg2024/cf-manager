@@ -49,7 +49,7 @@ router.post('/:id/run', async (req: Request, res: Response, next: NextFunction) 
     const id = parseInt(req.params.id as string, 10);
     const result = await runTaskNow(id);
     const task = getTaskById(id);
-    createAuditLog(null, 'task_run', task?.name || String(id), result.status, 'success');
+    createAuditLog(null, 'task_run', task?.name || String(id), result.detail, result.status === 'error' ? 'error' : 'success');
     res.json(result);
   } catch (err) { next(err); }
 });

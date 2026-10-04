@@ -8,7 +8,8 @@
     "build": "vue-tsc -b && vite build",
     "typecheck": "vue-tsc -b",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
     "@vicons/ionicons5": "^0.13.0",
@@ -35,6 +36,7 @@
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.69.0",
     "vite": "^8.0.12",
+    "vitest": "^4.1.11",
     "vue-tsc": "^3.2.8"
   }
 }

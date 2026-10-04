@@ -1,3 +1,5 @@
+import { rememberSecret } from './cfErrors';
+
 function toHex(buf: ArrayBuffer | Uint8Array): string {
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
@@ -43,6 +45,7 @@ async function deriveKey(raw: string): Promise<CryptoKey> {
 
 // 统一线格式（与 backend 对齐）：ivHex:encHex，其中 enc = ciphertext + GCM tag（内联），IV 12 字节。
 export async function encrypt(text: string, encryptionKey: string): Promise<string> {
+  rememberSecret(text);
   const key = await deriveKey(encryptionKey);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encoded = new TextEncoder().encode(text);
@@ -68,13 +71,17 @@ export async function decrypt(encryptedText: string, encryptionKey: string): Pro
       combined.set(data, 0);
       combined.set(tag, data.length);
       const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv, tagLength: 128 }, key, combined);
-      return new TextDecoder().decode(decrypted);
+      const plain = new TextDecoder().decode(decrypted);
+      rememberSecret(plain);
+      return plain;
     }
     const [ivHex, dataHex] = parts;
     const iv = fromHex(ivHex);
     const data = fromHex(dataHex);
     const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data);
-    return new TextDecoder().decode(decrypted);
+    const plain = new TextDecoder().decode(decrypted);
+    rememberSecret(plain);
+    return plain;
   } catch (err) {
     // GCM 认证失败（OperationError）= 密钥不匹配或密文被篡改
     throw new DecryptError(undefined, err);

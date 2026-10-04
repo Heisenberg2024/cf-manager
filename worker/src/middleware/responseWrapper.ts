@@ -1,5 +1,6 @@
 import { createMiddleware } from 'hono/factory';
 import type { Env } from '../types';
+import { redactDiagnostic } from '../services/cfErrors';
 
 /**
  * Check if the response body is an OpenAI-compatible format
@@ -15,9 +16,6 @@ function isOpenAIFormat(body: any): boolean {
   if (body.id && body.object === 'chat.completion') return true;
   if (body.id && body.object === 'chat.completion.chunk') return true;
   if (Array.isArray(body.choices)) return true;
-  
-  // OpenAI error format
-  if (body.error && typeof body.error === 'object' && body.error.message) return true;
   
   return false;
 }
@@ -40,6 +38,7 @@ export const responseWrapper = createMiddleware<{ Bindings: Env }>(async (c, nex
   } catch {
     return;
   }
+  if (body?.error) body = { ...body, error: redactDiagnostic(body.error) };
 
   // Skip wrapping if it's an OpenAI-compatible response
   if (isOpenAIFormat(body)) return;
@@ -48,12 +47,13 @@ export const responseWrapper = createMiddleware<{ Bindings: Env }>(async (c, nex
 
   if (body && typeof body === 'object' && body.success !== undefined) {
     if (body.data !== undefined || body.error !== undefined) {
-      return;
+      wrapped = body;
+    } else {
+      const { success, ...rest } = body;
+      wrapped = success
+        ? { success: true, data: Object.keys(rest).length > 0 ? rest : undefined }
+        : { success: false, error: Object.keys(rest).length > 0 ? rest : undefined };
     }
-    const { success, ...rest } = body;
-    wrapped = success
-      ? { success: true, data: Object.keys(rest).length > 0 ? rest : undefined }
-      : { success: false, error: Object.keys(rest).length > 0 ? rest : undefined };
   } else if (status >= 400) {
     wrapped = body?.error
       ? { success: false, error: body.error }
@@ -62,8 +62,11 @@ export const responseWrapper = createMiddleware<{ Bindings: Env }>(async (c, nex
     wrapped = { success: true, data: body };
   }
 
+  const headers = new Headers(res.headers);
+  headers.delete('Content-Length');
+  headers.set('Content-Type', 'application/json');
   c.res = new Response(JSON.stringify(wrapped), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers,
   });
 });

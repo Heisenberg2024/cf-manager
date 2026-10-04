@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { appLogger } from '../services/logger';
+import { errorDetails } from '../services/cfErrors';
 
 export interface AppError extends Error {
   statusCode?: number;
@@ -7,8 +8,7 @@ export interface AppError extends Error {
 }
 
 export function errorHandler(err: AppError, req: Request, res: Response, _next: NextFunction): void {
-  const statusCode = err.statusCode || 500;
-  const code = err.code || 'INTERNAL_ERROR';
+  const { statusCode, code, message } = errorDetails(err);
   appLogger.error(`[${code}] ${req.method} ${req.originalUrl} - ${err.message}`);
   if (res.headersSent) {
     return;
@@ -17,7 +17,7 @@ export function errorHandler(err: AppError, req: Request, res: Response, _next: 
     success: false,
     error: {
       code,
-      message: err.message,
+      message,
     },
   });
 }

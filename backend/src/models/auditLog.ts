@@ -1,4 +1,5 @@
 import { getDb } from '../db';
+import { redact } from '../services/cfErrors';
 
 export interface AuditLog {
   id: number;
@@ -19,7 +20,7 @@ export function createAuditLog(
 ): void {
   getDb()
     .prepare('INSERT INTO audit_log (account_id, action, target, detail, status) VALUES (?, ?, ?, ?, ?)')
-    .run(accountId, action, target, detail, status);
+    .run(accountId, action, target === null ? null : redact(target), detail === null ? null : redact(detail), status);
 }
 
 export interface AuditLogWithName extends AuditLog {

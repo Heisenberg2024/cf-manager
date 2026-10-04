@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { redactDiagnostic } from '../services/cfErrors';
 
 /**
  * Auto-wraps res.json() calls into { success, data } or { success, error }.
@@ -8,6 +9,7 @@ export function responseWrapper(_req: Request, res: Response, next: NextFunction
   const originalJson = res.json.bind(res);
 
   res.json = function (body: any) {
+    if (body?.error) body = { ...body, error: redactDiagnostic(body.error) };
     // Skip wrapping for all OpenAI-compatible paths (/v1/*, /api/v1/*), keep original format.
     // Use originalUrl to be safe across Express versions (path may or may not include mount prefix).
     const fullUrl = _req.originalUrl || '';

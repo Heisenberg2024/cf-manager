@@ -46,7 +46,8 @@ apiClient.interceptors.response.use(
       error.errorMessage = body?.message || error?.message || i18n.global.t('common.networkError');
     }
 
-    if (error?.response?.status === 401 || (error?.response?.status === 403 && errObj?.code !== 'R2_NOT_ENABLED' && errObj?.code !== 10042)) {
+    // Cloudflare 权限错误不代表管理 API_SECRET 失效。
+    if ((error?.response?.status === 401 && errObj?.code === 'UNAUTHORIZED') || (error?.response?.status === 403 && errObj?.code === 'FORBIDDEN')) {
       localStorage.removeItem('api_token');
       window.dispatchEvent(new Event('auth-expired'));
     }

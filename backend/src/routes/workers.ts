@@ -83,7 +83,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     } else {
       accounts = getActiveAccountsByFeature('workers');
     }
-    const results = await Promise.all(accounts.map(async (account) => {
+    const results = await mapConcurrent(accounts, 3, async (account) => {
       const items: Array<any> = [];
       const [workers, pages] = await Promise.allSettled([
         listWorkers(account),
@@ -100,7 +100,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
         appLogger.error(`[Pages] Failed to list pages for ${account.name}: ${pages.reason}`);
       }
       return items;
-    }));
+    });
     res.json(results.flat());
   } catch (err) { next(err); }
 });
@@ -505,7 +505,7 @@ router.get('/:accountId/pages/:name/config', async (req: Request, res: Response,
 router.get('/usage', async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const accounts = getActiveAccountsByFeature('workers');
-    const results = await Promise.all(accounts.map(async (account) => {
+    const results = await mapConcurrent(accounts, 3, async (account) => {
       try {
         const usage = await getWorkersUsageToday(account);
         return { accountId: account.id, accountName: account.name, ...usage };
@@ -513,7 +513,7 @@ router.get('/usage', async (_req: Request, res: Response, next: NextFunction) =>
         appLogger.error(`[Usage] Failed for account ${account.name}: ${err}`);
         return { accountId: account.id, accountName: account.name, requests: 0, errors: 0, subrequests: 0, cpuTimeMs: 0 };
       }
-    }));
+    });
     res.json(results);
   } catch (err) { next(err); }
 });

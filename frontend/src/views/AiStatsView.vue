@@ -80,6 +80,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
+import { createRequestScope } from '../utils/requestScope';
 import { useI18n } from 'vue-i18n';
 import apiClient from '../api/client';
 
@@ -91,6 +92,7 @@ interface AiUsageItem {
 }
 
 const { t } = useI18n();
+const requests = createRequestScope();
 const loading = ref(false);
 const usageData = ref<AiUsageItem[]>([]);
 
@@ -127,18 +129,20 @@ function badgeClass(neurons: number) {
 
 async function fetchUsage() {
   loading.value = true;
+  const request = requests.begin('fetchUsage');
   try {
     const { data: result } = await apiClient.get('/ai/usage');
+    if (!request.current()) return;
     const data = (result as any)?.data || result;
     usageData.value = (data || []).map((d: any) => ({
       ...d,
       totalNeurons: d.totalNeurons || 0,
     }));
-  } catch (error) {
-    console.error('[AiStatsView] Failed to fetch usage:', error);
+  } catch {
+    if (!request.current()) return;
     usageData.value = [];
   } finally {
-    loading.value = false;
+    if (request.current()) loading.value = false;
   }
 }
 

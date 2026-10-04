@@ -1,14 +1,16 @@
 import type { Account } from '../db/models';
 import { decrypt, DecryptError } from './encryption';
 import { logger } from './logger';
+import { createCfRequest, authHeaders, type AuthInput, type CfRequest } from './accountDiscovery';
+import { redact } from './cfErrors';
 
 export class CfApiError extends Error {
   status: number;
   body: string;
   constructor(status: number, body: string) {
-    super(`CF API error ${status}: ${body}`);
+    super(redact(`CF API error ${status}: ${body}`));
     this.status = status;
-    this.body = body;
+    this.body = redact(body);
   }
 }
 
@@ -31,6 +33,7 @@ async function decryptCredential(value: string, encryptionKey: string, account: 
 }
 
 export async function getAuthHeaders(account: Account, encryptionKey: string): Promise<Record<string, string>> {
+  if (account.is_enabled === 0) throw Object.assign(new Error(`Account ${account.name} (${account.account_id}) is disabled`), { statusCode: 409, code: 'ACCOUNT_DISABLED' });
   if (account.auth_type === 'token') {
     if (!account.api_token) throw new Error(`Account ${account.id} missing api_token`);
     const token = await decryptCredential(account.api_token, encryptionKey, account);
@@ -44,22 +47,22 @@ export async function getAuthHeaders(account: Account, encryptionKey: string): P
 
 const CF_BASE = 'https://api.cloudflare.com/client/v4';
 
+export function credentialRequest(input: AuthInput): CfRequest {
+  return createCfRequest((path, init) => fetch(`${CF_BASE}${path}`, { ...init, signal: AbortSignal.timeout(15000) }), authHeaders(input), 'Credential');
+}
+
+export async function accountRequest(account: Account, encryptionKey: string): Promise<CfRequest> {
+  return createCfRequest((path, init) => fetch(`${CF_BASE}${path}`, { ...init, signal: AbortSignal.timeout(15000) }), await getAuthHeaders(account, encryptionKey), `Account ${account.name} (${account.account_id})`);
+}
+
 export async function cfFetch<T = any>(
   account: Account,
   path: string,
   encryptionKey: string,
   init?: RequestInit
 ): Promise<T> {
-  const headers = await getAuthHeaders(account, encryptionKey);
-  const resp = await fetch(`${CF_BASE}${path}`, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...headers, ...(init?.headers as Record<string, string> || {}) },
-  });
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new CfApiError(resp.status, body);
-  }
-  return resp.json() as Promise<T>;
+  const request = await accountRequest(account, encryptionKey);
+  return await request(path, init) as T;
 }
 
 export async function cfFetchRaw(
@@ -110,7 +113,7 @@ export async function cfGraphQL(
 
 interface CfListResponse<T> {
   result: T[];
-  result_info?: { page: number; per_page: number; total_pages: number; total_count: number };
+  result_info?: { page?: number; per_page?: number; total_pages?: number; total_count?: number };
 }
 
 export async function cfFetchAll<T>(
@@ -121,12 +124,14 @@ export async function cfFetchAll<T>(
 ): Promise<T[]> {
   const all: T[] = [];
   let page = 1;
-  while (true) {
+  while (page <= 1000) {
     const sep = path.includes('?') ? '&' : '?';
     const data = await cfFetch<CfListResponse<T>>(account, `${path}${sep}page=${page}&per_page=${perPage}`, encryptionKey);
-    all.push(...(data.result || []));
-    if (!data.result_info || page >= data.result_info.total_pages) break;
+    if (!Array.isArray(data.result)) throw new CfApiError(502, 'Unexpected paginated list response');
+    all.push(...data.result);
+    const info = data.result_info;
+    if (data.result.length === 0 || (info?.total_pages !== undefined && page >= info.total_pages) || (info?.total_count !== undefined && all.length >= info.total_count) || (info?.total_pages === undefined && info?.total_count === undefined && data.result.length < (info?.per_page || perPage))) return all;
     page++;
   }
-  return all;
+  throw new CfApiError(502, 'Cloudflare list pagination exceeded its limit');
 }

@@ -281,7 +281,7 @@ export function deriveSemanticColorGroups(preset: AccentPreset, dark: boolean): 
 
 const storedMode = (localStorage.getItem('themeMode') as ThemeMode) || (localStorage.getItem('darkMode') !== null ? (localStorage.getItem('darkMode') === 'true' ? 'dark' : 'light') : 'auto');
 const storedAccent = localStorage.getItem('themeAccent') || 'orange';
-const storedGlass = localStorage.getItem('frostedGlass') !== 'false';
+const storedGlass = localStorage.getItem('frostedGlass') === 'true';
 const storedIntensity = (localStorage.getItem('glassIntensity') as GlassIntensity) || 'strong';
 
 export const currentMode = ref<ThemeMode>(storedMode);

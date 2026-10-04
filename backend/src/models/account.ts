@@ -1,4 +1,5 @@
 import { getDb } from '../db';
+import { ACCOUNT_SELECT, ensureCredential, getCredential, updateCredential } from './credential';
 
 export type AccountFeature = 'ai' | 'workers' | 'browser_render' | 'dns' | 'storage';
 
@@ -20,6 +21,13 @@ export interface Account {
   worker_plan: string;
   proxy_url: string;
   proxy_enabled: number;
+  credential_id?: number;
+  credential_name?: string;
+  credential_status?: string;
+  credential_checked_at?: string | null;
+  is_enabled?: number;
+  access_status?: string;
+  last_checked_at?: string | null;
 }
 
 export interface AccountInput {
@@ -34,6 +42,11 @@ export interface AccountInput {
   worker_plan?: string;
   proxy_url?: string;
   proxy_enabled?: number;
+  credential_id?: number;
+  is_enabled?: number;
+  is_active?: number;
+  access_status?: string;
+  last_checked_at?: string;
 }
 
 /** 账号的 Cloudflare Workers 计划类型；未标注（空串）视为免费。 */
@@ -55,7 +68,7 @@ export function normalizeWorkerPlan(plan: unknown): WorkerPlan {
 }
 
 export function hasFeature(account: Account, feature: AccountFeature): boolean {
-  const features = (account.enabled_features || ALL_FEATURES.join(',')).split(',');
+  const features = (account.enabled_features ?? ALL_FEATURES.join(',')).split(',');
   return features.includes(feature);
 }
 
@@ -72,7 +85,7 @@ export function hasPaidAccountByFeature(feature: AccountFeature): boolean {
 }
 
 export function getAllAccounts(): Account[] {
-  return getDb().prepare('SELECT * FROM accounts ORDER BY created_at DESC').all() as Account[];
+  return getDb().prepare(`${ACCOUNT_SELECT} ORDER BY accounts.created_at DESC`).all() as Account[];
 }
 
 export type AccountListFilter = 'all' | 'active' | 'unverified';
@@ -105,15 +118,15 @@ export function listAccountsPaged(opts: {
     where.push('is_active = 0');
   }
   if (search) {
-    where.push('(name LIKE ? OR email LIKE ?)');
+    where.push('(accounts.name LIKE ? OR COALESCE(c.email, accounts.email) LIKE ?)');
     params.push(`%${search}%`, `%${search}%`);
   }
   const whereSql = where.length > 0 ? 'WHERE ' + where.join(' AND ') : '';
 
-  const total = (getDb().prepare(`SELECT COUNT(*) as c FROM accounts ${whereSql}`).get(...params) as { c: number }).c;
+  const total = (getDb().prepare(`SELECT COUNT(*) as c FROM accounts LEFT JOIN credentials c ON c.id = accounts.credential_id ${whereSql}`).get(...params) as { c: number }).c;
   const offset = (page - 1) * pageSize;
   const accounts = getDb()
-    .prepare(`SELECT * FROM accounts ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+    .prepare(`${ACCOUNT_SELECT} ${whereSql} ORDER BY accounts.created_at DESC LIMIT ? OFFSET ?`)
     .all(...params, pageSize, offset) as Account[];
 
   // 三种状态的计数（不受 filter/search 影响，用于 tab 显示）
@@ -127,42 +140,41 @@ export function listAccountsPaged(opts: {
 }
 
 export function getActiveAccounts(): Account[] {
-  return getDb().prepare('SELECT * FROM accounts WHERE is_active = 1 ORDER BY created_at DESC').all() as Account[];
+  return getDb().prepare(`${ACCOUNT_SELECT} WHERE accounts.is_active = 1 AND accounts.is_enabled = 1 ORDER BY accounts.created_at DESC`).all() as Account[];
 }
 
 export function getAccountById(id: number): Account | undefined {
-  return getDb().prepare('SELECT * FROM accounts WHERE id = ?').get(id) as Account | undefined;
+  return getDb().prepare(`${ACCOUNT_SELECT} WHERE accounts.id = ?`).get(id) as Account | undefined;
 }
 
 export function createAccount(input: AccountInput): number {
-  const features = input.enabled_features || ALL_FEATURES.join(',');
-  const stmt = getDb().prepare(
-    'INSERT INTO accounts (name, auth_type, api_token, api_key, email, account_id, enabled_features, worker_plan, proxy_url, proxy_enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  );
-  const result = stmt.run(
-    input.name,
-    input.auth_type,
-    input.api_token || null,
-    input.api_key || null,
-    input.email || null,
-    input.account_id || null,
-    features,
-    normalizeWorkerPlan(input.worker_plan),
-    input.proxy_url || '',
-    input.proxy_enabled ?? 0
-  );
-  return result.lastInsertRowid as number;
+  return getDb().transaction(() => {
+    const credentialId = input.credential_id ?? ensureCredential(input);
+    const credential = getCredential(credentialId);
+    if (!credential) throw new Error('Credential not found');
+    const existing = getDb().prepare('SELECT id FROM accounts WHERE credential_id = ? AND account_id = ?').get(credentialId, input.account_id || null) as { id: number } | undefined;
+    if (existing) return existing.id;
+    const result = getDb().prepare('INSERT INTO accounts (name, auth_type, email, account_id, enabled_features, worker_plan, proxy_url, proxy_enabled, credential_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+      input.name, credential.auth_type, credential.email, input.account_id || null,
+      input.enabled_features ?? ALL_FEATURES.join(','), normalizeWorkerPlan(input.worker_plan),
+      input.proxy_url || '', input.proxy_enabled ?? 0, credentialId,
+    );
+    return Number(result.lastInsertRowid);
+  })();
 }
 
 export function updateAccount(id: number, input: Partial<AccountInput>): void {
+  const existing = getAccountById(id);
+  const authPatch = Object.fromEntries(Object.entries(input).filter(([k, v]) => v !== undefined && ['auth_type', 'api_token', 'api_key', 'email'].includes(k)));
+  if (existing?.credential_id && Object.keys(authPatch).length) updateCredential(existing.credential_id, authPatch);
   const sets: string[] = [];
-  const vals: any[] = [];
+  const vals: unknown[] = [];
   const fieldMap: Record<string, string> = {
     name: 'name',
-    auth_type: 'auth_type',
-    api_token: 'api_token',
-    api_key: 'api_key',
-    email: 'email',
+    is_enabled: 'is_enabled',
+    is_active: 'is_active',
+    access_status: 'access_status',
+    last_checked_at: 'last_checked_at',
     account_id: 'account_id',
     available_features: 'available_features',
     worker_plan: 'worker_plan',
@@ -198,7 +210,7 @@ export function updateAccountId(id: number, accountId: string): void {
 }
 
 export function getAccountByEmail(email: string): Account | undefined {
-  return getDb().prepare('SELECT * FROM accounts WHERE email = ?').get(email) as Account | undefined;
+  return getDb().prepare(`${ACCOUNT_SELECT} WHERE COALESCE(c.email, accounts.email) = ?`).get(email) as Account | undefined;
 }
 
 /**

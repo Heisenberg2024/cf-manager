@@ -14,8 +14,10 @@ export const useAccountStore = defineStore('accounts', () => {
   const search = ref('');
   const total = ref(0);             // 当前筛选条件下总数
   const counts = ref({ all: 0, active: 0, unverified: 0 }); // 三种状态各自总数
+  let requestIdentity = 0;
 
   async function fetchAccounts() {
+    const identity = ++requestIdentity;
     loading.value = true;
     try {
       const { data } = await accountsApi.getAll({
@@ -24,18 +26,20 @@ export const useAccountStore = defineStore('accounts', () => {
         filter: filter.value,
         search: search.value,
       });
+      if (identity !== requestIdentity) return;
       accounts.value = data.accounts;
       quota.value = data.quota;
       // 分页响应可能不包含 total/counts（旧后端），做兼容
       total.value = (data as any).total ?? data.accounts.length;
       counts.value = (data as any).counts ?? { all: data.accounts.length, active: 0, unverified: 0 };
     } catch {
+      if (identity !== requestIdentity) return;
       accounts.value = [];
       quota.value = [];
       total.value = 0;
       counts.value = { all: 0, active: 0, unverified: 0 };
     } finally {
-      loading.value = false;
+      if (identity === requestIdentity) loading.value = false;
     }
   }
 
@@ -75,8 +79,8 @@ export const useAccountStore = defineStore('accounts', () => {
   }
 
   async function testAccount(id: number) {
-    const { data } = await accountsApi.test(id);
-    return data;
+    try { const { data } = await accountsApi.test(id); return data; }
+    finally { await fetchAccounts(); }
   }
 
   async function testBatch(opts: { ids?: number[]; onlyUnverified?: boolean }) {
@@ -95,21 +99,6 @@ export const useAccountStore = defineStore('accounts', () => {
     await fetchAccounts();
   }
 
-  async function getCredentials(id: number) {
-    const { data } = await accountsApi.getCredentials(id);
-  return data as {
-    id: number;
-    name: string;
-    auth_type: 'token' | 'global_key';
-    account_id: string | null;
-    email: string | null;
-    api_token: string | null;
-    api_key: string | null;
-    proxy_url: string;
-    proxy_enabled: number;
-  };
-  }
-
   async function importCsv(file: File, skipVerify = false) {
     const { data } = await accountsApi.importCsv(file, skipVerify);
     await fetchAccounts();
@@ -126,6 +115,5 @@ export const useAccountStore = defineStore('accounts', () => {
     page, pageSize, filter, search, total, counts,
     fetchAccounts, setPage, setPageSize, setFilter, setSearch,
     createAccount, updateAccount, deleteAccount, testAccount, testBatch, updateFeatures, clearExhausted, importCsv, exportCsv,
-    getCredentials,
   };
 });

@@ -269,6 +269,7 @@
 
 <script setup lang="ts">
 import { ref, computed, h, onMounted } from 'vue';
+import { createRequestScope } from '../utils/requestScope';
 import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NTag, NSwitch, useMessage } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
@@ -276,17 +277,17 @@ import { settingsApi } from '../api/settings';
 import { tasksApi } from '../api/storage';
 import { accountsApi } from '../api/accounts';
 import apiClient from '../api/client';
-import { useAccountStore } from '../stores/accountStore';
 import { formatCN } from '../utils/dateFormat';
+import { confirmOperation } from '../utils/confirmOperation';
 import { storeApi } from '../api/store';
 
 const { t } = useI18n();
+const requests = createRequestScope();
 const message = useMessage();
 
 function drawerWidth(desktopWidth: number): number {
   return window.innerWidth <= 768 ? Math.min(window.innerWidth, desktopWidth) : desktopWidth;
 }
-const accountStore = useAccountStore();
 const loading = ref(false);
 const clearing = ref(false);
 const settings = ref<any>({});
@@ -297,7 +298,7 @@ const proxyEnabled = ref(false);
 const taskAllAccounts = ref<any[]>([]);
 async function loadTaskAccounts() {
   try {
-    const { data } = await accountsApi.getAll({ pageSize: 10000 });
+    const { data } = await accountsApi.getAll();
     taskAllAccounts.value = (data as any).accounts || [];
   } catch { taskAllAccounts.value = []; }
 }
@@ -319,8 +320,10 @@ const isWorkerPlatform = computed(() => settings.value.platform === 'cloudflare-
 
 async function fetchSettings() {
   loading.value = true;
+  const request = requests.begin('fetchSettings');
   try {
     const { data } = await settingsApi.get();
+    if (!request.current()) return;
     settings.value = data;
     proxyUrl.value = data.proxy_url || '';
     proxyEnabled.value = !!data.proxy_enabled;
@@ -331,9 +334,10 @@ async function fetchSettings() {
     resinPlatformInput.value = data.resin_platform || 'Default';
     resinDashboardUrl.value = data.resin_url || '';
   } catch {
+    if (!request.current()) return;
     settings.value = {};
   } finally {
-    loading.value = false;
+    if (request.current()) loading.value = false;
   }
 }
 
@@ -486,13 +490,16 @@ function onTaskTypeChange() {
 
 async function fetchTasks() {
   tasksLoading.value = true;
+  const request = requests.begin('fetchTasks');
   try {
     const { data } = await tasksApi.getAll();
+    if (!request.current()) return;
     tasks.value = Array.isArray(data) ? data : [];
   } catch {
+    if (!request.current()) return;
     tasks.value = [];
   } finally {
-    tasksLoading.value = false;
+    if (request.current()) tasksLoading.value = false;
   }
 }
 
@@ -540,14 +547,17 @@ async function handleSaveTask() {
 }
 
 async function handleDeleteTask(row: any) {
+  if (!await confirmOperation(t('common.delete'), row.name, `Scheduled task ${row.id}`)) return;
   await tasksApi.delete(row.id);
   message.success(t('settings.msg.taskDeleted'));
   fetchTasks();
 }
 
 async function handleRunTask(row: any) {
-  await tasksApi.run(row.id);
-  message.success(t('settings.msg.taskExecuted'));
+  const { data } = await tasksApi.run(row.id);
+  if (data?.status === 'error') message.error(data.detail || t('common.error'));
+  else message.success(t('settings.msg.taskExecuted'));
+  if (showHistoryDrawer.value && historyTaskName.value === row.name) await openHistory(row);
 }
 
 async function handleToggleTask(row: any, enabled: boolean) {
@@ -559,13 +569,16 @@ async function openHistory(row: any) {
   historyTaskName.value = row.name;
   showHistoryDrawer.value = true;
   historyLoading.value = true;
+  const request = requests.begin('openHistory');
   try {
     const { data } = await tasksApi.getHistory(row.id);
+    if (!request.current()) return;
     taskHistory.value = Array.isArray(data) ? data : [];
   } catch {
+    if (!request.current()) return;
     taskHistory.value = [];
   } finally {
-    historyLoading.value = false;
+    if (request.current()) historyLoading.value = false;
   }
 }
 
@@ -610,11 +623,14 @@ const editCanSave = computed(() =>
 
 async function loadSources() {
   sourceLoading.value = true;
+  const request = requests.begin('loadSources');
   try {
     const { data } = await storeApi.getSources();
+    if (!request.current()) return;
     catalogSources.value = data as any[];
-  } catch {} finally {
-    sourceLoading.value = false;
+  } catch {
+    if (!request.current()) return;} finally {
+    if (request.current()) sourceLoading.value = false;
   }
 }
 
@@ -702,7 +718,6 @@ onMounted(async () => {
   if (!isWorkerPlatform.value) {
     fetchTasks();
   }
-  accountStore.fetchAccounts();
   loadTaskAccounts();
   loadSources();
 });

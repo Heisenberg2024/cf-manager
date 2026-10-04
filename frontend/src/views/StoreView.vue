@@ -287,8 +287,7 @@ async function loadTemplates(force = false) {
     const { data } = await storeApi.getTemplates();
     templates.value = (data as any).templates || [];
     sources.value = (data as any).sources || [];
-  } catch (e: any) {
-    console.error('Load templates failed:', e);
+  } catch {
   } finally {
     loading.value = false;
     refreshing.value = false;

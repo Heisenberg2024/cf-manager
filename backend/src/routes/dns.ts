@@ -8,17 +8,20 @@ import { isDemoAccountId } from './routeUtils';
 import { listRules, createRule, updateRule, deleteRule } from '../services/rulesetService';
 
 const router = Router();
+function zoneContext(req: Request) {
+  return { accountId: Number(req.query.accountId) || undefined, zoneId: typeof req.query.zoneId === 'string' ? req.query.zoneId : undefined };
+}
 
-router.get('/domains', async (_req: Request, res: Response, next: NextFunction) => {
+router.get('/domains', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const zones = await getAllZones();
+    const zones = await getAllZones(req.query.refresh === 'true');
     res.json(zones);
   } catch (err) { next(err); }
 });
 
 router.get('/domains/:domain/records', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { account, zoneId } = await findAccountByDomain(req.params.domain as string);
+    const { account, zoneId } = await findAccountByDomain(req.params.domain as string, zoneContext(req));
     const records = await listDnsRecords(account, zoneId);
     res.json(records);
   } catch (err) { next(err); }
@@ -27,7 +30,7 @@ router.get('/domains/:domain/records', async (req: Request, res: Response, next:
 router.post('/domains/:domain/records', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const domain = req.params.domain as string;
-    const { account, zoneId } = await findAccountByDomain(domain);
+    const { account, zoneId } = await findAccountByDomain(domain, zoneContext(req));
     const record = await createDnsRecord(account, zoneId, req.body);
     createAuditLog(account.id, 'create_dns', domain, `${req.body.type} ${req.body.name} → ${req.body.content}`, 'success');
     res.status(201).json(record);
@@ -37,7 +40,7 @@ router.post('/domains/:domain/records', async (req: Request, res: Response, next
 router.put('/domains/:domain/records/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const domain = req.params.domain as string;
-    const { account, zoneId } = await findAccountByDomain(domain);
+    const { account, zoneId } = await findAccountByDomain(domain, zoneContext(req));
     const record = await updateDnsRecord(account, zoneId, req.params.id as string, req.body);
     createAuditLog(account.id, 'update_dns', domain, `${req.body.type || ''} ${req.body.name || ''} → ${req.body.content || ''}`, 'success');
     res.json(record);
@@ -47,7 +50,7 @@ router.put('/domains/:domain/records/:id', async (req: Request, res: Response, n
 router.delete('/domains/:domain/records/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const domain = req.params.domain as string;
-    const { account, zoneId } = await findAccountByDomain(domain);
+    const { account, zoneId } = await findAccountByDomain(domain, zoneContext(req));
     if (isDemoAccountId(account.id)) {
       res.status(403).json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可删除 DNS 记录' } });
       return;
@@ -60,7 +63,7 @@ router.delete('/domains/:domain/records/:id', async (req: Request, res: Response
 
 router.get('/domains/:domain/settings', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { account, zoneId } = await findAccountByDomain(req.params.domain as string);
+    const { account, zoneId } = await findAccountByDomain(req.params.domain as string, zoneContext(req));
     const settings = await getZoneSettings(account, zoneId);
     res.json(settings);
   } catch (err) { next(err); }
@@ -72,7 +75,7 @@ router.patch('/domains/:domain/proxy', async (req: Request, res: Response, next:
       res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'record_id and proxied (boolean) are required' } });
       return;
     }
-    const { account, zoneId } = await findAccountByDomain(req.params.domain as string);
+    const { account, zoneId } = await findAccountByDomain(req.params.domain as string, zoneContext(req));
     await updateProxyStatus(account, zoneId, req.body.record_id, req.body.proxied);
     res.json({ success: true });
   } catch (err) { next(err); }
@@ -151,10 +154,12 @@ router.delete('/domains', async (req: Request, res: Response, next: NextFunction
       return;
     }
 
+    const selections: Array<{ name: string; accountId?: number; zoneId?: string }> = domains.map((item: string | { name: string; accountId?: number; zoneId?: string }) => typeof item === 'string' ? { name: item, ...zoneContext(req) } : item);
     const results = await batchProcess(
-      domains as string[],
-      async (domain) => {
-        const { account, zoneId } = await findAccountByDomain(domain);
+      selections,
+      async (selection) => {
+        const domain = selection.name;
+        const { account, zoneId } = await findAccountByDomain(domain, selection);
         if (isDemoAccountId(account.id)) {
           throw new Error('DEMO_PROTECTED: 演示账户不可删除 Zone');
         }
@@ -164,7 +169,9 @@ router.delete('/domains', async (req: Request, res: Response, next: NextFunction
     );
 
     const formatted = results.map(r => ({
-      name: r.item,
+      name: r.item.name,
+      accountId: r.item.accountId,
+      zoneId: r.item.zoneId,
       success: !r.error,
       ...(r.error ? { error: r.error } : {}),
     }));
@@ -173,7 +180,7 @@ router.delete('/domains', async (req: Request, res: Response, next: NextFunction
     const succeeded = results.filter(r => !r.error);
     if (succeeded.length > 0) {
       const firstAccount = succeeded[0].result!.account;
-      createAuditLog(firstAccount.id, 'batch_delete_zone', 'multiple', `deleted ${succeeded.length}/${domains.length} zones: ${domains.join(', ')}`, 'success');
+      createAuditLog(firstAccount.id, 'batch_delete_zone', 'multiple', `deleted ${succeeded.length}/${domains.length} zones: ${selections.map(s => `${s.name} (Account ${s.accountId || ''})`).join(', ')}`, 'success');
     }
 
     res.json({
@@ -189,9 +196,9 @@ router.delete('/domains', async (req: Request, res: Response, next: NextFunction
 router.patch('/domains/:domain/settings', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const domain = req.params.domain as string;
-    const { account, zoneId } = await findAccountByDomain(domain);
+    const { account, zoneId } = await findAccountByDomain(domain, zoneContext(req));
     const result = await updateZoneSettings(account, zoneId, req.body);
-    createAuditLog(account.id, 'update_zone_settings', domain, `updated: ${result.updated.join(', ') || 'none'}${result.failed.length ? `, failed: ${result.failed.join(', ')}` : ''}`, 'success');
+    createAuditLog(account.id, 'update_zone_settings', domain, `updated: ${result.updated.join(', ') || 'none'}${result.failed.length ? `, failed: ${result.failed.join(', ')}` : ''}`, result.failed.length ? 'error' : 'success');
     res.json(result);
   } catch (err) { next(err); }
 });
@@ -200,7 +207,7 @@ router.patch('/domains/:domain/settings', async (req: Request, res: Response, ne
 router.post('/domains/:domain/purge-cache', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const domain = req.params.domain as string;
-    const { account, zoneId } = await findAccountByDomain(domain);
+    const { account, zoneId } = await findAccountByDomain(domain, zoneContext(req));
     const result = await purgeZoneCache(account, zoneId, req.body);
     createAuditLog(account.id, 'purge_cache', domain, req.body.purge_everything ? 'purge_everything' : `purge ${(req.body.files || []).length} URLs`, 'success');
     res.json(result);
@@ -211,7 +218,7 @@ router.post('/domains/:domain/purge-cache', async (req: Request, res: Response, 
 router.patch('/domains/:domain/status', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const domain = req.params.domain as string;
-    const { account, zoneId } = await findAccountByDomain(domain);
+    const { account, zoneId } = await findAccountByDomain(domain, zoneContext(req));
     if (typeof req.body.paused !== 'boolean') {
       res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'paused (boolean) is required' } });
       return;
@@ -226,20 +233,20 @@ router.patch('/domains/:domain/status', async (req: Request, res: Response, next
 
 router.get('/domains/:domain/rules/:phase', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { account, zoneId } = await findAccountByDomain(req.params.domain as string);
+    const { account, zoneId } = await findAccountByDomain(req.params.domain as string, zoneContext(req));
     res.json(await listRules(account, zoneId, req.params.phase as string));
   } catch (err) { next(err); }
 });
 
 router.post('/domains/:domain/rules/:phase', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { description, expression, action, action_parameters, enabled } = req.body;
+    const { description, expression, action, action_parameters, enabled, ratelimit } = req.body;
     if (!expression || !action) {
       res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'expression and action are required' } });
       return;
     }
-    const { account, zoneId } = await findAccountByDomain(req.params.domain as string);
-    const rule = await createRule(account, zoneId, req.params.phase as string, { description, expression, action, action_parameters, enabled });
+    const { account, zoneId } = await findAccountByDomain(req.params.domain as string, zoneContext(req));
+    const rule = await createRule(account, zoneId, req.params.phase as string, { description, expression, action, action_parameters, enabled, ratelimit });
     createAuditLog(account.id, 'create_rule', req.params.domain as string, `phase=${req.params.phase} action=${action}`, 'success');
     res.status(201).json(rule);
   } catch (err) { next(err); }
@@ -247,13 +254,13 @@ router.post('/domains/:domain/rules/:phase', async (req: Request, res: Response,
 
 router.put('/domains/:domain/rules/:phase/:ruleId', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { description, expression, action, action_parameters, enabled } = req.body;
+    const { description, expression, action, action_parameters, enabled, ratelimit } = req.body;
     if (!expression || !action) {
       res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'expression and action are required' } });
       return;
     }
-    const { account, zoneId } = await findAccountByDomain(req.params.domain as string);
-    const rule = await updateRule(account, zoneId, req.params.phase as string, req.params.ruleId as string, { description, expression, action, action_parameters, enabled });
+    const { account, zoneId } = await findAccountByDomain(req.params.domain as string, zoneContext(req));
+    const rule = await updateRule(account, zoneId, req.params.phase as string, req.params.ruleId as string, { description, expression, action, action_parameters, enabled, ratelimit });
     createAuditLog(account.id, 'update_rule', req.params.domain as string, `phase=${req.params.phase} rule_id=${req.params.ruleId}`, 'success');
     res.json(rule);
   } catch (err) { next(err); }
@@ -261,7 +268,7 @@ router.put('/domains/:domain/rules/:phase/:ruleId', async (req: Request, res: Re
 
 router.delete('/domains/:domain/rules/:phase/:ruleId', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { account, zoneId } = await findAccountByDomain(req.params.domain as string);
+    const { account, zoneId } = await findAccountByDomain(req.params.domain as string, zoneContext(req));
     if (isDemoAccountId(account.id)) {
       res.status(403).json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可删除规则' } });
       return;

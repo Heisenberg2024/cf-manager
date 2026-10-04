@@ -1,16 +1,18 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
-import Cloudflare from 'cloudflare';
-import { getAllAccounts, createAccount, deleteAccount, getAccountById, getAccountByEmail, nameFromEmail, updateAccountStatus, updateAccountId, updateAccountFeatures, updateAccount, AccountInput } from '../models/account';
+import { getAllAccounts, createAccount, deleteAccount, getAccountById, nameFromEmail, updateAccountStatus, updateAccountFeatures, updateAccount, AccountInput } from '../models/account';
 import { listAccountsPaged, AccountListFilter, Account, normalizeWorkerPlan } from '../models/account';
 import { encrypt } from '../services/encryptionService';
 import { decrypt } from '../services/encryptionService';
-import { getCfClient } from '../services/cfFactory';
+import { accountRequest } from '../services/cfFactory';
+import { credentials } from '../services/credentials';
+import { validateManualAccount, discoverAccounts } from '../services/accountDiscovery';
+import { errorDetails } from '../services/cfErrors';
+import { updateCredential } from '../models/credential';
 import { getQuotaSummary } from '../services/quotaTracker';
 import { clearCache } from '../services/accountRouter';
 import { appLogger } from '../services/logger';
 import { createAuditLog } from '../models/auditLog';
-import { getHttpAgent } from '../services/proxyService';
 import { clearExhausted } from '../models/quotaUsage';
 import { isDemoAccountId, isDemoMode } from './routeUtils';
 import { probeAvailableFeatures, probeWorkerPlan } from '../services/accountProbe';
@@ -74,196 +76,27 @@ router.get('/', (req: Request, res: Response, next: NextFunction) => {
 });
 
 router.post('/', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { name, auth_type, account_id, api_token, api_key, email } = req.body;
-    if (!name || !auth_type) {
-      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'name and auth_type are required' } });
-      return;
-    }
-    if (auth_type !== 'token' && auth_type !== 'global_key') {
-      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'auth_type must be "token" or "global_key"' } });
-      return;
-    }
-    if (auth_type === 'token' && !api_token) {
-      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'api_token is required for token auth' } });
-      return;
-    }
-    if (auth_type === 'global_key' && (!api_key || !email)) {
-      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'api_key and email are required for global_key auth' } });
-      return;
-    }
-
-    // Verify credentials before saving
-    try {
-      const httpAgent = getHttpAgent();
-      const opts: Record<string, any> = {};
-      if (httpAgent) opts.httpAgent = httpAgent;
-
-      let tempCf: Cloudflare;
-      if (auth_type === 'token') {
-        tempCf = new Cloudflare({ apiToken: api_token, ...opts });
-      } else {
-        tempCf = new Cloudflare({ apiEmail: email, apiKey: api_key, ...opts });
-      }
-      await tempCf.user.get();
-    } catch (e: any) {
-      res.status(400).json({ error: { code: 'CREDENTIAL_INVALID', message: `Cloudflare API 凭证验证失败: ${e.message || e}` } });
-      return;
-    }
-
-    const input: AccountInput = { name, auth_type, account_id, enabled_features: req.body.enabled_features, worker_plan: normalizeWorkerPlan(req.body.worker_plan), proxy_url: req.body.proxy_url, proxy_enabled: req.body.proxy_enabled };
-    if (auth_type === 'token') {
-      input.api_token = encrypt(api_token);
-    } else {
-      input.api_key = encrypt(api_key);
-      input.email = email;
-    }
-    const id = createAccount(input);
-
-    if (!account_id) {
-      try {
-        const saved = getAccountById(id);
-        if (saved) {
-          const cf = getCfClient(saved);
-          const accts: any[] = [];
-          for await (const acct of cf.accounts.list()) {
-            accts.push(acct as any);
-          }
-          if (accts.length > 0) {
-            updateAccountId(id, accts[0].id);
-            appLogger.info(`[Account] Auto-fetched account_id=${accts[0].id} for "${name}"`);
-          }
-          updateAccountStatus(id, true);
-        }
-      } catch (e) {
-        appLogger.warn(`[Account] Failed to auto-fetch account_id for "${name}": ${e}`);
-      }
-    }
-
-    // 探测可用功能（R2…）与计划类型（订阅列表）：计划探测需 Billing 读权限，探测不到保留现有值
-    try {
-      const fresh = getAccountById(id);
-      if (fresh) await probeAndStoreAccount(fresh);
-    } catch (e) {
-      appLogger.warn(`[Account] Failed to probe features for "${name}": ${e}`);
-    }
-
-    clearCache();
-    createAuditLog(id, 'create_account', name, `auth_type=${auth_type}`, 'success');
-    res.status(201).json({ id, ...input, api_token: '***', api_key: '***' });
-  } catch (err) { next(err); }
+  try { res.status(201).json(await credentials.save(req.body)); } catch (err) { next(err); }
 });
 
 router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = parseInt(req.params.id as string, 10);
-    if (isDemoAccountId(id)) {
-      res.status(403).json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可编辑' } });
-      return;
+    const id = Number(req.params.id);
+    if (isDemoAccountId(id)) throw Object.assign(new Error('Demo account is protected'), { statusCode: 403, code: 'DEMO_PROTECTED' });
+    const account = getAccountById(id);
+    if (!account) throw Object.assign(new Error('Account not found'), { statusCode: 404, code: 'NOT_FOUND' });
+    const body = req.body;
+    if (body.account_id !== undefined && /^[a-f\d]{32}$/i.test(account.account_id || '') && String(body.account_id).trim().toLowerCase() !== account.account_id?.toLowerCase()) {
+      throw Object.assign(new Error('Cloudflare Account ID identifies this binding. Add a new binding to switch Accounts and preserve quota/audit ownership.'), { statusCode: 400, code: 'ACCOUNT_ID_IMMUTABLE' });
     }
-    const existing = getAccountById(id);
-    if (!existing) { res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Account not found' } }); return; }
-
-    const { name, auth_type, api_token, api_key, email } = req.body;
-    if (!name || !auth_type) {
-      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'name and auth_type are required' } });
-      return;
+    if (body.api_token || body.api_key || body.email || (body.auth_type && body.auth_type !== account.auth_type)) {
+      await credentials.update(account.credential_id!, { auth_type: body.auth_type, api_token: body.api_token, api_key: body.api_key, email: body.email });
     }
-    if (auth_type !== 'token' && auth_type !== 'global_key') {
-      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'auth_type must be "token" or "global_key"' } });
-      return;
-    }
-
-    const input: Partial<AccountInput> = { name, auth_type };
-    const switching = existing.auth_type !== auth_type;
-
-    // 处理 proxy_url / proxy_enabled（无论是否切换认证类型都允许设置）
-    if (req.body.proxy_url !== undefined) {
-      input.proxy_url = req.body.proxy_url;
-    }
-    if (req.body.proxy_enabled !== undefined) {
-      input.proxy_enabled = req.body.proxy_enabled;
-    }
-
-    // 计划类型（free / paid / enterprise）由人工标注，随时可改；缺省/非法值落回 free
-    if (req.body.worker_plan !== undefined) {
-      input.worker_plan = normalizeWorkerPlan(req.body.worker_plan);
-    }
-
-    if (auth_type === 'token') {
-      if (switching && !api_token) {
-        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '切换至 token 认证需提供 api_token' } });
-        return;
-      }
-      if (api_token) {
-        try {
-          const tempCf = new Cloudflare({ apiToken: api_token, ...(getHttpAgent() ? { httpAgent: getHttpAgent() } : {}) });
-          await tempCf.user.get();
-        } catch (e: any) {
-          res.status(400).json({ error: { code: 'CREDENTIAL_INVALID', message: `Cloudflare API 凭证验证失败: ${e.message || e}` } });
-          return;
-        }
-        input.api_token = encrypt(api_token);
-      }
-      if (switching) { input.api_key = null; input.email = null; }
-    } else {
-      const hasEmail = !!email, hasKey = !!api_key;
-      if (switching && (!hasEmail || !hasKey)) {
-        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '切换至 global_key 认证需同时提供 email 和 api_key' } });
-        return;
-      }
-      if (hasEmail !== hasKey) {
-        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'email 与 api_key 需同时填写' } });
-        return;
-      }
-      if (hasEmail && hasKey) {
-        try {
-          const tempCf = new Cloudflare({ apiEmail: email, apiKey: api_key, ...(getHttpAgent() ? { httpAgent: getHttpAgent() } : {}) });
-          await tempCf.user.get();
-        } catch (e: any) {
-          res.status(400).json({ error: { code: 'CREDENTIAL_INVALID', message: `Cloudflare API 凭证验证失败: ${e.message || e}` } });
-          return;
-        }
-        input.api_key = encrypt(api_key);
-        input.email = email;
-      }
-      if (switching) { input.api_token = null; }
-    }
-
-    // 先保存，再重取 saved（确保用新凭证刷新 account_id 和探测）
-    updateAccount(id, input);
-    const saved = getAccountById(id);
-    if (!saved) { res.status(500).json({ error: { code: 'INTERNAL', message: '保存后账户消失' } }); return; }
-
-    // 自动刷新 account_id（触发条件：无 account_id 或提供了新凭证）
-    if (!saved.account_id || input.api_token || input.api_key) {
-      try {
-        const cf = getCfClient(saved);
-        const accts: any[] = [];
-        for await (const acct of cf.accounts.list()) accts.push(acct as any);
-        if (accts.length > 0) {
-          updateAccountId(id, accts[0].id);
-          appLogger.info(`[Account] Auto-fetched account_id=${accts[0].id} for "${name}"`);
-        }
-        updateAccountStatus(id, true);
-      } catch (e) {
-        appLogger.warn(`[Account] Failed to auto-fetch account_id for "${name}": ${e}`);
-      }
-    }
-
+    const verified = body.account_id === undefined ? undefined : await validateManualAccount(accountRequest({ ...getAccountById(id)!, is_enabled: 1 }), body.account_id);
+    updateAccount(id, { name: body.name, account_id: verified?.id, ...(verified ? { is_active: 1, access_status: 'available', last_checked_at: new Date().toISOString() } : {}), proxy_url: body.proxy_url, proxy_enabled: body.proxy_enabled, is_enabled: body.is_enabled === undefined ? undefined : body.is_enabled ? 1 : 0, worker_plan: body.worker_plan === undefined ? undefined : normalizeWorkerPlan(body.worker_plan) });
+    if (body.enabled_features !== undefined) updateAccountFeatures(id, body.enabled_features);
     clearCache();
-    createAuditLog(id, 'update_account', name, `auth_type=${auth_type}`, 'success');
-
-    // 若提供了新凭证，探测可用付费功能（R2…）与计划类型，失败不阻断
-    if (input.api_token || input.api_key) {
-      try {
-        const probed = getAccountById(id);
-        if (probed) await probeAndStoreAccount(probed);
-      } catch (e) {
-        appLogger.warn(`[Account] Failed to probe features for "${name}": ${e}`);
-      }
-    }
-
+    createAuditLog(id, 'update_account', account.name, 'Updated account binding', 'success');
     res.json({ success: true });
   } catch (err) { next(err); }
 });
@@ -339,43 +172,33 @@ router.get('/:id/credentials', (req: Request, res: Response, next: NextFunction)
   } catch (err) { next(err); }
 });
 
+async function testBinding(account: Account): Promise<void> {
+  // Verification is a read-only maintenance action, also allowed for disabled bindings.
+  const request = accountRequest({ ...account, is_enabled: 1 });
+  let accountId = account.account_id;
+  if (!accountId) {
+    const discovery = await discoverAccounts(request, account.auth_type);
+    if (discovery.accounts.length !== 1) throw Object.assign(new Error('Specify an Account ID or sync the credential to select its Accounts'), { statusCode: 400, code: 'ACCOUNT_ID_REQUIRED' });
+    accountId = discovery.accounts[0].id;
+  }
+  await validateManualAccount(request, accountId);
+  updateAccount(account.id, { account_id: accountId, is_active: 1, access_status: 'available', last_checked_at: new Date().toISOString() });
+  if (account.credential_id) updateCredential(account.credential_id, { status: 'active', last_checked_at: new Date().toISOString() });
+  await probeAndStoreAccount({ ...getAccountById(account.id)!, is_enabled: 1 });
+  clearCache();
+}
+
 router.post('/:id/test', async (req: Request, res: Response, next: NextFunction) => {
+  const account = getAccountById(Number(req.params.id));
+  if (!account) { res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Account not found' } }); return; }
   try {
-    const accountId = parseInt(req.params.id as string, 10);
-    const account = getAccountById(accountId);
-    if (!account) { res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Account not found' } }); return; }
-    const cf = getCfClient(account);
-    const user = await cf.user.get();
-
-    // 自动获取并存储 Cloudflare Account ID
-    if (!account.account_id) {
-      try {
-        const accounts: any[] = [];
-        for await (const acct of cf.accounts.list()) {
-          accounts.push(acct as any);
-        }
-        if (accounts.length > 0) {
-          updateAccountId(accountId, accounts[0].id);
-        }
-      } catch (e) {
-        // 获取账号列表失败不是致命错误，继续返回测试结果
-        appLogger.warn(`Failed to fetch account list: ${e}`);
-      }
-    }
-
-    // 测试成功，更新状态为活跃
-    updateAccountStatus(accountId, true);
-
-    // 探测可用功能（R2…）与计划类型（订阅列表）：计划探测需 Billing 读权限，探测不到保留现有值
-    try {
-      const fresh = getAccountById(accountId);
-      if (fresh) await probeAndStoreAccount(fresh);
-    } catch (e) {
-      appLogger.warn(`[Account] Failed to probe features for account ${accountId}: ${e}`);
-    }
-
-    res.json({ success: true, user });
-  } catch (err) { next(err); }
+    await testBinding(account);
+    res.json({ success: true });
+  } catch (err) {
+    const failure = errorDetails(err);
+    if (['invalid', 'permission'].includes(failure.kind)) updateAccount(account.id, { is_active: 0, access_status: 'unauthorized', last_checked_at: new Date().toISOString() });
+    clearCache(); next(err);
+  }
 });
 
 // ============ 清除 AI 配额耗尽标记 ============
@@ -418,38 +241,13 @@ router.post('/test-batch', async (req: Request, res: Response, next: NextFunctio
 
     async function testOne(account: { id: number; name: string }): Promise<void> {
       try {
-        const cf = getCfClient(getAccountById(account.id)!);
-        await cf.user.get();
-        // 自动获取 account_id
-        const saved = getAccountById(account.id);
-        if (saved && !saved.account_id) {
-          try {
-            const accts: any[] = [];
-            for await (const acct of cf.accounts.list()) {
-              accts.push(acct as any);
-            }
-            if (accts.length > 0) {
-              updateAccountId(account.id, accts[0].id);
-            }
-          } catch (e) {
-            appLogger.warn(`[Account:TestBatch] Failed to fetch account_id for "${account.name}": ${e}`);
-          }
-        }
-        updateAccountStatus(account.id, true);
-
-        // 探测可用功能（R2…）与计划类型：计划探测需 Billing 读权限，探测不到保留现有值
-        try {
-          const fresh = getAccountById(account.id);
-          if (fresh) await probeAndStoreAccount(fresh);
-        } catch (e) {
-          appLogger.warn(`[Account:TestBatch] Failed to probe features for "${account.name}": ${e}`);
-        }
+        await testBinding(getAccountById(account.id)!);
 
         createAuditLog(account.id, 'test_account', account.name, 'batch', 'success');
         results.push({ id: account.id, name: account.name, status: 'success' });
       } catch (e: any) {
         // 测试失败：标记为未活跃
-        updateAccountStatus(account.id, false);
+        if (['invalid', 'permission'].includes(errorDetails(e).kind)) updateAccount(account.id, { is_active: 0, access_status: 'unauthorized' });
         createAuditLog(account.id, 'test_account', account.name, `batch: ${e.message || e}`, 'error');
         results.push({ id: account.id, name: account.name, status: 'error', message: e.message || String(e) });
       }
@@ -604,7 +402,7 @@ router.get('/export-csv', (req: Request, res: Response, next: NextFunction) => {
 
     // 2) 组装 CSV
     const hasTokenAccount = accounts.some(a => a.auth_type === 'token' && !!a.api_token);
-    const header = ['name', 'email', 'globalKey', ...(hasTokenAccount ? ['apiToken'] : [])];
+    const header = ['name', 'accountId', 'email', 'globalKey', ...(hasTokenAccount ? ['apiToken'] : [])];
     const lines: string[] = [header.join(',')];
     for (const a of accounts) {
       let apiKey = '';
@@ -618,7 +416,7 @@ router.get('/export-csv', (req: Request, res: Response, next: NextFunction) => {
           appLogger.warn(`[Account:Export] 解密凭证失败 id=${a.id}，该行凭证留空: ${e}`);
         }
       }
-      const cells = [a.name, a.email || '', apiKey];
+      const cells = [a.name, a.account_id || '', a.email || '', apiKey];
       if (hasTokenAccount) cells.push(apiToken);
       lines.push(cells.map(toCsvCell).join(','));
     }
@@ -683,6 +481,7 @@ router.post('/import-csv', uploadCsv.single('file'), async (req: Request, res: R
     const apiKeyIdx = col('globalkey');
     const apiTokenIdx = col('apitoken');
     const nameIdx = col('name');
+    const accountIdIdx = col('accountid', 'account_id');
 
     if (apiKeyIdx === -1 && apiTokenIdx === -1) {
       res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'CSV 必须包含 globalKey 或 apiToken 列' } });
@@ -707,6 +506,7 @@ router.post('/import-csv', uploadCsv.single('file'), async (req: Request, res: R
       apiKey: string;
       apiToken: string;
       name: string;
+    accountId: string;
       result: { email: string; name: string; status: 'success' | 'skipped' | 'error'; message?: string };
     }
     const pendingTasks: ImportTask[] = [];
@@ -716,6 +516,7 @@ router.post('/import-csv', uploadCsv.single('file'), async (req: Request, res: R
       const email = cell(emailIdx);
       const apiKey = cell(apiKeyIdx);
       const apiToken = cell(apiTokenIdx);
+      const accountId = cell(accountIdIdx);
       // token 认证（只有 apiToken）允许没有邮箱，故名称兜底为占位名
       const authType: 'token' | 'global_key' = !apiKey && apiToken ? 'token' : 'global_key';
       const name = cell(nameIdx) || (email ? nameFromEmail(email) : `未命名账户-${i + 1}`);
@@ -730,7 +531,7 @@ router.post('/import-csv', uploadCsv.single('file'), async (req: Request, res: R
       }
 
       // 同批次内去重
-      const dedupeKey = authType === 'token' ? `token:${apiToken}` : `email:${email}`;
+      const dedupeKey = `${authType === 'token' ? `token:${apiToken}` : `email:${email}`}:${accountId}`;
       if (seenKeys.has(dedupeKey)) {
         results.push({ email, name, status: 'skipped', message: authType === 'token' ? 'CSV 内重复的 apiToken' : 'CSV 内重复邮箱' });
         continue;
@@ -739,72 +540,33 @@ router.post('/import-csv', uploadCsv.single('file'), async (req: Request, res: R
 
       // 数据库去重
       if (authType === 'global_key') {
-        if (getAccountByEmail(email)) {
+        if (getAllAccounts().some(a => a.auth_type === authType && a.email === email && (!accountId || a.account_id === accountId))) {
           results.push({ email, name, status: 'skipped', message: '数据库已存在该邮箱' });
           continue;
         }
-      } else if (tokenAccountExists(apiToken)) {
+      } else if (tokenAccountExists(apiToken, accountId)) {
         results.push({ email, name, status: 'skipped', message: '数据库已存在该 apiToken' });
         continue;
       }
 
       pendingTasks.push({
-        authType, email, apiKey, apiToken, name,
+        authType, email, apiKey, apiToken, name, accountId,
         result: { email, name, status: 'success' },
       });
     }
 
     // 处理单个任务：验证凭证 + 入库 + 自动获取 account_id
     async function processTask(task: ImportTask): Promise<void> {
-      const { authType, email, apiKey, apiToken, name } = task;
+      const { authType, email, apiKey, apiToken, name, accountId } = task;
       try {
-        // 验证 Cloudflare 凭证（可跳过）
+        let id: number;
         if (!skipVerify) {
-          try {
-            const httpAgent = getHttpAgent();
-            const opts: Record<string, any> = {};
-            if (httpAgent) opts.httpAgent = httpAgent;
-            const tempCf = authType === 'token'
-              ? new Cloudflare({ apiToken, ...opts })
-              : new Cloudflare({ apiEmail: email, apiKey, ...opts });
-            await tempCf.user.get();
-          } catch (e: any) {
-            task.result = { email, name, status: 'error', message: `凭证验证失败: ${e.message || e}` };
-            return;
-          }
-        }
-
-        // 保存到数据库
-        const input: AccountInput = {
-          name,
-          auth_type: authType,
-          email: email || undefined,
-        };
-        if (authType === 'token') input.api_token = encrypt(apiToken);
-        else input.api_key = encrypt(apiKey);
-        const id = createAccount(input);
-
-        // 自动获取 account_id（跳过验证模式下也尝试获取，失败不阻断）
-        if (!skipVerify) {
-          try {
-            const saved = getAccountById(id);
-            if (saved) {
-              const cf = getCfClient(saved);
-              const accts: any[] = [];
-              for await (const acct of cf.accounts.list()) {
-                accts.push(acct as any);
-              }
-              if (accts.length > 0) {
-                updateAccountId(id, accts[0].id);
-                appLogger.info(`[Account:Import] Auto-fetched account_id=${accts[0].id} for "${name}"`);
-              }
-              updateAccountStatus(id, true);
-            }
-          } catch (e) {
-            appLogger.warn(`[Account:Import] Failed to auto-fetch account_id for "${name}": ${e}`);
-          }
+          const saved = await credentials.save({ name, auth_type: authType, email, api_token: apiToken, api_key: apiKey, account_id: accountId || undefined });
+          id = saved.id;
+          updateAccount(id, { name });
         } else {
-          // 跳过验证模式：标记为未验证，后续通过「测试」按钮激活
+          const input = { name, auth_type: authType, account_id: accountId || undefined, email: email || undefined, api_token: authType === 'token' ? encrypt(apiToken) : undefined, api_key: authType === 'global_key' ? encrypt(apiKey) : undefined };
+          id = createAccount(input);
           updateAccountStatus(id, false);
         }
 
@@ -838,9 +600,9 @@ router.post('/import-csv', uploadCsv.single('file'), async (req: Request, res: R
 /**
  * token 认证账户的密文含随机 IV，无法直接比对密文，需解密后比较明文
  */
-function tokenAccountExists(apiToken: string): boolean {
+function tokenAccountExists(apiToken: string, accountId = ''): boolean {
   for (const acc of getAllAccounts()) {
-    if (acc.auth_type !== 'token' || !acc.api_token) continue;
+    if (acc.auth_type !== 'token' || !acc.api_token || (accountId && acc.account_id !== accountId)) continue;
     try {
       if (decrypt(acc.api_token) === apiToken) return true;
     } catch {

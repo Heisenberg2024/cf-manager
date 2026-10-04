@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { errorDetails } from './services/cfErrors';
 import { cors } from 'hono/cors';
 import type { Env } from './types';
 import { authMiddleware } from './middleware/auth';
@@ -14,6 +15,7 @@ import { getQuotaSummary, syncUsageFromCloudflare, invalidateAiCache } from './s
 import { getFakeNginxPage } from './pages/fakeNginx';
 
 import accountsRouter from './routes/accounts';
+import credentialsRouter from './routes/credentials';
 import dnsRouter from './routes/dns';
 import workersRouter from './routes/workers';
 import storageRouter from './routes/storage';
@@ -28,7 +30,7 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.use('*', cors({
   origin: '*',
-  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'X-Account-ID'],
   exposeHeaders: ['Content-Length', 'X-Request-Id'],
   maxAge: 86400,
@@ -38,6 +40,15 @@ app.use('*', requestIdMiddleware);
 // 双斜杠/尾部斜杠/大小写变形路径的匹配结果一致，避免绕过或 404/500 差异。
 app.use('*', canonicalizeMiddleware);
 app.use('*', errorHandler);
+
+// Unauthenticated local health check. Never calls Cloudflare or an external service.
+app.get('/api/health', async c => {
+  try {
+    if (!c.env.DB || !c.env.KV || !c.env.ENCRYPTION_KEY) throw new Error('Missing core binding');
+    await c.env.DB.prepare('SELECT 1').first();
+    return c.json({ status: 'ok', db_connected: true, platform: 'cloudflare-workers' });
+  } catch { return c.json({ status: 'unavailable', db_connected: false }, 503); }
+});
 
 // OpenAI-compatible routes (MUST be registered BEFORE responseWrapper)
 // These routes return OpenAI-standard format and should not be wrapped
@@ -59,9 +70,7 @@ app.use('/api/*', responseWrapper);
 app.use('/api/*', authMiddleware);
 
 app.onError((err: any, c) => {
-  const status = err.statusCode || err.status || 500;
-  const message = err.message || 'Internal server error';
-  const code = err.code || 'INTERNAL_ERROR';
+  const { statusCode: status, message, code } = errorDetails(err);
   console.error(`[OnError] ${c.req.method} ${c.req.path}: ${message}`);
   const path = c.req.path;
   if (path.startsWith('/v1') || path.startsWith('/api/v1')) {
@@ -73,31 +82,8 @@ app.onError((err: any, c) => {
   return c.json({ success: false, error: { code, message } }, status as any);
 });
 
-app.get('/api/health', async (c) => {
-  const diag: Record<string, any> = {
-    status: 'ok',
-    platform: 'cloudflare-workers',
-    bindings: {
-      DB: !!c.env.DB,
-      ENCRYPTION_KEY: !!c.env.ENCRYPTION_KEY,
-      API_SECRET: !!c.env.API_SECRET,
-      ASSETS: !!c.env.ASSETS,
-      KV: !!c.env.KV,
-    },
-  };
-  if (c.env.DB) {
-    try {
-      await c.env.DB.prepare('SELECT 1').first();
-      diag.db_connected = true;
-    } catch (e: any) {
-      diag.db_connected = false;
-      diag.db_error = e.message;
-    }
-  }
-  return c.json(diag);
-});
-
 app.route('/api/accounts', accountsRouter);
+app.route('/api/credentials', credentialsRouter);
 app.route('/api/dns', dnsRouter);
 app.route('/api/workers', workersRouter);
 app.route('/api/browser-render', browserRenderRouter);

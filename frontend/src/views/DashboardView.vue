@@ -102,6 +102,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, reactive } from 'vue';
+import { createRequestScope } from '../utils/requestScope';
 import { useI18n } from 'vue-i18n';
 import { useQuotaStore } from '../stores/quotaStore';
 import apiClient from '../api/client';
@@ -111,6 +112,7 @@ import CompactAccountCard from '../components/CompactAccountCard.vue';
 import AutoFitTable from '../components/AutoFitTable.vue';
 
 const { t } = useI18n();
+const requests = createRequestScope();
 
 const quotaStore = useQuotaStore();
 const searchQuery = ref('');
@@ -239,17 +241,20 @@ const logFilter = reactive<{ action: string | null; startDate: number | null; en
 
 async function fetchLogs() {
   loadingLogs.value = true;
+  const request = requests.begin('fetchLogs');
   try {
     const params: Record<string, string> = {};
     if (logFilter.action) params.action = logFilter.action;
     if (logFilter.startDate) params.startDate = toDateStr(logFilter.startDate);
     if (logFilter.endDate) params.endDate = toDateStr(logFilter.endDate);
     const { data } = await apiClient.get('/audit-log', { params });
+    if (!request.current()) return;
     auditLogs.value = data;
   } catch {
+    if (!request.current()) return;
     auditLogs.value = [];
   } finally {
-    loadingLogs.value = false;
+    if (request.current()) loadingLogs.value = false;
   }
 }
 

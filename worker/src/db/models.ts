@@ -1,3 +1,5 @@
+import { ACCOUNT_SELECT, ensureCredential, getCredential, updateCredential } from './credentials';
+import { redact } from '../services/cfErrors';
 export interface Account {
   id: number;
   name: string;
@@ -14,6 +16,13 @@ export interface Account {
   worker_plan: string;
   proxy_url: string;
   proxy_enabled: number;
+  credential_id?: number;
+  credential_name?: string;
+  credential_status?: string;
+  credential_checked_at?: string | null;
+  is_enabled?: number;
+  access_status?: string;
+  last_checked_at?: string | null;
 }
 
 /** 账号的 Cloudflare Workers 计划类型；未标注（空串）视为免费。 */
@@ -62,7 +71,7 @@ export interface AuditLogRow {
 // ============ Account queries ============
 
 export async function getActiveAccounts(db: D1Database): Promise<Account[]> {
-  const { results } = await db.prepare('SELECT * FROM accounts WHERE is_active = 1 ORDER BY name').all<Account>();
+  const { results } = await db.prepare(`${ACCOUNT_SELECT} WHERE accounts.is_active = 1 AND accounts.is_enabled = 1 ORDER BY accounts.name`).all<Account>();
   return results;
 }
 
@@ -81,7 +90,7 @@ export async function hasPaidAccountByFeature(db: D1Database, feature: AccountFe
 }
 
 export async function getAllAccounts(db: D1Database): Promise<Account[]> {
-  const { results } = await db.prepare('SELECT * FROM accounts ORDER BY created_at DESC').all<Account>();
+  const { results } = await db.prepare(`${ACCOUNT_SELECT} ORDER BY accounts.created_at DESC`).all<Account>();
   return results;
 }
 
@@ -115,16 +124,16 @@ export async function listAccountsPaged(db: D1Database, opts: {
     where.push('is_active = 0');
   }
   if (search) {
-    where.push('(name LIKE ? OR email LIKE ?)');
+    where.push('(accounts.name LIKE ? OR COALESCE(c.email, accounts.email) LIKE ?)');
     params.push(`%${search}%`, `%${search}%`);
   }
   const whereSql = where.length > 0 ? 'WHERE ' + where.join(' AND ') : '';
 
-  const totalRow = await db.prepare(`SELECT COUNT(*) as c FROM accounts ${whereSql}`).bind(...params).first<{ c: number }>();
+  const totalRow = await db.prepare(`SELECT COUNT(*) as c FROM accounts LEFT JOIN credentials c ON c.id = accounts.credential_id ${whereSql}`).bind(...params).first<{ c: number }>();
   const total = totalRow?.c ?? 0;
   const offset = (page - 1) * pageSize;
   const { results } = await db
-    .prepare(`SELECT * FROM accounts ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+    .prepare(`${ACCOUNT_SELECT} ${whereSql} ORDER BY accounts.created_at DESC LIMIT ? OFFSET ?`)
     .bind(...params, pageSize, offset)
     .all<Account>();
 
@@ -146,27 +155,34 @@ export async function listAccountsPaged(db: D1Database, opts: {
 }
 
 export async function getAccountById(db: D1Database, id: number): Promise<Account | null> {
-  return db.prepare('SELECT * FROM accounts WHERE id = ?').bind(id).first<Account>();
+  return db.prepare(`${ACCOUNT_SELECT} WHERE accounts.id = ?`).bind(id).first<Account>();
 }
 
 export async function createAccount(db: D1Database, data: {
-  name: string; auth_type: string; api_token?: string; api_key?: string;
-  email?: string; account_id?: string; enabled_features?: string; worker_plan?: string; proxy_url?: string; proxy_enabled?: number;
-}): Promise<number> {
-  const res = await db.prepare(
-    'INSERT INTO accounts (name, auth_type, api_token, api_key, email, account_id, enabled_features, worker_plan, proxy_url, proxy_enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).bind(data.name, data.auth_type, data.api_token || null, data.api_key || null,
-    data.email || null, data.account_id || null, data.enabled_features || 'ai,workers,browser_render,dns,storage',
-    normalizeWorkerPlan(data.worker_plan),
-    data.proxy_url || '', data.proxy_enabled ?? 0).run();
-  return res.meta.last_row_id;
+  name: string; auth_type: 'token' | 'global_key'; api_token?: string; api_key?: string;
+  email?: string; account_id?: string; enabled_features?: string; worker_plan?: string;
+  proxy_url?: string; proxy_enabled?: number; credential_id?: number;
+}, encryptionKey?: string): Promise<number> {
+  const credentialId = data.credential_id ?? await ensureCredential(db, data, encryptionKey!);
+  const credential = await getCredential(db, credentialId);
+  if (!credential) throw new Error('Credential not found');
+  await db.prepare('INSERT OR IGNORE INTO accounts (name, auth_type, email, account_id, enabled_features, worker_plan, proxy_url, proxy_enabled, credential_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(
+    data.name, credential.auth_type, credential.email, data.account_id || null,
+    data.enabled_features ?? 'ai,workers,browser_render,dns,storage', normalizeWorkerPlan(data.worker_plan),
+    data.proxy_url || '', data.proxy_enabled ?? 0, credentialId,
+  ).run();
+  if (data.account_id) return (await db.prepare('SELECT id FROM accounts WHERE credential_id = ? AND account_id = ?').bind(credentialId, data.account_id).first<{ id: number }>())!.id;
+  return (await db.prepare('SELECT id FROM accounts WHERE credential_id = ? ORDER BY id DESC LIMIT 1').bind(credentialId).first<{ id: number }>())!.id;
 }
 
-export async function updateAccount(db: D1Database, id: number, data: Partial<Account>): Promise<void> {
+export async function updateAccount(db: D1Database, id: number, data: Partial<Account>, encryptionKey?: string): Promise<void> {
+  const existing = await getAccountById(db, id);
+  const authPatch = Object.fromEntries(Object.entries(data).filter(([k, v]) => v !== undefined && ['auth_type', 'api_token', 'api_key', 'email'].includes(k)));
+  if (existing?.credential_id && Object.keys(authPatch).length) await updateCredential(db, existing.credential_id, authPatch, encryptionKey!);
   const sets: string[] = [];
   const vals: unknown[] = [];
   for (const [key, val] of Object.entries(data)) {
-    if (val !== undefined && !['id', 'created_at'].includes(key)) {
+    if (val !== undefined && ['name', 'account_id', 'enabled_features', 'available_features', 'worker_plan', 'proxy_url', 'proxy_enabled', 'is_active', 'is_enabled', 'access_status', 'last_checked_at'].includes(key)) {
       sets.push(`${key} = ?`);
       vals.push(val);
     }
@@ -182,7 +198,7 @@ export async function deleteAccount(db: D1Database, id: number): Promise<void> {
 }
 
 export async function getAccountByEmail(db: D1Database, email: string): Promise<Account | null> {
-  return db.prepare('SELECT * FROM accounts WHERE email = ?').bind(email).first<Account>();
+  return db.prepare(`${ACCOUNT_SELECT} WHERE COALESCE(c.email, accounts.email) = ?`).bind(email).first<Account>();
 }
 
 /**
@@ -260,7 +276,7 @@ export async function addAuditLog(db: D1Database, data: {
 }): Promise<void> {
   await db.prepare(
     'INSERT INTO audit_log (account_id, action, target, detail, status) VALUES (?, ?, ?, ?, ?)'
-  ).bind(data.account_id || null, data.action, data.target || null, data.detail || null, data.status).run();
+  ).bind(data.account_id || null, data.action, data.target ? redact(data.target) : null, data.detail ? redact(data.detail) : null, data.status).run();
 }
 
 export async function getRecentLogs(db: D1Database, limit = 20): Promise<AuditLogRow[]> {

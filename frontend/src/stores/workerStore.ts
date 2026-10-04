@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { workersApi } from '../api/workers';
+import { createRequestScope } from '../utils/requestScope';
 
 export const useWorkerStore = defineStore('workers', () => {
   const workers = ref<any[]>([]);
@@ -12,29 +13,35 @@ export const useWorkerStore = defineStore('workers', () => {
 
   // 当前按需选中的账户（点击顶部卡片）
   const selectedAccountId = ref<number | null>(null);
+  const requests = createRequestScope(() => String(selectedAccountId.value));
 
   async function fetchSummary() {
+    const request = requests.begin('summary', () => 'all');
     summaryLoading.value = true;
     try {
       const { data } = await workersApi.getSummary();
+      if (!request.current()) return;
       summary.value = Array.isArray(data) ? data : [];
     } catch {
-      summary.value = [];
+      if (request.current()) summary.value = [];
     } finally {
-      summaryLoading.value = false;
+      if (request.current()) summaryLoading.value = false;
     }
   }
 
   // 按需加载指定账户的 Worker/Pages；不传 accountId 则加载全部
   async function fetchWorkers(accountId?: number | null) {
+    const request = requests.begin('workers');
+    workers.value = [];
     loading.value = true;
     try {
       const { data } = await workersApi.getAll(accountId ?? undefined);
+      if (!request.current()) return;
       workers.value = Array.isArray(data) ? data : [];
     } catch {
-      workers.value = [];
+      if (request.current()) workers.value = [];
     } finally {
-      loading.value = false;
+      if (request.current()) loading.value = false;
     }
   }
 

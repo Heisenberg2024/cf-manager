@@ -8,6 +8,21 @@ services:
       args:
         - GIT_COMMIT=${GIT_COMMIT:-}
     restart: unless-stopped
+    user: "1000:1000"
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    pids_limit: 200
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     network_mode: bridge
     ports:
       - "${APP_PORT:-3000}:3000"
@@ -17,5 +32,8 @@ services:
       - PROXY_URL=${PROXY_URL:-}
       - DEMO_ACCOUNT_IDS=${DEMO_ACCOUNT_IDS:-}
       - DB_PATH=/app/data/cf-manager.db
+      - LOG_DIR=/app/data/logs
+      - FILE_LOGGING=${FILE_LOGGING:-true}
+      - TZ=${TZ:-Asia/Shanghai}
     volumes:
       - ./data:/app/data

@@ -127,121 +127,15 @@ html.app-dark {
   --ambient-color-4: rgba(56, 189, 248, 0.14);
 }
 
-/* 暗色环境层：orb 更强更「实」，并给背景叠一层噪点。
-   原因：backdrop-filter 只能模糊「背景里已经存在的东西」——
-   背景是纯色时，模糊前后完全一样，磨砂自然看不见；
-   背景有了可辨色块与颗粒，玻璃面板透出的内容被模糊后才有磨砂感。 */
-html.app-dark .orb-1 {
-  background: radial-gradient(circle, rgba(99, 102, 241, 0.22) 0%, transparent 68%);
-  filter: blur(50px);
-}
-
-html.app-dark .orb-2 {
-  background: radial-gradient(circle, var(--theme-ambient-accent, rgba(243, 128, 32, 0.2)) 0%, transparent 68%);
-  filter: blur(50px);
-}
-
-html.app-dark .orb-3 {
-  background: radial-gradient(circle, rgba(244, 63, 94, 0.16) 0%, transparent 68%);
-  filter: blur(58px);
-}
-
 /* Body & Ambient Mesh Lighting */
 body {
   margin: 0;
   min-height: 100vh;
-  background-color: transparent;
+  background-color: var(--app-bg);
   color: var(--app-text-primary);
   font-family: var(--sans);
   overflow-x: hidden;
   position: relative;
-}
-
-/* Vibrant Ambient Glow Canvas Layer (Real Elements for Perfect Glass Refraction) */
-.ambient-glow-layer {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: -1;
-  overflow: hidden;
-  background-color: var(--app-bg);
-  transition: background-color 0.4s ease;
-}
-
-.ambient-orb {
-  position: absolute;
-  border-radius: 50%;
-  pointer-events: none;
-  filter: blur(80px);
-  will-change: transform;
-  animation: orb-float 24s ease-in-out infinite alternate;
-}
-
-.orb-1 {
-  width: 550px;
-  height: 550px;
-  top: -120px;
-  left: -60px;
-  background: radial-gradient(circle, rgba(99, 102, 241, 0.18) 0%, transparent 70%);
-  /* blur 半径刻意收小：光斑边界要「看得出轮廓」，
-     否则 backdrop-filter 无从体现——玻璃前后都是均匀色雾，看起来就没变化 */
-  filter: blur(50px);
-}
-
-.orb-2 {
-  width: 520px;
-  height: 520px;
-  top: 8%;
-  right: -50px;
-  background: radial-gradient(circle, var(--theme-ambient-accent, rgba(243, 128, 32, 0.2)) 0%, transparent 70%);
-  filter: blur(50px);
-  animation-duration: 28s;
-  animation-delay: -5s;
-}
-
-.orb-3 {
-  width: 480px;
-  height: 480px;
-  bottom: -60px;
-  left: 25%;
-  background: radial-gradient(circle, rgba(244, 63, 94, 0.13) 0%, transparent 70%);
-  filter: blur(58px);
-  animation-duration: 32s;
-  animation-delay: -10s;
-}
-
-.orb-4 {
-  display: none;
-}
-
-/* 背景结构层：磨砂要「看得出模糊」，前提是玻璃后面存在可辨识的结构。
-   纯色 + 极柔光晕的背景里，任何 blur 半径的结果都一样（实测两极端档位像素差≈0），
-   于是只能靠「加白」制造差异，观感就变成了"变亮"而不是"更磨砂"。
-   这里铺一层大尺度、柔和的斜向光带：玻璃外能看清走向与边界，
-   透过玻璃则被 backdrop-filter 糊成均匀色 —— 档位越高，结构消失得越彻底。 */
-.ambient-glow-layer::after {
-  content: '';
-  position: absolute;
-  inset: -12%;
-  pointer-events: none;
-  /* 浅色主题的对比空间很小：浅灰底 + 淡彩带穿过近白面板后几乎辨认不出，
-     必须把光带本身做强，玻璃「糊掉结构」的前后差异才看得出来 */
-  background:
-    linear-gradient(112deg, transparent 4%, rgba(99, 102, 241, 0.7) 13%, transparent 24%),
-    linear-gradient(112deg, transparent 32%, rgba(56, 189, 248, 0.66) 42%, transparent 53%),
-    linear-gradient(112deg, transparent 60%, rgba(236, 72, 153, 0.54) 70%, transparent 81%),
-    linear-gradient(112deg, transparent 88%, rgba(16, 185, 129, 0.56) 96%, transparent 100%);
-}
-
-/* 暗色底上彩带本就显眼，整体减弱，避免花色 */
-html.app-dark .ambient-glow-layer::after {
-  opacity: 0.45;
-}
-
-@keyframes orb-float {
-  0% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(25px, -20px) scale(1.06); }
-  100% { transform: translate(-20px, 20px) scale(0.96); }
 }
 
 #app {
@@ -289,14 +183,10 @@ code {
   border: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow);
   border-radius: 12px;
-  transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1),
-              box-shadow 0.24s cubic-bezier(0.16, 1, 0.3, 1),
-              border-color 0.2s ease;
+  transition: border-color 0.15s ease;
 }
 
 .glass-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--glass-shadow-hover);
 }
 
 /* Glass effects on Naive UI structural containers */
@@ -321,10 +211,6 @@ code {
 .n-card {
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
-  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-              box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-              background-color 0.25s ease,
-              border-color 0.25s ease !important;
 }
 
 /* 磨砂雾度层：档位越高，面板上的白色薄雾越明显。
@@ -446,7 +332,6 @@ code {
 
 .interactive-card:hover,
 .store-card:hover {
-  transform: translateY(-2px);
   box-shadow: var(--glass-shadow-hover) !important;
 }
 
@@ -468,32 +353,6 @@ code {
 .n-data-table-tr:hover > .n-data-table-td {
   background-color: var(--app-bg-hover) !important;
   transition: background-color 0.15s ease;
-}
-
-/* Ensure page-fade-slide router transition wrapper inherits full height */
-.page-fade-slide-enter-active,
-.page-fade-slide-leave-active {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-/* Page View Transition */
-.page-fade-slide-enter-active,
-.page-fade-slide-leave-active {
-  transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-              transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.page-fade-slide-enter-from {
-  opacity: 0;
-  transform: translateY(6px);
-}
-
-.page-fade-slide-leave-to {
-  opacity: 0;
-  transform: translateY(-4px);
 }
 
 /* ============ Modern Frosted Custom Scrollbars ============ */

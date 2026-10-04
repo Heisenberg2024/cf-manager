@@ -532,7 +532,6 @@ async function generate() {
     const imageData = data.success ? data.data : data;
     const b64 = imageData?.data?.[0]?.b64_json;
     if (!b64) {
-      console.error('[AiImage] Empty image in response:', JSON.stringify(data).slice(0, 500));
       throw new Error(data.error?.message || imageData?.error?.message || `No image in response (keys: ${Object.keys(data).join(', ')})`);
     }
 

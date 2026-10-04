@@ -1,13 +1,16 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import apiClient from '../api/client';
+import { createRequestScope } from '../utils/requestScope';
 
 export const useQuotaStore = defineStore('quota', () => {
   const quota = ref<any[]>([]);
   const loading = ref(false);
   const syncing = ref(false);
+  const requests = createRequestScope();
 
   async function fetchQuota(refresh = false) {
+    const request = requests.begin('quota');
     if (refresh) {
       syncing.value = true;
     } else {
@@ -17,12 +20,11 @@ export const useQuotaStore = defineStore('quota', () => {
       const { data } = await apiClient.get('/quota', {
         params: refresh ? { sync: 'true' } : undefined,
       });
-      quota.value = data;
+      if (request.current()) quota.value = data;
     } catch {
-      quota.value = [];
+      if (request.current()) quota.value = [];
     } finally {
-      loading.value = false;
-      syncing.value = false;
+      if (request.current()) { loading.value = false; syncing.value = false; }
     }
   }
 

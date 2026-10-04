@@ -2,6 +2,8 @@ import Cloudflare from 'cloudflare';
 import { Account } from '../models/account';
 import { decrypt, DecryptError } from './encryptionService';
 import { getHttpAgentForAccount } from './proxyService';
+import { proxyFetch } from './proxyService';
+import { createCfRequest, authHeaders, type AuthInput, type CfRequest } from './accountDiscovery';
 
 /** 错误提示里用的账号标识：让用户在几十个账号里知道是哪一个坏了。 */
 function accountLabel(account: Account): string {
@@ -22,6 +24,7 @@ function decryptCredential(value: string, account: Account): string {
 }
 
 export function getAuthHeaders(account: Account): Record<string, string> {
+  if (account.is_enabled === 0) throw Object.assign(new Error(`Account ${account.name} (${account.account_id}) is disabled`), { statusCode: 409, code: 'ACCOUNT_DISABLED' });
   if (account.auth_type === 'token') {
     if (!account.api_token) throw new Error(`Account ${account.id} is missing api_token`);
     return { 'Authorization': `Bearer ${decryptCredential(account.api_token, account)}` };
@@ -32,8 +35,9 @@ export function getAuthHeaders(account: Account): Record<string, string> {
 }
 
 export function getCfClient(account: Account): Cloudflare {
+  if (account.is_enabled === 0) throw Object.assign(new Error(`Account ${account.name} (${account.account_id}) is disabled`), { statusCode: 409, code: 'ACCOUNT_DISABLED' });
   const httpAgent = getHttpAgentForAccount(account);
-  const opts: Record<string, any> = {};
+  const opts: Record<string, any> = { timeout: 30000, maxRetries: 2 };
   if (httpAgent) opts.httpAgent = httpAgent;
 
   if (account.auth_type === 'token') {
@@ -47,4 +51,12 @@ export function getCfClient(account: Account): Cloudflare {
 
 export function clearClientCache(): void {
   // No-op since we're not caching anymore
+}
+
+export function credentialRequest(input: AuthInput, account?: Account): CfRequest {
+  return createCfRequest((path, init) => proxyFetch(`https://api.cloudflare.com/client/v4${path}`, { ...init, signal: AbortSignal.timeout(15000) }, 15000, undefined, account), authHeaders(input), account ? `Account ${account.name} (${account.account_id})` : 'Credential');
+}
+
+export function accountRequest(account: Account): CfRequest {
+  return createCfRequest((path, init) => proxyFetch(`https://api.cloudflare.com/client/v4${path}`, { ...init, signal: AbortSignal.timeout(15000) }, 15000, undefined, account), getAuthHeaders(account), `Account ${account.name} (${account.account_id})`);
 }

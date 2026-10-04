@@ -55,8 +55,8 @@ function appliedVersions() {
     const data = JSON.parse(out);
     const rows = Array.isArray(data) ? data[0]?.results : [];
     return new Set((rows || []).map((r) => r.version));
-  } catch {
-    return new Set();
+  } catch (e) {
+    throw new Error('Cannot read D1 migration history; refusing to guess applied versions', { cause: e });
   }
 }
 
@@ -74,7 +74,7 @@ function runStatement(stmt) {
     if (isDropColumn && /no such column/i.test(msg)) {
       return { ok: true, idempotent: true };
     }
-    if (/already exists|duplicate column|duplicate.*name|constraint.*failed/i.test(msg)) {
+    if (/already exists|duplicate column|duplicate.*name/i.test(msg)) {
       return { ok: true, idempotent: true };
     }
     return { ok: false, msg };

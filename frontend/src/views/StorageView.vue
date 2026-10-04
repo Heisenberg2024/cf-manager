@@ -308,6 +308,7 @@ import AutoFitTable from '../components/AutoFitTable.vue';
 import type { DataTableColumns } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 import { storageApi } from '../api/storage';
+import { createRequestScope } from '../utils/requestScope';
 import { accountsApi } from '../api/accounts';
 import { formatCN } from '../utils/dateFormat';
 import { loadDemoAccounts, isDemoAccount } from '../utils/demoAccounts';
@@ -331,13 +332,14 @@ function confirmAction(title: string, content: string): Promise<boolean> {
 }
 
 const selectedAccount = ref<number | null>(null);
+const requests = createRequestScope(() => String(selectedAccount.value));
 const activeTab = ref('kv');
 const r2Available = ref(true);
 const allAccounts = ref<any[]>([]);
 const accountOptions = computed(() =>
   allAccounts.value
-    .filter((a: any) => a.is_active && (a.enabled_features || 'ai,workers,browser_render,dns,storage').includes('storage'))
-    .map((a: any) => ({ label: a.name, value: a.id }))
+    .filter((a: any) => a.is_active && a.is_enabled !== 0 && (a.enabled_features ?? 'ai,workers,browser_render,dns,storage').includes('storage'))
+    .map((a: any) => ({ label: `${a.name} (${a.account_id || a.id})`, value: a.id }))
 );
 
 function renderAccountLabel(option: { label: string; value: number }) {
@@ -384,6 +386,12 @@ async function checkR2Available() {
  * （旧资源在新账号下不存在）→ 报错或返回空数据。
  */
 function resetStorageCaches() {
+  requests.invalidate();
+  kvNsLoading.value = false; kvKeysLoading.value = false; d1DbLoading.value = false;
+  d1Loading.value = false; d1SchemaLoading.value = false; r2BucketLoading.value = false; r2Loading.value = false; r2PreviewLoading.value = false;
+  selectedD1DbId.value = null;
+  showCreateModal.value = false; showKvEditor.value = false; showD1Schema.value = false; showD1CreateTable.value = false; showR2Upload.value = false; showR2Preview.value = false;
+
   // KV
   kvNamespaces.value = [];
   selectedKvNs.value = null;
@@ -455,8 +463,10 @@ async function handleCreateConfirm() {
 
 async function handleDeleteKvNs(ns: any) {
   if (!selectedAccount.value) return;
+  const accountId = selectedAccount.value;
   if (!await confirmAction(t('storage.msg.deleteTitle'), t('storage.msg.deleteNamespaceConfirm', { name: ns.title || ns.id }))) return;
-  await storageApi.deleteKvNamespace(selectedAccount.value, ns.id);
+  await storageApi.deleteKvNamespace(accountId, ns.id);
+  if (accountId !== selectedAccount.value) return;
   message.success(t('storage.msg.namespaceDeleted'));
   if (selectedKvNs.value?.id === ns.id) {
     selectedKvNs.value = null;
@@ -477,11 +487,13 @@ function handleCreateKvNs() {
 async function loadKvNamespaces() {
   if (!selectedAccount.value) return;
   kvNsLoading.value = true;
+  const request = requests.begin('loadKvNamespaces');
   try {
     const { data } = await storageApi.getKvNamespaces(selectedAccount.value);
+    if (!request.current()) return;
     kvNamespaces.value = Array.isArray(data) ? data : [];
-  } catch { kvNamespaces.value = []; }
-  finally { kvNsLoading.value = false; }
+  } catch { if (!request.current()) return; kvNamespaces.value = []; }
+  finally { if (request.current()) kvNsLoading.value = false; }
 }
 
 function selectKvNamespace(ns: any) {
@@ -494,30 +506,34 @@ function selectKvNamespace(ns: any) {
 async function loadKvKeys(cursor?: string) {
   if (!selectedAccount.value || !selectedKvNs.value) return;
   kvKeysLoading.value = true;
+  const request = requests.begin('loadKvKeys', () => `${selectedAccount.value}:${selectedKvNs.value?.id}:${kvPrefix.value}`);
   try {
     const { data } = await storageApi.getKvKeys(selectedAccount.value, selectedKvNs.value.id, {
       prefix: kvPrefix.value || undefined,
       cursor: cursor || undefined,
       limit: 100,
     });
+    if (!request.current()) return;
     if (cursor) {
       kvKeys.value.push(...(data.keys || []));
     } else {
       kvKeys.value = data.keys || [];
     }
     kvCursor.value = data.cursor || '';
-  } catch { kvKeys.value = []; }
-  finally { kvKeysLoading.value = false; }
+  } catch { if (!request.current()) return; kvKeys.value = []; }
+  finally { if (request.current()) kvKeysLoading.value = false; }
 }
 
 async function viewKvValue(row: any) {
   if (!selectedAccount.value || !selectedKvNs.value) return;
+  const request = requests.begin('viewKvValue', () => `${selectedAccount.value}:${selectedKvNs.value?.id}`);
   try {
     const { data } = await storageApi.getKvValue(selectedAccount.value, selectedKvNs.value.id, row.name);
+    if (!request.current()) return;
     kvEditKey.value = row.name;
     kvEditForm.value = { key: row.name, value: data.value || '', ttl: null };
     showKvEditor.value = true;
-  } catch {
+  } catch { if (!request.current()) return;
     kvEditForm.value = { key: row.name, value: '', ttl: null };
   }
 }
@@ -538,7 +554,10 @@ async function handleSaveKv() {
 
 async function handleDeleteKv(row: any) {
   if (!selectedAccount.value || !selectedKvNs.value) return;
-  await storageApi.deleteKvKey(selectedAccount.value, selectedKvNs.value.id, row.name);
+  const accountId = selectedAccount.value;
+  const resource = selectedKvNs.value;
+  if (!await confirmAction(t('common.delete'), `Account ${accountId} / ${resource.title || resource.name || resource.id}: ${row.name || row.key}`)) return;
+  await storageApi.deleteKvKey(accountId, resource.id, row.name);
   message.success(t('storage.msg.deleted'));
   loadKvKeys();
 }
@@ -600,8 +619,10 @@ const d1ScrollX = computed(() => {
 
 async function handleDeleteD1Db(db: any) {
   if (!selectedAccount.value) return;
+  const accountId = selectedAccount.value;
   if (!await confirmAction(t('storage.msg.deleteDatabaseTitle'), t('storage.msg.deleteDatabaseConfirm', { name: db.name }))) return;
-  await storageApi.deleteD1Database(selectedAccount.value, db.uuid || db.id);
+  await storageApi.deleteD1Database(accountId, db.uuid || db.id);
+  if (accountId !== selectedAccount.value) return;
   message.success(t('storage.msg.databaseDeleted'));
   if (selectedD1Db.value?.uuid === db.uuid) {
     selectedD1Db.value = null;
@@ -623,34 +644,40 @@ function handleCreateD1Db() {
 async function loadD1Databases() {
   if (!selectedAccount.value) return;
   d1DbLoading.value = true;
+  const request = requests.begin('loadD1Databases');
   try {
     const { data } = await storageApi.getD1Databases(selectedAccount.value);
+    if (!request.current()) return;
     d1Databases.value = Array.isArray(data) ? data : [];
     if (d1Databases.value.length > 0 && !selectedD1Db.value) {
       selectD1Database(d1Databases.value[0]);
     }
-  } catch { d1Databases.value = []; }
-  finally { d1DbLoading.value = false; }
+  } catch { if (!request.current()) return; d1Databases.value = []; }
+  finally { if (request.current()) d1DbLoading.value = false; }
 }
 
 async function selectD1Database(db: any) {
   selectedD1Db.value = db;
   selectedD1DbId.value = db.uuid || db.id;
   activeTableName.value = '';
+  const request = requests.begin('selectD1Database', () => `${selectedAccount.value}:${selectedD1DbId.value}`);
   try {
     const { data } = await storageApi.getD1Tables(selectedAccount.value!, db.uuid || db.id);
+    if (!request.current()) return;
     d1Tables.value = Array.isArray(data) ? data : [];
-  } catch { d1Tables.value = []; }
+  } catch { if (!request.current()) return; d1Tables.value = []; }
 }
 
 async function executeD1() {
   if (!selectedAccount.value || !selectedD1Db.value || !d1Sql.value) return;
   d1Loading.value = true;
+  const request = requests.begin('executeD1', () => `${selectedAccount.value}:${selectedD1DbId.value}`);
   try {
     const { data } = await storageApi.executeD1Query(selectedAccount.value, selectedD1Db.value.uuid || selectedD1Db.value.id, d1Sql.value, d1AllowWrite.value);
+    if (!request.current()) return;
     d1Result.value = data;
-  } catch { d1Result.value = null; }
-  finally { d1Loading.value = false; }
+  } catch { if (!request.current()) return; d1Result.value = null; }
+  finally { if (request.current()) d1Loading.value = false; }
 }
 
 // ============ D1 Table Schema ============
@@ -689,11 +716,13 @@ async function openD1TableSchema(tableName: string) {
   showD1AddColumn.value = false;
   showD1RenameColumn.value = false;
   showD1DropColumn.value = false;
+  const request = requests.begin('openD1TableSchema', () => `${selectedAccount.value}:${selectedD1DbId.value}:${d1SchemaTable.value}`);
   try {
     const { data } = await storageApi.getD1TableSchema(selectedAccount.value, selectedD1Db.value.uuid || selectedD1Db.value.id, tableName);
+    if (!request.current()) return;
     d1SchemaData.value = Array.isArray(data) ? data : [];
-  } catch { d1SchemaData.value = []; }
-  finally { d1SchemaLoading.value = false; }
+  } catch { if (!request.current()) return; d1SchemaData.value = []; }
+  finally { if (request.current()) d1SchemaLoading.value = false; }
 }
 
 async function runD1Alter(sql: string) {
@@ -863,8 +892,10 @@ const r2DisplayItems = computed(() => {
 
 async function handleDeleteR2Bucket(b: any) {
   if (!selectedAccount.value) return;
+  const accountId = selectedAccount.value;
   if (!await confirmAction(t('storage.msg.deleteBucketTitle'), t('storage.msg.deleteBucketConfirm', { name: b.name }))) return;
-  await storageApi.deleteR2Bucket(selectedAccount.value, b.name);
+  await storageApi.deleteR2Bucket(accountId, b.name);
+  if (accountId !== selectedAccount.value) return;
   message.success(t('storage.msg.bucketDeleted'));
   if (selectedR2Bucket.value?.name === b.name) {
     selectedR2Bucket.value = null;
@@ -886,11 +917,13 @@ function handleCreateR2Bucket() {
 async function loadR2Buckets() {
   if (!selectedAccount.value) return;
   r2BucketLoading.value = true;
+  const request = requests.begin('loadR2Buckets');
   try {
     const { data } = await storageApi.getR2Buckets(selectedAccount.value);
+    if (!request.current()) return;
     r2Buckets.value = Array.isArray(data) ? data : [];
-  } catch { r2Buckets.value = []; }
-  finally { r2BucketLoading.value = false; }
+  } catch { if (!request.current()) return; r2Buckets.value = []; }
+  finally { if (request.current()) r2BucketLoading.value = false; }
 }
 
 function selectR2Bucket(b: any) {
@@ -902,15 +935,17 @@ function selectR2Bucket(b: any) {
 async function loadR2Objects() {
   if (!selectedAccount.value || !selectedR2Bucket.value) return;
   r2Loading.value = true;
+  const request = requests.begin('loadR2Objects', () => `${selectedAccount.value}:${selectedR2Bucket.value?.name}:${r2Prefix.value}`);
   try {
     const { data } = await storageApi.getR2Objects(selectedAccount.value, selectedR2Bucket.value.name, {
       prefix: r2Prefix.value || undefined,
       delimiter: '/',
     });
+    if (!request.current()) return;
     r2Objects.value = data.objects || [];
     r2Prefixes.value = data.delimited_prefixes || [];
-  } catch { r2Objects.value = []; r2Prefixes.value = []; }
-  finally { r2Loading.value = false; }
+  } catch { if (!request.current()) return; r2Objects.value = []; r2Prefixes.value = []; }
+  finally { if (request.current()) r2Loading.value = false; }
 }
 
 function navigateR2Folder(prefix: string) {
@@ -920,7 +955,10 @@ function navigateR2Folder(prefix: string) {
 
 async function handleDeleteR2(row: any) {
   if (!selectedAccount.value || !selectedR2Bucket.value) return;
-  await storageApi.deleteR2Object(selectedAccount.value, selectedR2Bucket.value.name, row.key);
+  const accountId = selectedAccount.value;
+  const resource = selectedR2Bucket.value;
+  if (!await confirmAction(t('common.delete'), `Account ${accountId} / ${resource.title || resource.name || resource.id}: ${row.name || row.key}`)) return;
+  await storageApi.deleteR2Object(accountId, resource.name, row.key);
   message.success(t('storage.msg.deleted'));
   loadR2Objects();
 }
@@ -965,6 +1003,7 @@ watch(showR2Preview, (isOpen) => {
 });
 
 onBeforeUnmount(() => {
+  requests.invalidate();
   clearR2PreviewUrl();
 });
 
@@ -979,14 +1018,16 @@ async function handlePreviewR2(row: any) {
   clearR2PreviewUrl();
   r2PreviewLoading.value = true;
   showR2Preview.value = true;
+  const request = requests.begin('handlePreviewR2', () => `${selectedAccount.value}:${selectedR2Bucket.value?.name}:${r2PreviewKey.value}:${showR2Preview.value}`);
   try {
     const resp = await storageApi.downloadR2Object(selectedAccount.value, selectedR2Bucket.value.name, row.key);
+    if (!request.current()) return;
     const blob = new Blob([resp.data], { type: row.contentType || 'image/png' });
     r2PreviewUrl.value = URL.createObjectURL(blob);
-  } catch {
+  } catch { if (!request.current()) return;
     message.error(t('storage.msg.imageLoadFailed'));
   } finally {
-    r2PreviewLoading.value = false;
+    if (request.current()) r2PreviewLoading.value = false;
   }
 }
 

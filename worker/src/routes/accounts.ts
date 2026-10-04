@@ -1,13 +1,21 @@
 import { Hono } from 'hono';
 import type { Env } from '../types';
-import { getAllAccounts, getAccountById, getAccountByEmail, nameFromEmail, createAccount, updateAccount, deleteAccount, addAuditLog, listAccountsPaged, AccountListFilter, clearExhausted, Account, normalizeWorkerPlan } from '../db/models';
+import { getAllAccounts, getAccountById, nameFromEmail, createAccount, updateAccount, deleteAccount, addAuditLog, listAccountsPaged, AccountListFilter, clearExhausted, Account, normalizeWorkerPlan } from '../db/models';
 import { encrypt, decrypt } from '../services/encryption';
 import { probeAvailableFeatures, probeWorkerPlan } from '../services/accountProbe';
-import { cfFetch } from '../services/cfApi';
-import { getQuotaSummary } from '../services/quotaTracker';
+import { accountRequest } from '../services/cfApi';
+import { credentials } from '../services/credentials';
+import { validateManualAccount, discoverAccounts } from '../services/accountDiscovery';
+import { errorDetails } from '../services/cfErrors';
+import { updateCredential } from '../db/credentials';
+import { getQuotaSummary, invalidateAiCache } from '../services/quotaTracker';
 import { isDemoAccount, isDemoMode } from '../services/demo';
 
 const app = new Hono<{ Bindings: Env }>();
+async function invalidateAccountCaches(env: Env) {
+  await env.KV.delete('dns_zones_all');
+  await invalidateAiCache(env);
+}
 
 /**
  * 探测账号的「可用功能」与「Workers 计划类型」并落库。
@@ -62,176 +70,22 @@ app.get('/', async (c) => {
   return c.json({ accounts, quota });
 });
 
-app.post('/', async (c) => {
-  const db = c.env.DB;
+app.post('/', async c => c.json(await credentials(c.env).save(await c.req.json()), 201));
+
+app.put('/:id', async c => {
+  const id = Number(c.req.param('id'));
+  if (isDemoAccount(id, c.env.DEMO_ACCOUNT_IDS)) return c.json({ error: { code: 'DEMO_PROTECTED', message: 'Demo account is protected' } }, 403);
+  const account = await getAccountById(c.env.DB, id);
+  if (!account) return c.json({ error: { code: 'NOT_FOUND', message: 'Account not found' } }, 404);
   const body = await c.req.json();
-  const { name, auth_type, account_id, api_token, api_key, email, enabled_features } = body;
-
-  if (!name || !auth_type) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'name and auth_type are required' } }, 400);
-  if (auth_type !== 'token' && auth_type !== 'global_key') return c.json({ error: { code: 'VALIDATION_ERROR', message: 'auth_type must be "token" or "global_key"' } }, 400);
-  if (auth_type === 'token' && !api_token) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'api_token is required for token auth' } }, 400);
-  if (auth_type === 'global_key' && (!api_key || !email)) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'api_key and email are required for global_key auth' } }, 400);
-
-  // Verify credentials before saving
-  try {
-    const CF_BASE = 'https://api.cloudflare.com/client/v4';
-    let headers: Record<string, string>;
-    if (auth_type === 'token') {
-      headers = { Authorization: `Bearer ${api_token}` };
-    } else {
-      headers = { 'X-Auth-Email': email, 'X-Auth-Key': api_key };
-    }
-    const verifyRes = await fetch(`${CF_BASE}/user`, { headers });
-    if (!verifyRes.ok) {
-      const body = await verifyRes.text();
-      return c.json({ error: { code: 'CREDENTIAL_INVALID', message: `Cloudflare API 凭证验证失败 (${verifyRes.status}): ${body}` } }, 400);
-    }
-  } catch (e) {
-    return c.json({ error: { code: 'CREDENTIAL_INVALID', message: `无法连接 Cloudflare API: ${e}` } }, 400);
+  if (body.account_id !== undefined && /^[a-f\d]{32}$/i.test(account.account_id || '') && String(body.account_id).trim().toLowerCase() !== account.account_id?.toLowerCase()) {
+    return c.json({ error: { code: 'ACCOUNT_ID_IMMUTABLE', message: 'Cloudflare Account ID identifies this binding. Add a new binding to switch Accounts and preserve quota/audit ownership.' } }, 400);
   }
-
-  const input: any = { name, auth_type, account_id, enabled_features, worker_plan: normalizeWorkerPlan(body.worker_plan), proxy_url: body.proxy_url, proxy_enabled: body.proxy_enabled };
-  if (auth_type === 'token') {
-    input.api_token = await encrypt(api_token, c.env.ENCRYPTION_KEY);
-  } else {
-    input.api_key = await encrypt(api_key, c.env.ENCRYPTION_KEY);
-    input.email = email;
-  }
-
-  const id = await createAccount(db, input);
-
-  if (!account_id) {
-    try {
-      const saved = await getAccountById(db, id);
-      if (saved) {
-        const data = await cfFetch<{ result: any[] }>(saved, '/accounts?page=1&per_page=10', c.env.ENCRYPTION_KEY);
-        if (data.result?.length > 0) {
-          await updateAccount(db, id, { account_id: data.result[0].id });
-          console.log(`[Account] Auto-fetched account_id=${data.result[0].id} for "${name}"`);
-        }
-        await updateAccount(db, id, { is_active: 1 });
-      }
-    } catch (e) {
-      console.warn(`[Account] Failed to auto-fetch account_id for "${name}": ${e}`);
-    }
-  }
-
-  // 探测可用功能（R2…）与计划类型（订阅列表）：计划探测需 Billing 读权限，探测不到保留现有值
-  try {
-    const fresh = await getAccountById(db, id);
-    if (fresh) await probeAndStoreAccount(db, fresh, c.env.ENCRYPTION_KEY);
-  } catch (e) {
-    console.warn(`[Account] Failed to probe features for "${name}": ${e}`);
-  }
-
-  await addAuditLog(db, { account_id: id, action: 'create_account', target: name, detail: `auth_type=${auth_type}`, status: 'success' });
-  return c.json({ id, ...input, api_token: '***', api_key: '***' }, 201);
-});
-
-app.put('/:id', async (c) => {
-  const db = c.env.DB;
-  const encryptionKey = c.env.ENCRYPTION_KEY;
-  const id = parseInt(c.req.param('id'), 10);
-
-  if (isDemoAccount(id, c.env.DEMO_ACCOUNT_IDS)) {
-    return c.json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可编辑' } }, 403);
-  }
-  const existing = await getAccountById(db, id);
-  if (!existing) return c.json({ error: { code: 'NOT_FOUND', message: 'Account not found' } }, 404);
-
-  const { name, auth_type, api_token, api_key, email, proxy_url, proxy_enabled, worker_plan } = await c.req.json();
-  if (!name || !auth_type) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'name and auth_type are required' } }, 400);
-  if (auth_type !== 'token' && auth_type !== 'global_key') return c.json({ error: { code: 'VALIDATION_ERROR', message: 'auth_type must be "token" or "global_key"' } }, 400);
-
-  const input: any = { name, auth_type };
-  const switching = existing.auth_type !== auth_type;
-
-  // 处理 proxy_url / proxy_enabled（无论是否切换认证类型都允许设置）
-  if (proxy_url !== undefined) {
-    input.proxy_url = proxy_url;
-  }
-  if (proxy_enabled !== undefined) {
-    input.proxy_enabled = proxy_enabled;
-  }
-
-  // 计划类型（free / paid / enterprise）由人工标注，随时可改；缺省/非法值落回 free
-  if (worker_plan !== undefined) {
-    input.worker_plan = normalizeWorkerPlan(worker_plan);
-  }
-  const CF_BASE = 'https://api.cloudflare.com/client/v4';
-
-  if (auth_type === 'token') {
-    if (switching && !api_token) {
-      return c.json({ error: { code: 'VALIDATION_ERROR', message: '切换至 token 认证需提供 api_token' } }, 400);
-    }
-    if (api_token) {
-      try {
-        const verifyRes = await fetch(`${CF_BASE}/user`, { headers: { Authorization: `Bearer ${api_token}` } });
-        if (!verifyRes.ok) {
-          const body = await verifyRes.text();
-          return c.json({ error: { code: 'CREDENTIAL_INVALID', message: `Cloudflare API 凭证验证失败 (${verifyRes.status}): ${body}` } }, 400);
-        }
-      } catch (e) {
-        return c.json({ error: { code: 'CREDENTIAL_INVALID', message: `无法连接 Cloudflare API: ${e}` } }, 400);
-      }
-      input.api_token = await encrypt(api_token, encryptionKey);
-    }
-    if (switching) { input.api_key = null; input.email = null; }
-  } else {
-    const hasEmail = !!email, hasKey = !!api_key;
-    if (switching && (!hasEmail || !hasKey)) {
-      return c.json({ error: { code: 'VALIDATION_ERROR', message: '切换至 global_key 认证需同时提供 email 和 api_key' } }, 400);
-    }
-    if (hasEmail !== hasKey) {
-      return c.json({ error: { code: 'VALIDATION_ERROR', message: 'email 与 api_key 需同时填写' } }, 400);
-    }
-    if (hasEmail && hasKey) {
-      try {
-        const verifyRes = await fetch(`${CF_BASE}/user`, { headers: { 'X-Auth-Email': email, 'X-Auth-Key': api_key } });
-        if (!verifyRes.ok) {
-          const body = await verifyRes.text();
-          return c.json({ error: { code: 'CREDENTIAL_INVALID', message: `Cloudflare API 凭证验证失败 (${verifyRes.status}): ${body}` } }, 400);
-        }
-      } catch (e) {
-        return c.json({ error: { code: 'CREDENTIAL_INVALID', message: `无法连接 Cloudflare API: ${e}` } }, 400);
-      }
-      input.api_key = await encrypt(api_key, encryptionKey);
-      input.email = email;
-    }
-    if (switching) { input.api_token = null; }
-  }
-
-  // 先保存，再重取 saved
-  await updateAccount(db, id, input);
-  const saved = await getAccountById(db, id);
-  if (!saved) return c.json({ error: { code: 'INTERNAL', message: '保存后账户消失' } }, 500);
-
-  // 自动刷新 account_id
-  if (!saved.account_id || input.api_token || input.api_key) {
-    try {
-      const data = await cfFetch<{ result: any[] }>(saved, '/accounts?page=1&per_page=10', encryptionKey);
-      if (data.result?.length > 0) {
-        await updateAccount(db, id, { account_id: data.result[0].id });
-        console.log(`[Account] Auto-fetched account_id=${data.result[0].id} for "${name}"`);
-      }
-      await updateAccount(db, id, { is_active: 1 });
-    } catch (e) {
-      console.warn(`[Account] Failed to auto-fetch account_id for "${name}": ${e}`);
-    }
-  }
-
-  await addAuditLog(db, { account_id: id, action: 'update_account', target: name, detail: `auth_type=${auth_type}`, status: 'success' });
-
-  // 若提供了新凭证，探测可用功能（R2…）与计划类型，失败不阻断
-  if (input.api_token || input.api_key) {
-    try {
-      const probed = await getAccountById(db, id);
-      if (probed) await probeAndStoreAccount(db, probed, encryptionKey);
-    } catch (e) {
-      console.warn(`[Account] Failed to probe features for "${name}": ${e}`);
-    }
-  }
-
+  if (body.api_token || body.api_key || body.email || (body.auth_type && body.auth_type !== account.auth_type)) await credentials(c.env).update(account.credential_id!, { auth_type: body.auth_type, api_token: body.api_token, api_key: body.api_key, email: body.email });
+  const verified = body.account_id === undefined ? undefined : await validateManualAccount(await accountRequest({ ...(await getAccountById(c.env.DB, id))!, is_enabled: 1 }, c.env.ENCRYPTION_KEY), body.account_id);
+  await updateAccount(c.env.DB, id, { name: body.name, account_id: verified?.id, ...(verified ? { is_active: 1, access_status: 'available', last_checked_at: new Date().toISOString() } : {}), proxy_url: body.proxy_url, proxy_enabled: body.proxy_enabled, is_enabled: body.is_enabled === undefined ? undefined : body.is_enabled ? 1 : 0, enabled_features: body.enabled_features, worker_plan: body.worker_plan === undefined ? undefined : normalizeWorkerPlan(body.worker_plan) });
+  await invalidateAccountCaches(c.env);
+  await addAuditLog(c.env.DB, { account_id: id, action: 'update_account', target: account.name, detail: 'Updated account binding', status: 'success' });
   return c.json({ success: true });
 });
 
@@ -249,6 +103,7 @@ app.patch('/:id/features', async (c) => {
 
   await updateAccount(db, id, { enabled_features });
   await addAuditLog(db, { account_id: id, action: 'update_features', target: account.name, detail: enabled_features, status: 'success' });
+  await invalidateAccountCaches(c.env);
   return c.json({ success: true });
 });
 
@@ -263,39 +118,36 @@ app.delete('/:id', async (c) => {
 
   await addAuditLog(db, { account_id: id, action: 'delete_account', target: account.name, status: 'success' });
   await deleteAccount(db, id);
+  await invalidateAccountCaches(c.env);
   return c.json({ success: true });
 });
 
-app.post('/:id/test', async (c) => {
-  const db = c.env.DB;
-  const id = parseInt(c.req.param('id'), 10);
-  const account = await getAccountById(db, id);
+async function testBinding(db: D1Database, account: Account, encryptionKey: string): Promise<void> {
+  const request = await accountRequest({ ...account, is_enabled: 1 }, encryptionKey);
+  let accountId = account.account_id;
+  if (!accountId) {
+    const discovery = await discoverAccounts(request, account.auth_type);
+    if (discovery.accounts.length !== 1) throw Object.assign(new Error('Specify an Account ID or sync the credential to select its Accounts'), { statusCode: 400, code: 'ACCOUNT_ID_REQUIRED' });
+    accountId = discovery.accounts[0].id;
+  }
+  await validateManualAccount(request, accountId);
+  await updateAccount(db, account.id, { account_id: accountId, is_active: 1, access_status: 'available', last_checked_at: new Date().toISOString() });
+  if (account.credential_id) await updateCredential(db, account.credential_id, { status: 'active', last_checked_at: new Date().toISOString() }, encryptionKey);
+  await probeAndStoreAccount(db, { ...(await getAccountById(db, account.id))!, is_enabled: 1 }, encryptionKey);
+}
+
+app.post('/:id/test', async c => {
+  const account = await getAccountById(c.env.DB, Number(c.req.param('id')));
   if (!account) return c.json({ error: { code: 'NOT_FOUND', message: 'Account not found' } }, 404);
-
-  const user = await cfFetch(account, '/user', c.env.ENCRYPTION_KEY);
-
-  if (!account.account_id) {
-    try {
-      const data = await cfFetch<{ result: any[] }>(account, '/accounts?page=1&per_page=10', c.env.ENCRYPTION_KEY);
-      if (data.result?.length > 0) {
-        await updateAccount(db, id, { account_id: data.result[0].id });
-      }
-    } catch (e) {
-      console.warn(`[Account] Failed to fetch account list: ${e}`);
-    }
-  }
-
-  await updateAccount(db, id, { is_active: 1 });
-
-  // 探测可用功能（R2…）与计划类型（订阅列表）：计划探测需 Billing 读权限，探测不到保留现有值
   try {
-    const fresh = await getAccountById(db, id);
-    if (fresh) await probeAndStoreAccount(db, fresh, c.env.ENCRYPTION_KEY);
-  } catch (e) {
-    console.warn(`[Account] Failed to probe features for account ${id}: ${e}`);
+    await testBinding(c.env.DB, account, c.env.ENCRYPTION_KEY);
+    await invalidateAccountCaches(c.env);
+    return c.json({ success: true });
+  } catch (err) {
+    if (['invalid', 'permission'].includes(errorDetails(err).kind)) await updateAccount(c.env.DB, account.id, { is_active: 0, access_status: 'unauthorized', last_checked_at: new Date().toISOString() });
+    await invalidateAccountCaches(c.env);
+    throw err;
   }
-
-  return c.json({ user });
 });
 
 // ============ 清除 AI 配额耗尽标记 ============
@@ -311,6 +163,7 @@ app.post('/:id/clear-exhausted', async (c) => {
   }
   await clearExhausted(db, id, 'ai_neurons');
   try { await addAuditLog(db, { account_id: id, action: 'clear_exhausted', target: account.name, detail: 'ai_neurons', status: 'success' }); } catch {}
+  await invalidateAccountCaches(c.env);
   return c.json({ success: true, message: '已清除 AI 配额耗尽标记' });
 });
 
@@ -376,35 +229,13 @@ app.post('/test-batch', async (c) => {
 
   async function testOne(account: { id: number; name: string }): Promise<void> {
     try {
-      const full = await getAccountById(db, account.id);
-      if (!full) throw new Error('Account not found');
-      await cfFetch(full, '/user', encryptionKey);
-      // 自动获取 account_id
-      if (!full.account_id) {
-        try {
-          const data = await cfFetch<{ result: any[] }>(full, '/accounts?page=1&per_page=10', encryptionKey);
-          if (data.result?.length > 0) {
-            await updateAccount(db, account.id, { account_id: data.result[0].id });
-          }
-        } catch (e) {
-          console.warn(`[Account:TestBatch] Failed to fetch account_id for "${account.name}": ${e}`);
-        }
-      }
-      await updateAccount(db, account.id, { is_active: 1 });
-
-      // 探测可用功能（R2…）与计划类型：计划探测需 Billing 读权限，探测不到保留现有值
-      try {
-        const fresh = await getAccountById(db, account.id);
-        if (fresh) await probeAndStoreAccount(db, fresh, encryptionKey);
-      } catch (e) {
-        console.warn(`[Account:TestBatch] Failed to probe features for "${account.name}": ${e}`);
-      }
+      await testBinding(db, (await getAccountById(db, account.id))!, encryptionKey);
 
       await addAuditLog(db, { account_id: account.id, action: 'test_account', target: account.name, detail: 'batch', status: 'success' });
       results.push({ id: account.id, name: account.name, status: 'success' });
     } catch (e: any) {
       // 测试失败：标记为未活跃
-      await updateAccount(db, account.id, { is_active: 0 });
+      if (['invalid', 'permission'].includes(errorDetails(e).kind)) await updateAccount(db, account.id, { is_active: 0, access_status: 'unauthorized' });
       await addAuditLog(db, { account_id: account.id, action: 'test_account', target: account.name, detail: `batch: ${e?.message || e}`, status: 'error' });
       results.push({ id: account.id, name: account.name, status: 'error', message: e?.message || String(e) });
     }
@@ -424,6 +255,7 @@ app.post('/test-batch', async (c) => {
     error: results.filter(r => r.status === 'error').length,
   };
   console.log(`[Account:TestBatch] 批量测试完成: 共 ${summary.total}，成功 ${summary.success}，失败 ${summary.error}`);
+  await invalidateAccountCaches(c.env);
   return c.json({ summary, results });
 });
 
@@ -454,6 +286,7 @@ app.post('/batch/features', async (c) => {
       results.push({ id, name: account.name, status: 'error', message: e?.message || String(e) });
     }
   }
+  await invalidateAccountCaches(c.env);
   return c.json({ summary: { total: results.length, success: results.filter(r => r.status === 'success').length, skipped: results.filter(r => r.status === 'skipped').length, error: results.filter(r => r.status === 'error').length }, results });
 });
 
@@ -481,6 +314,7 @@ app.post('/batch/delete', async (c) => {
       results.push({ id, name: account.name, status: 'error', message: e?.message || String(e) });
     }
   }
+  await invalidateAccountCaches(c.env);
   return c.json({ summary: { total: results.length, success: results.filter(r => r.status === 'success').length, skipped: results.filter(r => r.status === 'skipped').length, error: results.filter(r => r.status === 'error').length }, results });
 });
 
@@ -514,6 +348,7 @@ app.post('/batch/proxy', async (c) => {
       results.push({ id, name: account.name, status: 'error', message: e?.message || String(e) });
     }
   }
+  await invalidateAccountCaches(c.env);
   return c.json({ summary: { total: results.length, success: results.filter(r => r.status === 'success').length, skipped: results.filter(r => r.status === 'skipped').length, error: results.filter(r => r.status === 'error').length }, results });
 });
 
@@ -555,7 +390,7 @@ app.get('/export-csv', async (c) => {
 
   // 2) 组装 CSV
   const hasTokenAccount = accounts.some(a => a.auth_type === 'token' && !!a.api_token);
-  const header = ['name', 'email', 'globalKey', ...(hasTokenAccount ? ['apiToken'] : [])];
+  const header = ['name', 'accountId', 'email', 'globalKey', ...(hasTokenAccount ? ['apiToken'] : [])];
   const lines: string[] = [header.join(',')];
   for (const a of accounts) {
     let apiKey = '';
@@ -569,7 +404,7 @@ app.get('/export-csv', async (c) => {
         console.warn(`[Account:Export] 解密凭证失败 id=${a.id}，该行凭证留空: ${e?.message || e}`);
       }
     }
-    const cells = [a.name, a.email || '', apiKey];
+    const cells = [a.name, a.account_id || '', a.email || '', apiKey];
     if (hasTokenAccount) cells.push(apiToken);
     lines.push(cells.map(toCsvCell).join(','));
   }
@@ -646,6 +481,7 @@ app.post('/import-csv', async (c) => {
   const apiKeyIdx = col('globalkey');
   const apiTokenIdx = col('apitoken');
   const nameIdx = col('name');
+  const accountIdIdx = col('accountid', 'account_id');
 
   if (apiKeyIdx === -1 && apiTokenIdx === -1) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'CSV 必须包含 globalKey 或 apiToken 列' } }, 400);
@@ -668,6 +504,7 @@ app.post('/import-csv', async (c) => {
     apiKey: string;
     apiToken: string;
     name: string;
+    accountId: string;
     result: { email: string; name: string; status: 'success' | 'skipped' | 'error'; message?: string };
   }
   const pendingTasks: ImportTask[] = [];
@@ -677,6 +514,7 @@ app.post('/import-csv', async (c) => {
     const email = cell(emailIdx);
     const apiKey = cell(apiKeyIdx);
     const apiToken = cell(apiTokenIdx);
+    const accountId = cell(accountIdIdx);
     // token 认证（只有 apiToken）允许没有邮箱，故名称兜底为占位名
     const authType: 'token' | 'global_key' = !apiKey && apiToken ? 'token' : 'global_key';
     const name = cell(nameIdx) || (email ? nameFromEmail(email) : `未命名账户-${i + 1}`);
@@ -691,7 +529,7 @@ app.post('/import-csv', async (c) => {
     }
 
     // 同批次内去重
-    const dedupeKey = authType === 'token' ? `token:${apiToken}` : `email:${email}`;
+    const dedupeKey = `${authType === 'token' ? `token:${apiToken}` : `email:${email}`}:${accountId}`;
     if (seenKeys.has(dedupeKey)) {
       results.push({ email, name, status: 'skipped', message: authType === 'token' ? 'CSV 内重复的 apiToken' : 'CSV 内重复邮箱' });
       continue;
@@ -700,70 +538,33 @@ app.post('/import-csv', async (c) => {
 
     // 数据库去重
     if (authType === 'global_key') {
-      if (await getAccountByEmail(db, email)) {
+      if ((await getAllAccounts(db)).some(a => a.auth_type === authType && a.email === email && (!accountId || a.account_id === accountId))) {
         results.push({ email, name, status: 'skipped', message: '数据库已存在该邮箱' });
         continue;
       }
-    } else if (await tokenAccountExists(db, apiToken, encryptionKey)) {
+    } else if (await tokenAccountExists(db, apiToken, encryptionKey, accountId)) {
       results.push({ email, name, status: 'skipped', message: '数据库已存在该 apiToken' });
       continue;
     }
 
     pendingTasks.push({
-      authType, email, apiKey, apiToken, name,
+      authType, email, apiKey, apiToken, name, accountId,
       result: { email, name, status: 'success' },
     });
   }
 
   // 处理单个任务：验证凭证 + 入库 + 自动获取 account_id
   async function processTask(task: ImportTask): Promise<void> {
-    const { authType, email, apiKey, apiToken, name } = task;
+    const { authType, email, apiKey, apiToken, name, accountId } = task;
     try {
-      // 验证 Cloudflare 凭证（可跳过）
+      let id: number;
       if (!skipVerify) {
-        try {
-          const verifyRes = await fetch('https://api.cloudflare.com/client/v4/user', {
-            headers: authType === 'token'
-              ? { Authorization: `Bearer ${apiToken}` }
-              : { 'X-Auth-Email': email, 'X-Auth-Key': apiKey },
-          });
-          if (!verifyRes.ok) {
-            const body = await verifyRes.text();
-            task.result = { email, name, status: 'error', message: `凭证验证失败 (${verifyRes.status}): ${body.slice(0, 200)}` };
-            return;
-          }
-        } catch (e: any) {
-          task.result = { email, name, status: 'error', message: `凭证验证请求失败: ${e?.message || e}` };
-          return;
-        }
-      }
-      // 保存到数据库
-      const input: any = {
-        name,
-        auth_type: authType,
-        email: email || undefined,
-      };
-      if (authType === 'token') input.api_token = await encrypt(apiToken, encryptionKey);
-      else input.api_key = await encrypt(apiKey, encryptionKey);
-      const id = await createAccount(db, input);
-
-      // 自动获取 account_id
-      if (!skipVerify) {
-        try {
-          const saved = await getAccountById(db, id);
-          if (saved) {
-            const data = await cfFetch<{ result: any[] }>(saved, '/accounts?page=1&per_page=10', encryptionKey);
-            if (data.result?.length > 0) {
-              await updateAccount(db, id, { account_id: data.result[0].id });
-              console.log(`[Account:Import] Auto-fetched account_id=${data.result[0].id} for "${name}"`);
-            }
-            await updateAccount(db, id, { is_active: 1 });
-          }
-        } catch (e) {
-          console.warn(`[Account:Import] Failed to auto-fetch account_id for "${name}": ${e}`);
-        }
+        const saved = await credentials(c.env).save({ name, auth_type: authType, email, api_token: apiToken, api_key: apiKey, account_id: accountId || undefined });
+        id = saved.id;
+        await updateAccount(db, id, { name });
       } else {
-        // 跳过验证模式：标记为未验证，后续通过「测试」按钮激活
+        const input = { name, auth_type: authType, account_id: accountId || undefined, email: email || undefined, api_token: authType === 'token' ? await encrypt(apiToken, encryptionKey) : undefined, api_key: authType === 'global_key' ? await encrypt(apiKey, encryptionKey) : undefined };
+        id = await createAccount(db, input, encryptionKey);
         await updateAccount(db, id, { is_active: 0 });
       }
 
@@ -791,16 +592,17 @@ app.post('/import-csv', async (c) => {
     error: results.filter(r => r.status === 'error').length,
   };
   console.log(`[Account:Import] CSV 批量导入完成${skipVerify ? ' (skipVerify)' : ''}: 共 ${summary.total}，成功 ${summary.success}，跳过 ${summary.skipped}，失败 ${summary.error}`);
+  await invalidateAccountCaches(c.env);
   return c.json({ summary, results });
 });
 
 /**
  * token 认证账户的密文含随机 IV，无法直接比对密文，需解密后比较明文
  */
-async function tokenAccountExists(db: D1Database, apiToken: string, encryptionKey: string): Promise<boolean> {
+async function tokenAccountExists(db: D1Database, apiToken: string, encryptionKey: string, accountId = ''): Promise<boolean> {
   const accounts = await getAllAccounts(db);
   const tokens = await Promise.all(
-    accounts.filter(a => a.auth_type === 'token' && a.api_token).map(a => decrypt(a.api_token as string, encryptionKey).catch(() => null)),
+    accounts.filter(a => a.auth_type === 'token' && a.api_token && (!accountId || a.account_id === accountId)).map(a => decrypt(a.api_token as string, encryptionKey).catch(() => null)),
   );
   return tokens.includes(apiToken);
 }

@@ -19,6 +19,20 @@ export function getDb(): Database.Database {
 export function initDb(): void {
   const db = getDb();
   db.exec(`
+    CREATE TABLE IF NOT EXISTS credentials (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      auth_type TEXT NOT NULL CHECK(auth_type IN ('token', 'global_key')),
+      api_token TEXT,
+      api_key TEXT,
+      email TEXT,
+      fingerprint TEXT UNIQUE,
+      legacy_account_id INTEGER UNIQUE,
+      status TEXT DEFAULT 'unknown',
+      last_checked_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS accounts (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
       name            TEXT NOT NULL,
@@ -33,6 +47,10 @@ export function initDb(): void {
       worker_plan     TEXT DEFAULT 'free',
       proxy_url       TEXT DEFAULT '',
       proxy_enabled   INTEGER DEFAULT 0,
+      credential_id   INTEGER REFERENCES credentials(id),
+      is_enabled      INTEGER DEFAULT 1,
+      access_status   TEXT DEFAULT 'unknown',
+      last_checked_at DATETIME,
       created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -100,6 +118,18 @@ export function initDb(): void {
   `);
 
   applyMigrations(db);
+  // Copy ciphertext verbatim and preserve Account IDs / foreign keys. All steps are atomic.
+  db.transaction(() => {
+    db.exec(`
+      INSERT OR IGNORE INTO credentials (name, auth_type, api_token, api_key, email, legacy_account_id, created_at, updated_at)
+      SELECT name, auth_type, api_token, api_key, email, id, created_at, updated_at FROM accounts WHERE credential_id IS NULL;
+      UPDATE accounts SET credential_id = (SELECT id FROM credentials WHERE legacy_account_id = accounts.id) WHERE credential_id IS NULL;
+      UPDATE accounts SET api_token = NULL, api_key = NULL WHERE credential_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_accounts_credential ON accounts(credential_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_binding ON accounts(credential_id, account_id);
+    `);
+    db.prepare('INSERT OR IGNORE INTO _migrations (version) VALUES (?)').run('0011_credentials_backfill');
+  })();
 }
 
 // 版本化迁移（P1-17 / P1-18）：每条仅执行一次，记录于 _migrations 表。
@@ -115,6 +145,10 @@ type Migration = {
   kind?: 'add' | 'drop';
 };
 const MIGRATIONS: Migration[] = [
+  { version: '0011_accounts_credential_id', table: 'accounts', column: 'credential_id', sql: 'ALTER TABLE accounts ADD COLUMN credential_id INTEGER REFERENCES credentials(id);' },
+  { version: '0011_accounts_is_enabled', table: 'accounts', column: 'is_enabled', sql: 'ALTER TABLE accounts ADD COLUMN is_enabled INTEGER DEFAULT 1;' },
+  { version: '0011_accounts_access_status', table: 'accounts', column: 'access_status', sql: "ALTER TABLE accounts ADD COLUMN access_status TEXT DEFAULT 'unknown';" },
+  { version: '0011_accounts_last_checked_at', table: 'accounts', column: 'last_checked_at', sql: 'ALTER TABLE accounts ADD COLUMN last_checked_at DATETIME;' },
   { version: '0001_accounts_enabled_features', table: 'accounts', column: 'enabled_features', sql: "ALTER TABLE accounts ADD COLUMN enabled_features TEXT DEFAULT 'ai,workers,browser_render,dns,storage';" },
   // 注：历史上此处有 0002_accounts_password（ADD COLUMN password），该字段已废弃并移除，
   // 见下方 0008 的删列迁移；已部署库 `_migrations` 中的 0002 记录留着无害。

@@ -308,9 +308,9 @@ router.post('/:accountId/r2/:bucket/bulk-delete', async (req: Request, res: Resp
     if (!account) return;
     const { keys } = req.body;
     if (!Array.isArray(keys)) { res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'keys must be an array' } }); return; }
-    await bulkDeleteR2Objects(account, p(req, 'bucket'), keys);
+    const results = await bulkDeleteR2Objects(account, p(req, 'bucket'), keys);
     createAuditLog(account.id, 'r2_bulk_delete', p(req, 'bucket'), `${keys.length} objects`, 'success');
-    res.json({ success: true });
+    res.json({ success: true, total: results.length, succeeded: results.filter(r => r.success).length, failed: results.filter(r => !r.success).length, results });
   } catch (err) { next(err); }
 });
 

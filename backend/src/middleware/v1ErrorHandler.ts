@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { appLogger } from '../services/logger';
+import { errorDetails } from '../services/cfErrors';
 
 /**
  * Error handler for OpenAI-compatible routes (/v1, /api/v1).
@@ -10,9 +11,7 @@ import { appLogger } from '../services/logger';
  * so we accept `any` and type-narrow to AppError.
  */
 export function v1ErrorHandler(err: any, req: Request, res: Response, _next: NextFunction): void {
-  const statusCode = (err && typeof err === 'object' && err.statusCode) || 500;
-  const code = (err && typeof err === 'object' && err.code) || 'INTERNAL_ERROR';
-  const message = (err && typeof err === 'object' && err.message) || String(err);
+  const { statusCode, code, message } = errorDetails(err);
   appLogger.error(`[V1 ${code}] ${req.method} ${req.originalUrl} - ${message}`);
   if (res.headersSent) return;
   res.status(statusCode).json({

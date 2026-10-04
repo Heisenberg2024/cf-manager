@@ -135,10 +135,9 @@ function bindingTagType(type: CatalogBindingType) {
   border-radius: 12px;
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  transition: border-color 0.15s ease;
 }
 .store-card:hover {
-  transform: translateY(-3px);
   box-shadow: var(--glass-shadow-hover) !important;
   border-color: var(--theme-primary-hover) !important;
 }
@@ -149,7 +148,7 @@ function bindingTagType(type: CatalogBindingType) {
   width: 26px;
   height: 26px;
   border-radius: 6px;
-  background: linear-gradient(135deg, var(--primary-color) 0%, #7c5cff 100%);
+  background: var(--theme-primary);
   color: #fff;
   font-size: 15px;
 }

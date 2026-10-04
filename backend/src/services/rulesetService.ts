@@ -7,6 +7,7 @@ export interface GenericRuleInput {
   action: string;
   action_parameters: any;
   enabled?: boolean;
+  ratelimit?: Record<string, unknown>;
 }
 
 // Account 级 Phase（使用 /accounts/{account_id}/rulesets，kind: 'root'）
@@ -21,7 +22,7 @@ function isAccountLevelPhase(phase: string): boolean {
 }
 
 /** 获取指定 phase 的 ruleset ID，不存在则创建 */
-async function getRulesetId(account: Account, zoneId: string, phase: string, name: string): Promise<string> {
+async function getRulesetId(account: Account, zoneId: string, phase: string, name: string, createIfMissing = true): Promise<string> {
   const cf = getCfClient(account);
   const accountLevel = isAccountLevelPhase(phase);
   if (accountLevel && !account.account_id) {
@@ -33,6 +34,7 @@ async function getRulesetId(account: Account, zoneId: string, phase: string, nam
   for await (const r of cf.rulesets.list(scope as any)) { list.push(r); }
   const existing = list.find((r) => r.phase === phase);
   if (existing) return existing.id;
+  if (!createIfMissing) throw Object.assign(new Error('Ruleset not found'), { statusCode: 404, code: 'RULESET_NOT_FOUND' });
 
   const created = await cf.rulesets.create({
     ...scope,
@@ -46,12 +48,17 @@ async function getRulesetId(account: Account, zoneId: string, phase: string, nam
 
 /** 列出指定 phase 的所有规则 */
 export async function listRules(account: Account, zoneId: string, phase: string): Promise<any[]> {
+  try {
   const cf = getCfClient(account);
   const accountLevel = isAccountLevelPhase(phase);
   const scope = accountLevel ? { account_id: account.account_id! } : { zone_id: zoneId };
-  const rsId = await getRulesetId(account, zoneId, phase, `${phase} rules`);
+  const rsId = await getRulesetId(account, zoneId, phase, `${phase} rules`, false);
   const rs: any = await cf.rulesets.get(rsId, scope as any);
   return rs.rules ?? [];
+  } catch (error) {
+    if ((error as { code?: string }).code === 'RULESET_NOT_FOUND') return [];
+    throw error;
+  }
 }
 
 /** 创建规则 */
@@ -66,6 +73,7 @@ export async function createRule(account: Account, zoneId: string, phase: string
     expression: input.expression,
     action: input.action,
     action_parameters: input.action_parameters,
+    ratelimit: input.ratelimit,
     enabled: input.enabled ?? true,
   } as any);
 }
@@ -75,14 +83,15 @@ export async function updateRule(account: Account, zoneId: string, phase: string
   const cf = getCfClient(account);
   const accountLevel = isAccountLevelPhase(phase);
   const scope = accountLevel ? { account_id: account.account_id! } : { zone_id: zoneId };
-  const rsId = await getRulesetId(account, zoneId, phase, `${phase} rules`);
+  const rsId = await getRulesetId(account, zoneId, phase, `${phase} rules`, false);
   return await cf.rulesets.rules.edit(rsId, ruleId, {
     ...scope,
     description: input.description,
     expression: input.expression,
     action: input.action,
     action_parameters: input.action_parameters,
-    enabled: input.enabled ?? true,
+    ratelimit: input.ratelimit,
+    enabled: input.enabled,
   } as any);
 }
 
@@ -91,6 +100,6 @@ export async function deleteRule(account: Account, zoneId: string, phase: string
   const cf = getCfClient(account);
   const accountLevel = isAccountLevelPhase(phase);
   const scope = accountLevel ? { account_id: account.account_id! } : { zone_id: zoneId };
-  const rsId = await getRulesetId(account, zoneId, phase, `${phase} rules`);
+  const rsId = await getRulesetId(account, zoneId, phase, `${phase} rules`, false);
   return await cf.rulesets.rules.delete(rsId, ruleId, scope as any);
 }

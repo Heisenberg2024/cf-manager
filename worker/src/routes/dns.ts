@@ -1,29 +1,36 @@
 import { Hono } from 'hono';
 import type { Env } from '../types';
 import { getActiveAccountsByFeature, addAuditLog, getAccountById } from '../db/models';
-import { cfFetch, cfFetchAll } from '../services/cfApi';
+import { cfFetch, cfFetchAll, accountRequest } from '../services/cfApi';
 import { listRules, createRule, updateRule, deleteRule } from '../services/rulesetService';
 import { isDemoAccount } from '../services/demo';
 
+import { mapConcurrent } from '../utils/concurrent';
+import { readZoneSettings, writeZoneSettings } from '../services/zoneSettings';
+
 const app = new Hono<{ Bindings: Env }>();
+function zoneContext(c: { req: { query(name: string): string | undefined } }) {
+  return { accountId: Number(c.req.query('accountId')) || undefined, zoneId: c.req.query('zoneId') };
+}
 
 const ZONES_CACHE_KEY = 'dns_zones_all';
 const ZONES_CACHE_TTL = 300; // 5 minutes
 
-async function getAllZones(db: D1Database, encryptionKey: string, kv: KVNamespace): Promise<any[]> {
+async function getAllZones(db: D1Database, encryptionKey: string, kv: KVNamespace, refresh = false): Promise<any[]> {
   const cached = await kv.get(ZONES_CACHE_KEY, 'json');
-  if (cached) return cached as any[];
+  if (cached && !refresh) return cached as any[];
 
   const accounts = await getActiveAccountsByFeature(db, 'dns');
-  const results = await Promise.all(accounts.map(async (account) => {
+  const results = await mapConcurrent(accounts, 3, async (account) => {
     try {
-      const zones = await cfFetchAll<any>(account, '/zones', encryptionKey, 100);
-      return zones.map(z => ({ ...z, cfAccountId: account.id, accountName: account.name }));
+      if (!account.account_id) return [];
+      const zones = await cfFetchAll<any>(account, `/zones?account.id=${account.account_id}`, encryptionKey, 50);
+      return zones.filter(z => z.account?.id === account.account_id).map(z => ({ ...z, status: z.paused ? 'paused' : z.status, cfAccountId: account.id, accountName: account.name }));
     } catch (e) {
       console.error(`Failed to fetch zones for ${account.name}: ${e}`);
       return [];
     }
-  }));
+  });
   const allZones = results.flat();
 
   await kv.put(ZONES_CACHE_KEY, JSON.stringify(allZones), { expirationTtl: ZONES_CACHE_TTL });
@@ -34,9 +41,11 @@ async function invalidateZonesCache(kv: KVNamespace) {
   await kv.delete(ZONES_CACHE_KEY);
 }
 
-async function findAccountByDomain(db: D1Database, domain: string, encryptionKey: string, kv: KVNamespace) {
+async function findAccountByDomain(db: D1Database, domain: string, encryptionKey: string, kv: KVNamespace, context: { accountId?: number; zoneId?: string } = {}) {
   const zones = await getAllZones(db, encryptionKey, kv);
-  const zone = zones.find((z: any) => z.name === domain);
+  const matches = zones.filter((z: any) => z.name === domain && (!context.accountId || z.cfAccountId === context.accountId) && (!context.zoneId || z.id === context.zoneId));
+  if (matches.length > 1) throw Object.assign(new Error(`Domain ${domain} has multiple local Account bindings; specify accountId and zoneId`), { statusCode: 409, code: 'AMBIGUOUS_ACCOUNT' });
+  const zone = matches[0];
   if (!zone) throw Object.assign(new Error(`Domain ${domain} not found`), { statusCode: 404 });
   const accounts = await getActiveAccountsByFeature(db, 'dns');
   const account = accounts.find(a => a.id === zone.cfAccountId);
@@ -45,19 +54,18 @@ async function findAccountByDomain(db: D1Database, domain: string, encryptionKey
 }
 
 app.get('/domains', async (c) => {
-  const zones = await getAllZones(c.env.DB, c.env.ENCRYPTION_KEY, c.env.KV);
+  const zones = await getAllZones(c.env.DB, c.env.ENCRYPTION_KEY, c.env.KV, c.req.query('refresh') === 'true');
   return c.json(zones);
 });
 
 app.get('/domains/:domain/records', async (c) => {
-  const { account, zoneId } = await findAccountByDomain(c.env.DB, c.req.param('domain'), c.env.ENCRYPTION_KEY, c.env.KV);
-  const data = await cfFetch<{ result: any[] }>(account, `/zones/${zoneId}/dns_records?per_page=1000`, c.env.ENCRYPTION_KEY);
-  return c.json(data.result || []);
+  const { account, zoneId } = await findAccountByDomain(c.env.DB, c.req.param('domain'), c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
+  return c.json(await cfFetchAll(account, `/zones/${zoneId}/dns_records`, c.env.ENCRYPTION_KEY, 100));
 });
 
 app.post('/domains/:domain/records', async (c) => {
   const domain = c.req.param('domain');
-  const { account, zoneId } = await findAccountByDomain(c.env.DB, domain, c.env.ENCRYPTION_KEY, c.env.KV);
+  const { account, zoneId } = await findAccountByDomain(c.env.DB, domain, c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
   if (isDemoAccount(account.id, c.env.DEMO_ACCOUNT_IDS)) {
     return c.json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可新增 DNS 记录' } }, 403);
   }
@@ -72,13 +80,13 @@ app.post('/domains/:domain/records', async (c) => {
 app.put('/domains/:domain/records/:id', async (c) => {
   const domain = c.req.param('domain');
   const recordId = c.req.param('id');
-  const { account, zoneId } = await findAccountByDomain(c.env.DB, domain, c.env.ENCRYPTION_KEY, c.env.KV);
+  const { account, zoneId } = await findAccountByDomain(c.env.DB, domain, c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
   if (isDemoAccount(account.id, c.env.DEMO_ACCOUNT_IDS)) {
     return c.json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可修改 DNS 记录' } }, 403);
   }
   const body = await c.req.json();
   const data = await cfFetch(account, `/zones/${zoneId}/dns_records/${recordId}`, c.env.ENCRYPTION_KEY, {
-    method: 'PUT', body: JSON.stringify(body),
+    method: 'PATCH', body: JSON.stringify(body),
   });
   await addAuditLog(c.env.DB, { account_id: account.id, action: 'update_dns', target: domain, detail: `${body.type || ''} ${body.name || ''} → ${body.content || ''}`, status: 'success' });
   return c.json(data.result);
@@ -87,7 +95,7 @@ app.put('/domains/:domain/records/:id', async (c) => {
 app.delete('/domains/:domain/records/:id', async (c) => {
   const domain = c.req.param('domain');
   const recordId = c.req.param('id');
-  const { account, zoneId } = await findAccountByDomain(c.env.DB, domain, c.env.ENCRYPTION_KEY, c.env.KV);
+  const { account, zoneId } = await findAccountByDomain(c.env.DB, domain, c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
   if (isDemoAccount(account.id, c.env.DEMO_ACCOUNT_IDS)) {
     return c.json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可删除 DNS 记录' } }, 403);
   }
@@ -97,9 +105,8 @@ app.delete('/domains/:domain/records/:id', async (c) => {
 });
 
 app.get('/domains/:domain/settings', async (c) => {
-  const { account, zoneId } = await findAccountByDomain(c.env.DB, c.req.param('domain'), c.env.ENCRYPTION_KEY, c.env.KV);
-  const data = await cfFetch(account, `/zones/${zoneId}/settings`, c.env.ENCRYPTION_KEY);
-  return c.json(data.result || []);
+  const { account, zoneId } = await findAccountByDomain(c.env.DB, c.req.param('domain'), c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
+  return c.json(await readZoneSettings(await accountRequest(account, c.env.ENCRYPTION_KEY), zoneId));
 });
 
 app.patch('/domains/:domain/proxy', async (c) => {
@@ -107,7 +114,7 @@ app.patch('/domains/:domain/proxy', async (c) => {
   if (!body.record_id || typeof body.proxied !== 'boolean') {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'record_id and proxied (boolean) are required' } }, 400);
   }
-  const { account, zoneId } = await findAccountByDomain(c.env.DB, c.req.param('domain'), c.env.ENCRYPTION_KEY, c.env.KV);
+  const { account, zoneId } = await findAccountByDomain(c.env.DB, c.req.param('domain'), c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
   if (isDemoAccount(account.id, c.env.DEMO_ACCOUNT_IDS)) {
     return c.json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可修改 DNS 代理状态' } }, 403);
   }
@@ -192,10 +199,12 @@ app.delete('/domains', async (c) => {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'domains (string[]) is required' } }, 400);
   }
 
+  const selections: Array<{ name: string; accountId?: number; zoneId?: string }> = domains.map((item: string | { name: string; accountId?: number; zoneId?: string }) => typeof item === 'string' ? { name: item, ...zoneContext(c) } : item);
   const results = await batchProcess(
-    domains as string[],
-    async (domain) => {
-      const { account, zoneId } = await findAccountByDomain(c.env.DB, domain, c.env.ENCRYPTION_KEY, c.env.KV);
+    selections,
+    async (selection) => {
+      const domain = selection.name;
+      const { account, zoneId } = await findAccountByDomain(c.env.DB, domain, c.env.ENCRYPTION_KEY, c.env.KV, selection);
       if (isDemoAccount(account.id, c.env.DEMO_ACCOUNT_IDS)) {
         throw new Error('DEMO_PROTECTED: 演示账户不可删除 Zone');
       }
@@ -205,7 +214,9 @@ app.delete('/domains', async (c) => {
   );
 
   const formatted = results.map(r => ({
-    name: r.item,
+    name: r.item.name,
+    accountId: r.item.accountId,
+    zoneId: r.item.zoneId,
     success: !r.error,
     ...(r.error ? { error: r.error } : {}),
   }));
@@ -214,7 +225,7 @@ app.delete('/domains', async (c) => {
   const succeeded = results.filter(r => !r.error);
   if (succeeded.length > 0) {
     const firstAccount = succeeded[0].result!.account;
-    await addAuditLog(c.env.DB, { account_id: firstAccount.id, action: 'batch_delete_zone', target: 'multiple', detail: `deleted ${succeeded.length}/${domains.length} zones: ${domains.join(', ')}`, status: 'success' });
+    await addAuditLog(c.env.DB, { account_id: firstAccount.id, action: 'batch_delete_zone', target: 'multiple', detail: `deleted ${succeeded.length}/${domains.length} zones: ${selections.map(s => `${s.name} (Account ${s.accountId || ''})`).join(', ')}`, status: 'success' });
   }
 
   return c.json({
@@ -228,39 +239,18 @@ app.delete('/domains', async (c) => {
 // 更新 Zone 设置
 app.patch('/domains/:domain/settings', async (c) => {
   const domain = c.req.param('domain');
-  const { account, zoneId } = await findAccountByDomain(c.env.DB, domain, c.env.ENCRYPTION_KEY, c.env.KV);
+  const { account, zoneId } = await findAccountByDomain(c.env.DB, domain, c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
   const body = await c.req.json();
 
-  const SETTING_PATHS: Record<string, string> = {
-    ssl: 'ssl', always_use_https: 'always_use_https', security_level: 'security_level',
-    automatic_https_rewrites: 'automatic_https_rewrites', cache_level: 'cache_level',
-    browser_cache_ttl: 'browser_cache_ttl', development_mode: 'development_mode',
-    minify: 'minify', brotli: 'brotli', zero_rtt: '0rtt',
-  };
-
-  const updated: string[] = [];
-  const failed: string[] = [];
-  for (const [key, value] of Object.entries(body)) {
-    const path = SETTING_PATHS[key];
-    if (!path) { failed.push(key); continue; }
-    try {
-      await cfFetch(account, `/zones/${zoneId}/settings/${path}`, c.env.ENCRYPTION_KEY, {
-        method: 'PATCH', body: JSON.stringify({ value }),
-      });
-      updated.push(key);
-    } catch (_e) {
-      failed.push(key);
-    }
-  }
-
-  await addAuditLog(c.env.DB, { account_id: account.id, action: 'update_zone_settings', target: domain, detail: `updated: ${updated.join(', ') || 'none'}${failed.length ? `, failed: ${failed.join(', ')}` : ''}`, status: 'success' });
-  return c.json({ updated, failed });
+  const result = await writeZoneSettings(await accountRequest(account, c.env.ENCRYPTION_KEY), zoneId, body);
+  await addAuditLog(c.env.DB, { account_id: account.id, action: 'update_zone_settings', target: domain, detail: `updated: ${result.updated.join(', ')}; failed: ${result.failed.join(', ')}`, status: result.failed.length ? 'error' : 'success' });
+  return c.json(result);
 });
 
 // 清除 Zone 缓存
 app.post('/domains/:domain/purge-cache', async (c) => {
   const domain = c.req.param('domain');
-  const { account, zoneId } = await findAccountByDomain(c.env.DB, domain, c.env.ENCRYPTION_KEY, c.env.KV);
+  const { account, zoneId } = await findAccountByDomain(c.env.DB, domain, c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
   const body = await c.req.json();
   const data = await cfFetch<any>(account, `/zones/${zoneId}/purge_cache`, c.env.ENCRYPTION_KEY, {
     method: 'POST', body: JSON.stringify(body),
@@ -272,7 +262,7 @@ app.post('/domains/:domain/purge-cache', async (c) => {
 // 暂停/激活 Zone
 app.patch('/domains/:domain/status', async (c) => {
   const domain = c.req.param('domain');
-  const { account, zoneId } = await findAccountByDomain(c.env.DB, domain, c.env.ENCRYPTION_KEY, c.env.KV);
+  const { account, zoneId } = await findAccountByDomain(c.env.DB, domain, c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
   const body = await c.req.json();
   if (typeof body.paused !== 'boolean') {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'paused (boolean) is required' } }, 400);
@@ -287,32 +277,32 @@ app.patch('/domains/:domain/status', async (c) => {
 // ============ 通用规则引擎 ============
 
 app.get('/domains/:domain/rules/:phase', async (c) => {
-  const { account, zoneId } = await findAccountByDomain(c.env.DB, c.req.param('domain'), c.env.ENCRYPTION_KEY, c.env.KV);
+  const { account, zoneId } = await findAccountByDomain(c.env.DB, c.req.param('domain'), c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
   return c.json(await listRules(account, zoneId, c.req.param('phase'), c.env.ENCRYPTION_KEY));
 });
 
 app.post('/domains/:domain/rules/:phase', async (c) => {
   const body = await c.req.json();
-  const { description, expression, action, action_parameters, enabled } = body;
+  const { description, expression, action, action_parameters, enabled, ratelimit } = body;
   if (!expression || !action) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'expression and action are required' } }, 400);
-  const { account, zoneId } = await findAccountByDomain(c.env.DB, c.req.param('domain'), c.env.ENCRYPTION_KEY, c.env.KV);
-  const rule = await createRule(account, zoneId, c.req.param('phase'), { description, expression, action, action_parameters, enabled }, c.env.ENCRYPTION_KEY);
+  const { account, zoneId } = await findAccountByDomain(c.env.DB, c.req.param('domain'), c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
+  const rule = await createRule(account, zoneId, c.req.param('phase'), { description, expression, action, action_parameters, enabled, ratelimit }, c.env.ENCRYPTION_KEY);
   await addAuditLog(c.env.DB, { account_id: account.id, action: 'create_rule', target: c.req.param('domain'), detail: `phase=${c.req.param('phase')} action=${action}`, status: 'success' });
   return c.json(rule, 201);
 });
 
 app.put('/domains/:domain/rules/:phase/:ruleId', async (c) => {
   const body = await c.req.json();
-  const { description, expression, action, action_parameters, enabled } = body;
+  const { description, expression, action, action_parameters, enabled, ratelimit } = body;
   if (!expression || !action) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'expression and action are required' } }, 400);
-  const { account, zoneId } = await findAccountByDomain(c.env.DB, c.req.param('domain'), c.env.ENCRYPTION_KEY, c.env.KV);
-  const rule = await updateRule(account, zoneId, c.req.param('phase'), c.req.param('ruleId'), { description, expression, action, action_parameters, enabled }, c.env.ENCRYPTION_KEY);
+  const { account, zoneId } = await findAccountByDomain(c.env.DB, c.req.param('domain'), c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
+  const rule = await updateRule(account, zoneId, c.req.param('phase'), c.req.param('ruleId'), { description, expression, action, action_parameters, enabled, ratelimit }, c.env.ENCRYPTION_KEY);
   await addAuditLog(c.env.DB, { account_id: account.id, action: 'update_rule', target: c.req.param('domain'), detail: `phase=${c.req.param('phase')} rule_id=${c.req.param('ruleId')}`, status: 'success' });
   return c.json(rule);
 });
 
 app.delete('/domains/:domain/rules/:phase/:ruleId', async (c) => {
-  const { account, zoneId } = await findAccountByDomain(c.env.DB, c.req.param('domain'), c.env.ENCRYPTION_KEY, c.env.KV);
+  const { account, zoneId } = await findAccountByDomain(c.env.DB, c.req.param('domain'), c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
   if (isDemoAccount(account.id, c.env.DEMO_ACCOUNT_IDS)) {
     return c.json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可删除 WAF 规则' } }, 403);
   }

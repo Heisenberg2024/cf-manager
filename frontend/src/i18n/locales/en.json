@@ -1,4 +1,36 @@
 {
+  "credentials": {
+    "title": "Credentials ({count})",
+    "relationship": "One credential can link multiple independent Cloudflare Accounts. The account table lists real Accounts.",
+    "name": "Credential name",
+    "optionalName": "Optional; defaults to the account name or email",
+    "add": "Add credential and Accounts",
+    "edit": "Edit credential",
+    "keepSecret": "Leave empty to keep the current credential",
+    "sharedWarning": "Changing a credential affects all linked Accounts. Account names, features and enabled state affect only that binding.",
+    "detect": "Verify / discover Accounts",
+    "manual": "Specify Account ID manually",
+    "accountIdHint": "Enter a 32-character hexadecimal Account ID",
+    "fallback": "If enumeration is unavailable, enter an Account ID. Saving verifies access to that specific Account.",
+    "sync": "Verify / sync",
+    "bind": "Link Accounts",
+    "syncResult": "Account synchronization result",
+    "newCount": "Discovered {count} unlinked Accounts. Use Link Accounts to select and add them.",
+    "checkedAt": "Last checked",
+    "delete": "Delete entire credential",
+    "deleteConfirm": "Delete credential \"{name}\" and its {count} local Account bindings: {accounts}. Remote Cloudflare resources are retained. Related local quota data is removed.",
+    "bindingOnly": "Delete only this local Account binding; retain the credential and sibling Accounts.",
+    "enabled": "Enable Account",
+    "status": {
+      "unknown": "Unchecked",
+      "active": "Valid",
+      "invalid": "Invalid",
+      "available": "Accessible",
+      "unauthorized": "Unauthorized",
+      "unavailable": "Unavailable",
+      "error": "Check failed"
+    }
+  },
   "common": {
     "cancel": "Cancel",
     "save": "Save",
@@ -295,6 +327,19 @@
     }
   },
   "dns": {
+    "batch": {
+      "selectPage": "Select current page",
+      "selectAll": "Select all {count} records",
+      "selected": "{count} selected",
+      "edit": "Bulk edit",
+      "result": "DNS batch results",
+      "summary": "{total} records: {success} succeeded, {failed} failed",
+      "confirm": "{action}: Account {account} / Zone {domain}, {count} DNS records. Records: {records} {more}. Deletions cannot be undone.",
+      "more": "and {count} more",
+      "proxyUnsupported": "{name} ({type}) does not support proxying",
+      "proxyTtl": "{name} is proxied; TTL must be automatic (1)",
+      "proxyHint": "Proxy applies to A / AAAA / CNAME. Proxied records use automatic TTL. Inapplicable records are reported individually."
+    },
     "title": "DNS Management",
     "addDomain": "+ Add Domain",
     "selectAccount": "Select account",

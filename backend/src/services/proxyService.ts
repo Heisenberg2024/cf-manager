@@ -196,22 +196,23 @@ export async function proxyFetch(input: string | URL, init?: any, timeoutMs: num
   // Create AbortController for timeout
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const signal = init?.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal;
   
   try {
     if (!agent) {
-      const response = await fetch(input, { ...init, signal: controller.signal }) as unknown as FetchResponse;
+      const response = await fetch(input, { ...init, signal }) as unknown as FetchResponse;
       clearTimeout(timeoutId);
       return response;
     }
 
-    const doFetch = () => nodeFetch(input.toString(), { ...init, agent, timeout: timeoutMs });
+    const doFetch = () => nodeFetch(input.toString(), { ...init, agent, timeout: timeoutMs, signal });
     const result = await doFetch() as unknown as FetchResponse;
     clearTimeout(timeoutId);
     return result;
   } catch (err: any) {
     clearTimeout(timeoutId);
     
-    if (err.code === 'ECONNRESET' || err.code === 'EPIPE') {
+    if ((!init?.method || init.method === 'GET') && (err.code === 'ECONNRESET' || err.code === 'EPIPE')) {
       cachedAgent = undefined;
       cachedUrl = '';
       // 重建 agent 进行重试（优先级与首次请求一致）
@@ -228,13 +229,14 @@ export async function proxyFetch(input: string | URL, init?: any, timeoutMs: num
       // Retry with new agent
       const retryController = new AbortController();
       const retryTimeoutId = setTimeout(() => retryController.abort(), timeoutMs);
+      const retrySignal = init?.signal ? AbortSignal.any([retryController.signal, init.signal]) : retryController.signal;
       try {
         if (!newAgent) {
-          const response = await fetch(input, { ...init, signal: retryController.signal }) as unknown as FetchResponse;
+          const response = await fetch(input, { ...init, signal: retrySignal }) as unknown as FetchResponse;
           clearTimeout(retryTimeoutId);
           return response;
         }
-        const result = await nodeFetch(input.toString(), { ...init, agent: newAgent, timeout: timeoutMs }) as unknown as FetchResponse;
+        const result = await nodeFetch(input.toString(), { ...init, agent: newAgent, timeout: timeoutMs, signal: retrySignal }) as unknown as FetchResponse;
         clearTimeout(retryTimeoutId);
         return result;
       } catch (retryErr) {

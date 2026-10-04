@@ -264,7 +264,6 @@ async function translate() {
       message.error(t('aiTranslate.translateError'));
     }
   } catch (err: any) {
-    console.error('Translation error:', err);
     message.error(err.errorMessage || t('aiTranslate.translateError'));
   } finally {
     loading.value = false;
