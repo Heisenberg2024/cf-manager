@@ -19,6 +19,11 @@ export function getDb(): Database.Database {
 export function initDb(): void {
   const db = getDb();
   db.exec(`
+    CREATE TABLE IF NOT EXISTS dns_batch_executions (
+      id TEXT PRIMARY KEY,
+      expires_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_dns_batch_expires ON dns_batch_executions(expires_at);
     CREATE TABLE IF NOT EXISTS credentials (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -118,6 +123,7 @@ export function initDb(): void {
   `);
 
   applyMigrations(db);
+  db.prepare('INSERT OR IGNORE INTO _migrations (version) VALUES (?)').run('0012_dns_batch_executions');
   // Copy ciphertext verbatim and preserve Account IDs / foreign keys. All steps are atomic.
   db.transaction(() => {
     db.exec(`

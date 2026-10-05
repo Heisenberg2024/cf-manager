@@ -1,10 +1,22 @@
-import apiClient from './client';
+import apiClient, { API_BASE_URL } from './client';
+import { readBatchStream } from '../utils/batchStream';
+import type { BatchSpec, BatchPreview, BatchEvent } from '../shared/dnsBatch';
 
 export interface ZoneContext { accountId?: number; zoneId?: string }
 export interface ZoneSelection extends ZoneContext { name: string }
 const domainPath = (domain: string) => `/dns/domains/${encodeURIComponent(domain)}`;
 
 export const dnsApi = {
+  previewBatch: (spec: BatchSpec) => apiClient.post<BatchPreview>('/dns/batch/preview', spec, {timeout: 0, _silent: true}),
+  async executeBatch(preview: BatchPreview, receive: (event: BatchEvent) => void) {
+    const response = await fetch(`${API_BASE_URL.replace(/\/$/, '')}/dns/batch/execute`, {method: 'POST', headers: {'Content-Type':'application/json', Authorization: `Bearer ${localStorage.getItem('api_token') || ''}`}, body: JSON.stringify(preview)});
+    if(!response.ok) {
+      const body = await response.json();
+      if(response.status === 401 && body.error?.code === 'UNAUTHORIZED') { localStorage.removeItem('api_token'); window.dispatchEvent(new Event('auth-expired')); }
+      throw new Error(body.error?.message || `HTTP ${response.status}`);
+    }
+    await readBatchStream(response, receive);
+  },
   // 现有方法
   getDomains: (refresh = false) => apiClient.get('/dns/domains', { params: refresh ? { refresh: true } : {} }),
   getRecords: (domain: string, context: ZoneContext = {}) => apiClient.get(`${domainPath(domain)}/records`, { params: context }),

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
+import type { BatchZone } from '../shared/dnsBatch';
 import { dnsApi, type ZoneContext, type ZoneSelection } from '../api/dns';
 
 export const useDnsStore = defineStore('dns', () => {
@@ -81,7 +82,14 @@ export const useDnsStore = defineStore('dns', () => {
     await dnsApi.updateStatus(domain, paused, { ...currentContext.value });
     await fetchDomains(true);
   }
-  return { domains, records, currentDomain, currentContext, loading, domainsLoading, recordsError,
+  // Records are never cached outside the active Zone. All other Zones read CF on next open.
+  async function invalidateRecords(zones: BatchZone[]) {
+    if(zones.some(z => isCurrent(z.zoneName, {accountId:z.accountId, zoneId:z.zoneId}))) {
+      records.value = []; ++recordIdentity;
+      await fetchRecords(currentDomain.value, {...currentContext.value});
+    }
+  }
+  return { invalidateRecords, domains, records, currentDomain, currentContext, loading, domainsLoading, recordsError,
     zoneSettings, settingsLoading, settingsError, fetchDomains, fetchRecords, clearSelection, isCurrent,
     createDomains, deleteDomains, fetchZoneSettings, updateZoneSettings, purgeZoneCache, updateZoneStatus };
 });

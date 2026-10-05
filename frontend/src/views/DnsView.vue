@@ -30,7 +30,7 @@
     <n-grid class="dns-grid-container" :cols="24" :x-gap="12" :y-gap="12" responsive="screen" item-responsive>
       <!-- 左侧域名列表 -->
       <n-gi span="24 m:7" class="dns-grid-col">
-        <n-card size="small" class="dns-left-card" content-style="display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 12px;">
+        <n-card size="small" class="dns-left-card" content-class="dns-list-content" content-style="display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 12px;">
           <template #header>
             <n-space align="center" justify="space-between" style="width: 100%">
               <span>{{ t('dns.domainList') }}</span>
@@ -39,101 +39,99 @@
               </n-text>
             </n-space>
           </template>
-          <template #header-extra>
-            <n-button
-              v-if="selectedDomains.size > 0"
-              size="tiny"
-              type="error"
-              @click="handleBatchDelete"
-            >
-              {{ t('dns.deleteSelected', { count: selectedDomains.size }) }}
-            </n-button>
-          </template>
+          <n-space class="dns-zone-actions" :size="6" align="center" style="margin-bottom: 10px">
+            <n-button size="tiny" @click="selectMatchingDomains">{{ t('dns.multi.selectSearch', {count: filteredDomains.filter(d => !isDemoDomain(d)).length}) }}</n-button>
+            <n-dropdown trigger="click" :options="multiDnsOptions" @select="openMultiDns"><n-button size="tiny" :disabled="!selectedDomains.size">{{ t('dns.multi.menu') }} ▾</n-button></n-dropdown>
+            <n-button size="tiny" :disabled="!selectedDomains.size" @click="selectedDomains = new Set()">{{ t('dns.multi.clear') }}</n-button>
+            <n-dropdown trigger="click" :options="[{key:'delete-zones', label:t('dns.multi.deleteZones')}]" @select="handleBatchDelete"><n-button size="tiny" :disabled="!selectedDomains.size">{{ t('dns.multi.more') }} ▾</n-button></n-dropdown>
+          </n-space>
 
-          <n-spin :show="dnsStore.domainsLoading" style="flex: 1 1 0%; min-height: 0; display: flex; flex-direction: column;">
-            <!-- 所有账户模式：分组折叠 -->
-            <template v-if="selectedAccount === '__all__'">
-              <n-collapse v-if="groupedDomains.length > 0" :default-expanded-names="expandedGroups">
-                <n-collapse-item
-                  v-for="group in groupedDomains"
-                  :key="group.accountName"
-                  :name="group.accountName"
-                >
-                  <template #header>
-                    <n-space align="center" :size="4">
-                      <span>{{ group.accountName }}</span>
-                      <n-text depth="3" style="font-size: 12px">({{ group.domains.length }})</n-text>
-                    </n-space>
-                  </template>
-                  <n-list hoverable clickable>
-                    <n-list-item
-                      v-for="d in group.domains"
-                      :key="zoneKey(d)"
-                      @click="selectDomain(d)"
-                      :style="{ background: dnsStore.currentDomain === d.name && dnsStore.currentContext.accountId === d.cfAccountId ? 'var(--n-color-hover)' : '' }"
-                    >
-                      <div style="display: flex; align-items: flex-start; gap: 8px; width: 100%">
-                        <n-checkbox
-                          v-if="!isDemoDomain(d)"
-                          :checked="selectedDomains.has(zoneKey(d))"
-                          @update:checked="(v: boolean) => toggleDomainSelect(zoneKey(d), v)"
-                          @click.stop
-                        />
-                        <div style="flex: 1; min-width: 0">
-                          <div style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ d.name }}</div>
-                          <n-space align="center" :size="4" style="margin-top: 2px">
-                            <span :style="{ color: statusColor(d.status), fontSize: '11px' }">●</span>
-                            <n-text depth="3" style="font-size: 11px">{{ statusLabel(d.status) }}</n-text>
-                            <n-text depth="3" style="font-size: 11px">· {{ d.accountName }}</n-text>
-                          </n-space>
-                        </div>
-                      </div>
-                    </n-list-item>
-                  </n-list>
-                </n-collapse-item>
-              </n-collapse>
-            </template>
-
-            <!-- 单账户模式：平铺列表 -->
-            <template v-else>
-              <n-list v-if="filteredDomains.length > 0" hoverable clickable>
-                <n-list-item
-                  v-for="d in filteredDomains"
-                  :key="zoneKey(d)"
-                  @click="selectDomain(d)"
-                  :style="{ background: dnsStore.currentDomain === d.name && dnsStore.currentContext.accountId === d.cfAccountId ? 'var(--n-color-hover)' : '' }"
-                >
-                  <div style="display: flex; align-items: flex-start; gap: 8px; width: 100%">
-                    <n-checkbox
-                      v-if="!isDemoDomain(d)"
-                      :checked="selectedDomains.has(zoneKey(d))"
-                      @update:checked="(v: boolean) => toggleDomainSelect(zoneKey(d), v)"
-                      @click.stop
-                    />
-                    <div style="flex: 1; min-width: 0">
-                      <div style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ d.name }}</div>
-                      <n-space align="center" :size="4" style="margin-top: 2px">
-                        <span :style="{ color: statusColor(d.status), fontSize: '11px' }">●</span>
-                        <n-text depth="3" style="font-size: 11px">{{ statusLabel(d.status) }}</n-text>
+          <div class="dns-zone-list" role="region" :aria-label="t('dns.domainList')" tabindex="0">
+            <n-spin :show="dnsStore.domainsLoading">
+              <!-- 所有账户模式：分组折叠 -->
+              <template v-if="selectedAccount === '__all__'">
+                <n-collapse v-if="groupedDomains.length > 0" :default-expanded-names="expandedGroups">
+                  <n-collapse-item
+                    v-for="group in groupedDomains"
+                    :key="group.accountName"
+                    :name="group.accountName"
+                  >
+                    <template #header>
+                      <n-space align="center" :size="4">
+                        <span>{{ group.accountName }}</span>
+                        <n-text depth="3" style="font-size: 12px">({{ group.domains.length }})</n-text>
                       </n-space>
-                    </div>
-                  </div>
-                </n-list-item>
-              </n-list>
-            </template>
-
-            <n-empty v-if="!dnsStore.domainsLoading && filteredDomains.length === 0" :description="t('dns.noDomain')" style="margin: 20px 0">
-              <template #extra>
-                <n-button size="small" type="primary" @click="showAddDomainModal = true">{{ t('dns.addDomainBtn') }}</n-button>
+                    </template>
+                    <n-list hoverable clickable>
+                      <n-list-item
+                        v-for="d in group.domains"
+                        :key="zoneKey(d)"
+                        @click="selectDomain(d)"
+                        :style="{ background: dnsStore.currentDomain === d.name && dnsStore.currentContext.accountId === d.cfAccountId ? 'var(--n-color-hover)' : '' }"
+                      >
+                        <div style="display: flex; align-items: flex-start; gap: 8px; width: 100%">
+                          <n-checkbox
+                            v-if="!isDemoDomain(d)"
+                            :checked="selectedDomains.has(zoneKey(d))"
+                            @update:checked="(v: boolean) => toggleDomainSelect(zoneKey(d), v)"
+                            @click.stop
+                          />
+                          <div style="flex: 1; min-width: 0">
+                            <div style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ d.name }}</div>
+                            <n-space align="center" :size="4" style="margin-top: 2px">
+                              <span :style="{ color: statusColor(d.status), fontSize: '11px' }">●</span>
+                              <n-text depth="3" style="font-size: 11px">{{ statusLabel(d.status) }}</n-text>
+                              <n-text depth="3" style="font-size: 11px">· {{ d.accountName }}</n-text>
+                            </n-space>
+                          </div>
+                        </div>
+                      </n-list-item>
+                    </n-list>
+                  </n-collapse-item>
+                </n-collapse>
               </template>
-            </n-empty>
-          </n-spin>
+
+              <!-- 单账户模式：平铺列表 -->
+              <template v-else>
+                <n-list v-if="filteredDomains.length > 0" hoverable clickable>
+                  <n-list-item
+                    v-for="d in filteredDomains"
+                    :key="zoneKey(d)"
+                    @click="selectDomain(d)"
+                    :style="{ background: dnsStore.currentDomain === d.name && dnsStore.currentContext.accountId === d.cfAccountId ? 'var(--n-color-hover)' : '' }"
+                  >
+                    <div style="display: flex; align-items: flex-start; gap: 8px; width: 100%">
+                      <n-checkbox
+                        v-if="!isDemoDomain(d)"
+                        :checked="selectedDomains.has(zoneKey(d))"
+                        @update:checked="(v: boolean) => toggleDomainSelect(zoneKey(d), v)"
+                        @click.stop
+                      />
+                      <div style="flex: 1; min-width: 0">
+                        <div style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ d.name }}</div>
+                        <n-space align="center" :size="4" style="margin-top: 2px">
+                          <span :style="{ color: statusColor(d.status), fontSize: '11px' }">●</span>
+                          <n-text depth="3" style="font-size: 11px">{{ statusLabel(d.status) }}</n-text>
+                        </n-space>
+                      </div>
+                    </div>
+                  </n-list-item>
+                </n-list>
+              </template>
+
+              <n-empty v-if="!dnsStore.domainsLoading && filteredDomains.length === 0" :description="t('dns.noDomain')" style="margin: 20px 0">
+                <template #extra>
+                  <n-button size="small" type="primary" @click="showAddDomainModal = true">{{ t('dns.addDomainBtn') }}</n-button>
+                </template>
+              </n-empty>
+            </n-spin>
+          </div>
         </n-card>
       </n-gi>
 
       <!-- 右侧详情面板 -->
       <n-gi span="24 m:17" class="dns-grid-col">
-        <n-card v-if="dnsStore.currentDomain" size="small" class="dns-right-card" content-style="display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 12px;">
+        <n-card v-if="dnsStore.currentDomain" size="small" class="dns-right-card" content-class="dns-detail-content" content-style="display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 12px;">
           <template #header>
             <n-space align="center">
               <span>{{ dnsStore.currentDomain }}</span>
@@ -154,7 +152,7 @@
               <n-alert v-if="dnsStore.recordsError" type="error" :bordered="false">{{ dnsStore.recordsError }}</n-alert>
               <n-space align="center" style="margin-bottom: 8px; flex-shrink: 0">
                 <n-button size="small" :disabled="batchRunning" @click="selectPageRecords">{{ t('dns.batch.selectPage') }}</n-button>
-                <n-button size="small" :disabled="batchRunning" @click="selectedRecordIds = dnsStore.records.map(r => r.id)">{{ t('dns.batch.selectAll', { count: dnsStore.records.length }) }}</n-button>
+                <n-button size="small" :disabled="batchRunning" @click="selectedRecordIds = filteredRecords.map(r => r.id)">{{ t('dns.batch.selectAll', { count: filteredRecords.length }) }}</n-button>
                 <n-button size="small" :disabled="batchRunning" @click="selectedRecordIds = []">{{ t('common.clearSelection') }}</n-button>
                 <n-text>{{ t('dns.batch.selected', { count: selectedRecordIds.length }) }}</n-text>
                 <n-button size="small" :disabled="!selectedRecordIds.length || currentDomainIsDemo || batchRunning" @click="showBatchRecordEdit = true">{{ t('dns.batch.edit') }}</n-button>
@@ -162,11 +160,15 @@
                 <n-button size="small" :loading="dnsStore.loading" @click="dnsStore.fetchRecords(dnsStore.currentDomain)">{{ t('common.refresh') }}</n-button>
                 <n-button size="small" type="primary" @click="openAddRecordModal">{{ t('dns.addRecord') }}</n-button>
               </n-space>
+              <n-space align="center" style="margin-bottom: 8px; flex-shrink: 0">
+                <n-input v-model:value="recordSearch" :placeholder="t('dns.multi.searchRecords')" clearable size="small" style="width: 220px" />
+                <n-select v-model:value="recordType" :options="recordTypeOptions" :placeholder="t('dns.recordType')" clearable size="small" style="width: 120px" />
+              </n-space>
               <n-progress v-if="batchRunning" type="line" :percentage="Math.round(batchCompleted / Math.max(batchTotal, 1) * 100)" :show-indicator="true" />
               <AutoFitTable
                 style="flex: 1 1 0%; min-height: 0; margin-top: 0;"
                 :columns="recordColumns"
-                :data="dnsStore.records"
+                :data="filteredRecords"
                 :loading="dnsStore.loading"
                 :scroll-x="680"
                 :pagination="{ page: recordPage, pageSize: recordPageSize, showSizePicker: true, pageSizes: [20, 50, 100], onUpdatePage: (page: number) => recordPage = page, onUpdatePageSize: (size: number) => { recordPageSize = size; recordPage = 1; } }"
@@ -345,38 +347,17 @@
           </n-tabs>
         </n-card>
 
-        <n-card v-else size="small" class="dns-right-card" content-style="display: flex; align-items: center; justify-content: center; flex: 1; min-height: 0;">
+        <n-card v-else size="small" class="dns-right-card" content-class="dns-detail-content" content-style="display: flex; align-items: center; justify-content: center; flex: 1; min-height: 0;">
           <n-empty :description="t('dns.selectFromLeft')" style="margin: 40px 0" />
         </n-card>
       </n-gi>
     </n-grid>
 
+    <DnsBatchDialog v-model:show="showMultiDns" :zones="multiTargets" :action="multiAction" @completed="onMultiCompleted" />
     <!-- 添加 DNS 记录 Modal -->
     <n-modal v-model:show="showAddRecordModal" preset="dialog" :title="editingRecordId ? t('dns.editRecordModalTitle') : t('dns.addRecordModalTitle')" style="width: 520px; max-width: 95vw">
       <n-form ref="recordFormRef" :model="newRecord" :rules="recordRules" label-placement="left" label-width="80">
-        <n-form-item :label="t('dns.recordType')" path="type">
-          <n-select v-model:value="newRecord.type" :options="typeOptions" :disabled="!!editingRecordId" />
-        </n-form-item>
-        <n-form-item :label="t('dns.recordName')" path="name">
-          <n-input v-model:value="newRecord.name" :placeholder="t('dns.recordNamePlaceholder')" />
-        </n-form-item>
-        <n-form-item v-if="newRecord.type === 'MX' || newRecord.type === 'SRV'" :label="t('dns.priority')">
-          <n-input-number v-model:value="newRecord.priority" :min="0" :max="65535" />
-        </n-form-item>
-        <n-form-item v-if="newRecord.type === 'SRV'" label="Weight"><n-input-number v-model:value="newRecord.weight" :min="0" :max="65535" /></n-form-item>
-        <n-form-item v-if="newRecord.type === 'SRV'" label="Port"><n-input-number v-model:value="newRecord.port" :min="1" :max="65535" /></n-form-item>
-        <n-form-item :label="t('dns.recordContent')" path="content">
-          <n-input v-model:value="newRecord.content" :placeholder="t('dns.recordContentPlaceholder')" />
-        </n-form-item>
-        <n-form-item :label="t('dns.ttl')">
-          <n-space align="center">
-            <n-input-number v-model:value="newRecord.ttl" :min="60" :max="86400" :disabled="newRecord.proxied" />
-            <n-text v-if="newRecord.proxied" depth="3" style="font-size: 12px">{{ t('dns.ttlAutoHint') }}</n-text>
-          </n-space>
-        </n-form-item>
-        <n-form-item :label="t('dns.proxied')">
-          <n-switch v-model:value="newRecord.proxied" :disabled="!['A', 'AAAA', 'CNAME'].includes(newRecord.type)" />
-        </n-form-item>
+        <DnsRecordFields v-model="newRecord" :lock-type="!!editingRecordId" />
       </n-form>
       <template #action>
         <n-button @click="showAddRecordModal = false">{{ t('common.cancel') }}</n-button>
@@ -460,9 +441,12 @@ import type { DataTableColumns, FormInst, FormRules } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 import { useDnsStore } from '../stores/dnsStore';
 import AutoFitTable from '../components/AutoFitTable.vue';
+import DnsBatchDialog from '../components/DnsBatchDialog.vue';
+import DnsRecordFields from '../components/DnsRecordFields.vue';
+import type { BatchAction, BatchZone } from '../shared/dnsBatch';
 import { dnsApi } from '../api/dns';
 import { accountsApi } from '../api/accounts';
-import { buildDnsRecord } from '../utils/dnsRecord';
+import { buildDnsRecord, DNS_TYPES } from '../utils/dnsRecord';
 import { runBatch, type BatchResult } from '../utils/batchOperation';
 import type { ZoneContext } from '../api/dns';
 import { loadDemoAccounts, isDemoAccount } from '../utils/demoAccounts';
@@ -582,11 +566,28 @@ function onAccountChange(val: string) {
   saveAccount(val);
   dnsStore.clearSelection();
   selectedRecordIds.value = [];
-  selectedDomains.value = new Set();
   if (val === '__all__') {
     expandedGroups.value = groupedDomains.value.map(g => g.accountName);
   }
 }
+
+const showMultiDns = ref(false);
+const multiAction = ref<BatchAction>('create');
+const multiTargets = ref<BatchZone[]>([]);
+const multiDnsOptions = computed(() => ['create', 'update', 'delete', 'proxy', 'ttl'].map(key => ({key, label:t(`dns.multi.${key}`)})));
+function selectMatchingDomains() {
+  for(const domain of filteredDomains.value) if(!isDemoDomain(domain)) selectedDomains.value.add(zoneKey(domain));
+  selectedDomains.value = new Set(selectedDomains.value);
+}
+function openMultiDns(key: string) {
+  multiTargets.value = allDomains.value.filter(d => selectedDomains.value.has(zoneKey(d))).map(d => ({accountId:d.cfAccountId, credentialId:d.credentialId, zoneId:d.id, zoneName:d.name}));
+  multiAction.value = key as BatchAction; showMultiDns.value = true;
+}
+async function onMultiCompleted(zones: BatchZone[]) { await dnsStore.invalidateRecords(zones); }
+watch(() => dnsStore.domains, () => {
+  const present = new Set(allDomains.value.map(zoneKey));
+  selectedDomains.value = new Set([...selectedDomains.value].filter(key => present.has(key)));
+});
 
 // ===== Tab =====
 const activeTab = ref('records');
@@ -612,7 +613,7 @@ const recordRules: FormRules = {
   content: { required: true, message: t('dns.recordContentRequired'), trigger: 'blur' },
 };
 
-const typeOptions = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'SRV', 'NS', 'PTR'].map(t => ({ label: t, value: t }));
+
 
 watch(() => newRecord.value.type, type => { if (!['A', 'AAAA', 'CNAME'].includes(type)) newRecord.value.proxied = false; });
 
@@ -693,7 +694,12 @@ const currentDomainIsDemo = computed(() => {
 
 interface DnsRow { id: string; type: string; name: string; content: string; ttl: number; proxied: boolean }
 const selectedRecordIds = ref<string[]>([]);
+const recordSearch = ref('');
+const recordType = ref<string | null>(null);
+const recordTypeOptions = DNS_TYPES.map(value => ({ label: value, value }));
+const filteredRecords = computed(() => dnsStore.records.filter(r => (!recordType.value || r.type === recordType.value) && (!recordSearch.value || `${r.name} ${r.content || ''} ${JSON.stringify(r.data || '')}`.toLowerCase().includes(recordSearch.value.toLowerCase()))));
 const recordPage = ref(1);
+watch([recordSearch, recordType], () => { recordPage.value = 1; });
 const recordPageSize = ref(20);
 const batchRunning = ref(false);
 const batchCompleted = ref(0);
@@ -705,7 +711,7 @@ const batchTtl = ref(300);
 const batchProxy = ref('on');
 watch(() => [dnsStore.currentDomain, dnsStore.currentContext.accountId, dnsStore.currentContext.zoneId], () => { selectedRecordIds.value = []; recordPage.value = 1; showAddRecordModal.value = false; });
 function selectPageRecords() {
-  selectedRecordIds.value = dnsStore.records.slice((recordPage.value - 1) * recordPageSize.value, recordPage.value * recordPageSize.value).map(row => row.id);
+  selectedRecordIds.value = filteredRecords.value.slice((recordPage.value - 1) * recordPageSize.value, recordPage.value * recordPageSize.value).map(row => row.id);
 }
 function confirmRecordBatch(action: 'delete' | 'ttl' | 'proxy') {
   const ids = new Set(selectedRecordIds.value);
@@ -726,7 +732,7 @@ function confirmRecordBatch(action: 'delete' | 'ttl' | 'proxy') {
           if (action === 'delete') return dnsApi.deleteRecord(target.domain, row.id, target.context);
           if (action === 'proxy') {
             if (!['A', 'AAAA', 'CNAME'].includes(row.type)) throw new Error(t('dns.batch.proxyUnsupported', { name: row.name, type: row.type }));
-            return dnsApi.updateRecord(target.domain, row.id, { proxied, ...(proxied ? { ttl: 1 } : {}) }, target.context);
+            return dnsApi.updateRecord(target.domain, row.id, { proxied }, target.context);
           }
           if (row.proxied && ttl !== 1) throw new Error(t('dns.batch.proxyTtl', { name: row.name }));
           return dnsApi.updateRecord(target.domain, row.id, { ttl }, target.context);
@@ -790,12 +796,13 @@ function handleEditRecord(row: any) {
   newRecord.value = {
     type: row.type,
     name: toRecordName(row.name, dnsStore.currentDomain),
-    content: row.type === 'SRV' ? row.data?.target || '' : row.content,
+    content: row.type === 'SRV' ? row.data?.target || '' : row.type === 'CAA' ? row.data?.value || '' : row.content,
     ttl: row.ttl,
     proxied: row.proxied,
     priority: row.data?.priority ?? row.priority ?? 10,
     weight: row.data?.weight ?? 0,
     port: row.data?.port ?? 443,
+    flags: row.data?.flags ?? 0, tag: row.data?.tag ?? 'issue', comment: row.comment ?? '',
   };
   showAddRecordModal.value = true;
 }
@@ -1028,7 +1035,7 @@ onMounted(async () => {
   flex: 1 1 0%;
   min-height: 0;
   height: 100% !important;
-  grid-template-rows: 1fr !important;
+  grid-template-rows: minmax(0, 1fr) !important;
   box-sizing: border-box;
 }
 
@@ -1046,12 +1053,23 @@ onMounted(async () => {
   overflow: hidden;
 }
 
-.dns-left-card :deep(.n-card__content) {
+.dns-left-card :deep(.dns-list-content) {
   flex: 1 1 0%;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+.dns-zone-actions {
+  flex-shrink: 0;
+}
+
+.dns-zone-list {
+  flex: 1 1 0%;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .dns-right-card {
@@ -1061,7 +1079,7 @@ onMounted(async () => {
   overflow: hidden;
 }
 
-.dns-right-card :deep(.n-card__content) {
+.dns-right-card :deep(.dns-detail-content) {
   flex: 1 1 0%;
   min-height: 0;
   display: flex;
@@ -1149,5 +1167,25 @@ onMounted(async () => {
   border: 1px solid var(--glass-border);
   border-radius: 10px;
   box-shadow: var(--glass-shadow);
+}
+/* Naive UI 的 m 断点为 1024px；上下排列时分别限定两个面板高度。 */
+@media (max-width: 1023px) {
+  .dns-grid-container {
+    flex: 0 0 auto;
+    height: auto !important;
+    grid-template-rows: none !important;
+  }
+
+  .dns-grid-col {
+    height: auto;
+  }
+
+  .dns-left-card {
+    height: clamp(300px, 50dvh, 420px);
+  }
+
+  .dns-right-card {
+    height: clamp(480px, 70dvh, 720px);
+  }
 }
 </style>

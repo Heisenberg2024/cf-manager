@@ -51,7 +51,7 @@
 
     <!-- Detail Drawer -->
     <n-drawer v-model:show="detailVisible" :width="isMobile ? '100%' : 720" placement="right">
-      <n-drawer-content :title="detailItem?.template.name || t('store.detail')" closable>
+      <n-drawer-content :title="detailItem?.template.name || t('store.detail')" :native-scrollbar="true" body-content-style="height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden;" closable>
         <template v-if="detailItem">
           <div class="detail-layout">
             <!-- 头部：描述信息 + 按钮（不滚动） -->
@@ -405,12 +405,7 @@ onMounted(async () => {
 }
 
 /* 详情抽屉三段式布局：上固定 / 中 README 独立滚动 / 下固定 */
-/* 把 n-drawer-content 自带的 body 滚动关掉，让内部 flex 容器自己管理滚动 */
-:deep(.n-drawer-content .n-drawer-content__body) {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
+/* Drawer body 的高度链通过公开 body-content-style 设置，不依赖内部 DOM 类名。 */
 .detail-layout {
   display: flex;
   flex-direction: column;

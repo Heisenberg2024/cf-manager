@@ -1,7 +1,7 @@
 <template>
   <n-drawer v-model:show="visible" :width="drawerWidth(860)" placement="right">
     <n-drawer-content :title="t('workerSettings.drawerTitle', { name: workerName })" closable>
-      <n-tabs type="line" animated>
+      <n-tabs type="line" animated @update:value="loadTabResources">
         <!-- Secrets -->
         <n-tab-pane name="secrets" :tab="t('workerSettings.tabs.secrets')">
           <n-space vertical>
@@ -454,6 +454,8 @@ const zoneOptions = computed(() =>
 const zoneIdOptions = computed(() =>
   zones.value.map((z: any) => ({ label: `${z.name} (${z.status})`, value: z.id }))
 );
+
+function loadTabResources(tab: string | number) { if (tab === 'routes') void loadZones(); }
 
 async function loadZones() {
   if (zones.value.length) return; // 已加载过则跳过

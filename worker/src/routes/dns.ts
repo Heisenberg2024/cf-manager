@@ -8,6 +8,11 @@ import { isDemoAccount } from '../services/demo';
 import { mapConcurrent } from '../utils/concurrent';
 import { readZoneSettings, writeZoneSettings } from '../services/zoneSettings';
 
+import { streamSSE } from 'hono/streaming';
+import { previewBatch, verifyPreview, executeBatch, type BatchPreview } from '../services/dnsBatch';
+import { dnsBatchRuntime, consumeDnsPreview } from '../services/dnsBatchRuntime';
+import { errorDetails } from '../services/cfErrors';
+
 const app = new Hono<{ Bindings: Env }>();
 function zoneContext(c: { req: { query(name: string): string | undefined } }) {
   return { accountId: Number(c.req.query('accountId')) || undefined, zoneId: c.req.query('zoneId') };
@@ -18,14 +23,14 @@ const ZONES_CACHE_TTL = 300; // 5 minutes
 
 async function getAllZones(db: D1Database, encryptionKey: string, kv: KVNamespace, refresh = false): Promise<any[]> {
   const cached = await kv.get(ZONES_CACHE_KEY, 'json');
-  if (cached && !refresh) return cached as any[];
+  if (Array.isArray(cached) && !refresh && cached.every(z => z.credentialId)) return cached;
 
   const accounts = await getActiveAccountsByFeature(db, 'dns');
   const results = await mapConcurrent(accounts, 3, async (account) => {
     try {
       if (!account.account_id) return [];
       const zones = await cfFetchAll<any>(account, `/zones?account.id=${account.account_id}`, encryptionKey, 50);
-      return zones.filter(z => z.account?.id === account.account_id).map(z => ({ ...z, status: z.paused ? 'paused' : z.status, cfAccountId: account.id, accountName: account.name }));
+      return zones.filter(z => z.account?.id === account.account_id).map(z => ({ ...z, status: z.paused ? 'paused' : z.status, cfAccountId: account.id, credentialId: account.credential_id, accountName: account.name }));
     } catch (e) {
       console.error(`Failed to fetch zones for ${account.name}: ${e}`);
       return [];
@@ -53,6 +58,22 @@ async function findAccountByDomain(db: D1Database, domain: string, encryptionKey
   return { account, zoneId: zone.id };
 }
 
+app.post('/batch/preview', async c => c.json(await previewBatch(await c.req.json(), dnsBatchRuntime(c.env), c.env.ENCRYPTION_KEY)));
+app.post('/batch/execute', async c => {
+  const plan = await c.req.json<BatchPreview>();
+  await verifyPreview(plan, c.env.ENCRYPTION_KEY);
+  await consumeDnsPreview(c.env, plan);
+  c.header('X-Accel-Buffering', 'no');
+  c.header('Cache-Control', 'no-cache, no-transform');
+  return streamSSE(c, async stream => {
+    const emit = async (event: unknown) => { if (!stream.aborted) await stream.writeSSE({ data: JSON.stringify(event) }); };
+    const heartbeat = setInterval(() => { if (!stream.aborted) void stream.write(': heartbeat\n\n').catch(() => {}); }, 10_000);
+    try { await executeBatch(plan, dnsBatchRuntime(c.env), emit); }
+    catch (error) { await emit({ type: 'error', message: errorDetails(error).message }); }
+    finally { clearInterval(heartbeat); }
+  });
+});
+
 app.get('/domains', async (c) => {
   const zones = await getAllZones(c.env.DB, c.env.ENCRYPTION_KEY, c.env.KV, c.req.query('refresh') === 'true');
   return c.json(zones);
@@ -73,7 +94,7 @@ app.post('/domains/:domain/records', async (c) => {
   const data = await cfFetch(account, `/zones/${zoneId}/dns_records`, c.env.ENCRYPTION_KEY, {
     method: 'POST', body: JSON.stringify(body),
   });
-  await addAuditLog(c.env.DB, { account_id: account.id, action: 'create_dns', target: domain, detail: `${body.type} ${body.name} → ${body.content}`, status: 'success' });
+  await addAuditLog(c.env.DB, { account_id: account.id, action: 'create_dns', target: domain, detail: `type=${body.type} name=${body.name}`, status: 'success' });
   return c.json(data.result, 201);
 });
 
@@ -88,7 +109,7 @@ app.put('/domains/:domain/records/:id', async (c) => {
   const data = await cfFetch(account, `/zones/${zoneId}/dns_records/${recordId}`, c.env.ENCRYPTION_KEY, {
     method: 'PATCH', body: JSON.stringify(body),
   });
-  await addAuditLog(c.env.DB, { account_id: account.id, action: 'update_dns', target: domain, detail: `${body.type || ''} ${body.name || ''} → ${body.content || ''}`, status: 'success' });
+  await addAuditLog(c.env.DB, { account_id: account.id, action: 'update_dns', target: domain, detail: `record_id=${recordId} fields=${Object.keys(body).join(',')}`, status: 'success' });
   return c.json(data.result);
 });
 

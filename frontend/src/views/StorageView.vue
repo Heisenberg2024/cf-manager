@@ -21,7 +21,7 @@
       <n-tab-pane name="kv" :tab="t('storage.kv')">
         <n-grid class="storage-grid-container" :cols="24" :x-gap="12" :y-gap="12" responsive="screen" item-responsive>
           <n-gi span="24 m:6">
-            <n-card :title="t('storage.namespace')" size="small" class="storage-left-card" content-style="display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 12px; overflow-y: auto;">
+            <n-card content-class="storage-card-content" :title="t('storage.namespace')" size="small" class="storage-left-card" content-style="display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 12px; overflow-y: auto;">
               <template #header-extra>
                 <n-button size="tiny" type="primary" @click="handleCreateKvNs">{{ t('storage.create') }}</n-button>
               </template>
@@ -40,7 +40,7 @@
             </n-card>
           </n-gi>
           <n-gi span="24 m:18">
-            <n-card :title="selectedKvNs ? `Keys - ${selectedKvNs.title || selectedKvNs.id}` : 'Keys'" size="small" class="storage-right-card" content-style="display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 12px;">
+            <n-card content-class="storage-card-content" :title="selectedKvNs ? `Keys - ${selectedKvNs.title || selectedKvNs.id}` : 'Keys'" size="small" class="storage-right-card" content-style="display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 12px;">
               <template #header-extra>
                 <n-space>
                   <n-input v-model:value="kvPrefix" :placeholder="t('storage.prefixFilter')" size="small" style="width: 200px" @keyup.enter="() => loadKvKeys()" clearable />
@@ -84,7 +84,7 @@
         <n-grid class="storage-grid-container" :cols="24" :x-gap="12" :y-gap="12" responsive="screen" item-responsive>
           <!-- 左侧：纯粹的数据表列表卡片（标准 Naive UI 布局，绝不挤压错位） -->
           <n-gi span="24 m:6" class="storage-grid-col">
-            <n-card
+            <n-card content-class="storage-card-content"
               :title="selectedD1Db ? `${t('storage.tables')} (${d1Tables.length})` : t('storage.tables')"
               size="small"
               class="storage-left-card"
@@ -114,7 +114,7 @@
             </n-card>
           </n-gi>
           <n-gi span="24 m:18" class="storage-grid-col">
-            <n-card :title="t('storage.sqlQuery')" size="small" class="storage-right-card" content-style="display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 12px;">
+            <n-card content-class="storage-card-content" :title="t('storage.sqlQuery')" size="small" class="storage-right-card" content-style="display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 12px;">
               <n-input v-model:value="d1Sql" type="textarea" :rows="3" :placeholder="t('storage.sqlPlaceholder')" style="margin-bottom: 10px; font-family: monospace; flex-shrink: 0;" />
               <n-space style="margin-bottom: 10px; flex-shrink: 0;">
                 <n-button type="primary" size="small" @click="executeD1" :loading="d1Loading" :disabled="!selectedD1Db || !d1Sql">{{ t('storage.execute') }}</n-button>
@@ -134,7 +134,7 @@
       <n-tab-pane v-if="r2Available" name="r2" :tab="t('storage.r2')">
         <n-grid class="storage-grid-container" :cols="24" :x-gap="12" :y-gap="12" responsive="screen" item-responsive>
           <n-gi span="24 m:6">
-            <n-card :title="t('storage.bucket')" size="small" class="storage-left-card" content-style="display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 12px; overflow-y: auto;">
+            <n-card content-class="storage-card-content" :title="t('storage.bucket')" size="small" class="storage-left-card" content-style="display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 12px; overflow-y: auto;">
               <template #header-extra>
                 <n-button size="tiny" type="primary" @click="handleCreateR2Bucket">{{ t('storage.create') }}</n-button>
               </template>
@@ -153,7 +153,7 @@
             </n-card>
           </n-gi>
           <n-gi span="24 m:18">
-            <n-card :title="selectedR2Bucket ? `${t('storage.files')} - ${selectedR2Bucket.name}` : t('storage.files')" size="small" class="storage-right-card" content-style="display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 12px;">
+            <n-card content-class="storage-card-content" :title="selectedR2Bucket ? `${t('storage.files')} - ${selectedR2Bucket.name}` : t('storage.files')" size="small" class="storage-right-card" content-style="display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 12px;">
               <template #header-extra>
                 <n-button size="small" type="primary" @click="showR2Upload = true" :disabled="!selectedR2Bucket">{{ t('storage.upload') }}</n-button>
               </template>
@@ -1217,12 +1217,12 @@ onMounted(async () => {
 /* 空状态：Naive 的 n-empty 自带 48px 下外边距，在 overflow:auto 的列表容器里会被算进
    scrollHeight，导致内容并未超出也出现滚动条。改用 auto margin 居中，不产生溢出。 */
 .storage-list-scroll :deep(.n-empty),
-.storage-left-card :deep(.n-card__content .n-empty) {
+.storage-left-card :deep(.storage-card-content .n-empty) {
   margin: auto;
 }
 
-.storage-left-card :deep(.n-card__content),
-.storage-right-card :deep(.n-card__content) {
+.storage-left-card :deep(.storage-card-content),
+.storage-right-card :deep(.storage-card-content) {
   flex: 1 1 0% !important;
   min-height: 0 !important;
   display: flex !important;
@@ -1268,10 +1268,37 @@ onMounted(async () => {
   overflow: hidden;
 }
 
-.storage-right-card :deep(.n-card__content) {
+.storage-right-card :deep(.storage-card-content) {
   flex: 1 1 0%;
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+/* 与 n-gi 的 m 断点一致：上下排列后，列表和详情各自保留滚动空间。 */
+@media (max-width: 1023px) {
+  .storage-grid-container {
+    flex: 0 0 auto;
+    height: auto !important;
+    grid-template-rows: none !important;
+    overflow: visible;
+  }
+
+  .storage-grid-container > :deep(*) {
+    height: auto !important;
+  }
+
+  .storage-left-card,
+  .storage-right-card {
+    flex: 0 0 auto;
+    max-height: none !important;
+  }
+
+  .storage-left-card {
+    height: clamp(300px, 50dvh, 420px);
+  }
+
+  .storage-right-card {
+    height: clamp(480px, 70dvh, 720px);
+  }
 }
 </style>

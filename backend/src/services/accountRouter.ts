@@ -41,9 +41,9 @@ interface AiSnapshotEntry {
 const zonesCache = new NodeCache({ stdTTL: ZONES_CACHE_TTL });
 const quotaCache = new NodeCache({ stdTTL: QUOTA_CACHE_TTL });
 
-export async function getAllZones(refresh = false): Promise<Array<Zone & { cfAccountId: number; accountName: string }>> {
+export async function getAllZones(refresh = false): Promise<Array<Zone & { cfAccountId: number; credentialId?: number; accountName: string }>> {
   const cacheKey = 'all_zones';
-  const cached = zonesCache.get<Array<Zone & { cfAccountId: number; accountName: string }>>(cacheKey);
+  const cached = zonesCache.get<Array<Zone & { cfAccountId: number; credentialId?: number; accountName: string }>>(cacheKey);
   if (cached && !refresh) return cached;
 
   const accounts = getActiveAccountsByFeature('dns');
@@ -56,7 +56,7 @@ export async function getAllZones(refresh = false): Promise<Array<Zone & { cfAcc
       for await (const zone of cf.zones.list({ per_page: 50, account: { id: account.account_id } })) {
         zones.push(zone as any);
       }
-      return zones.filter(zone => zone.account?.id === account.account_id).map(zone => ({ ...zone, status: zone.paused ? 'paused' : zone.status, cfAccountId: account.id, accountName: account.name }));
+      return zones.filter(zone => zone.account?.id === account.account_id).map(zone => ({ ...zone, status: zone.paused ? 'paused' : zone.status, cfAccountId: account.id, credentialId: account.credential_id, accountName: account.name }));
     } catch (err) {
       appLogger.error(`Failed to fetch zones for account ${account.name}: ${err}`);
       return [];

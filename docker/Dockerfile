@@ -12,7 +12,9 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 COPY frontend/tsconfig*.json frontend/vite.config.ts frontend/index.html ./
 COPY frontend/public ./public
 COPY frontend/src ./src
-RUN npm run build
+COPY shared/dnsRecord.ts shared/dnsBatch.ts shared/cfErrors.ts shared/accountDiscovery.ts ./src/shared/
+# Shared sources are copied above; this flattened stage has no ../scripts directory.
+RUN npm --ignore-scripts run build
 
 # ---- Stage 2: Build Backend ----
 FROM node:24-alpine AS backend-builder
@@ -36,7 +38,7 @@ RUN node scripts/gen-version.js backend
 COPY shared/model-pricing.json ./src/data/model-pricing.json
 COPY shared/catalog.schema.json ./src/services/catalog.schema.json
 COPY shared/catalogValidator.ts ./src/services/catalogValidator.ts
-COPY shared/cfErrors.ts shared/accountDiscovery.ts shared/credentialManager.ts shared/zoneSettings.ts ./src/services/
+COPY shared/cfErrors.ts shared/accountDiscovery.ts shared/credentialManager.ts shared/zoneSettings.ts shared/dnsRecord.ts shared/dnsBatch.ts ./src/services/
 # catalog 校验器由 ajv standalone 预编译生成（运行时避免 new Function，兼容 Cloudflare）。
 COPY scripts/gen-catalog-validator.js ./scripts/gen-catalog-validator.js
 RUN CATALOG_SCHEMA_PATH=/app/src/services/catalog.schema.json \

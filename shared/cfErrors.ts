@@ -25,9 +25,12 @@ export class CloudflareError extends Error {
   readonly code: string;
   readonly statusCode: number;
   readonly kind: CfFailureKind;
-  constructor(readonly status: number, message: string, readonly cfCodes: Array<string | number> = [], context = '') {
+  readonly status: number;
+  readonly cfCodes: Array<string | number>;
+  constructor(status: number, message: string, cfCodes: Array<string | number> = [], context = '') {
     const kind = status === 401 ? 'invalid' : status === 403 ? 'permission' : status === 429 ? 'rate_limited' : 'error';
     super(redact(`${context ? `${context}: ` : ''}Cloudflare HTTP ${status}${cfCodes.length ? ` Code ${cfCodes.join(', ')}` : ''}: ${message}`));
+    this.status = status; this.cfCodes = cfCodes;
     this.name = 'CloudflareError';
     this.kind = kind;
     this.code = `CF_${kind.toUpperCase()}`;

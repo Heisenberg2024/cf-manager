@@ -9,7 +9,11 @@
     "typecheck": "vue-tsc -b",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "predev": "node ../scripts/sync-shared.js --frontend",
+    "prebuild": "node ../scripts/sync-shared.js --frontend",
+    "pretypecheck": "node ../scripts/sync-shared.js --frontend",
+    "pretest": "node ../scripts/sync-shared.js --frontend"
   },
   "dependencies": {
     "@vicons/ionicons5": "^0.13.0",

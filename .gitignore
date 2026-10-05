@@ -88,3 +88,10 @@ backend/src/services/credentialManager.ts
 worker/src/services/credentialManager.ts
 backend/src/services/zoneSettings.ts
 worker/src/services/zoneSettings.ts
+
+# Generated DNS shared sources
+backend/src/services/dnsRecord.ts
+worker/src/services/dnsRecord.ts
+backend/src/services/dnsBatch.ts
+worker/src/services/dnsBatch.ts
+frontend/src/shared/

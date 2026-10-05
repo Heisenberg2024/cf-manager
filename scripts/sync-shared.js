@@ -16,10 +16,12 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 const root = path.resolve(__dirname, '..');
+const frontendOnly = process.argv.includes('--frontend');
 
 // 每个条目: 源文件 -> 需要复制到的所有目标相对路径（相对仓库根目录）
 const jobs = [
-  ...['cfErrors', 'accountDiscovery', 'credentialManager', 'zoneSettings'].map(name => ({
+  ...['dnsRecord', 'dnsBatch', 'cfErrors', 'accountDiscovery'].map(name => ({name: `frontend-${name}`, source: `shared/${name}.ts`, targets: [`frontend/src/shared/${name}.ts`]})),
+  ...['cfErrors', 'accountDiscovery', 'credentialManager', 'zoneSettings', 'dnsRecord', 'dnsBatch'].map(name => ({
     name,
     source: `shared/${name}.ts`,
     targets: [`backend/src/services/${name}.ts`, `worker/src/services/${name}.ts`],
@@ -72,7 +74,7 @@ for (const job of jobs) {
     continue;
   }
   for (const t of job.targets) {
-    copyIfChanged(src, path.join(root, t));
+    if (!frontendOnly || t.startsWith('frontend/')) copyIfChanged(src, path.join(root, t));
   }
 }
 
@@ -82,7 +84,7 @@ if (failed) {
 
 // 额外：用 ajv standalone 预编译 catalog 校验器（运行时避免 new Function，兼容
 // Cloudflare Workers / Pages）。从 backend 目录运行以保证能解析到 ajv 依赖。
-try {
+if (!frontendOnly) try {
   execSync('node ' + path.join(__dirname, 'gen-catalog-validator.js'), {
     cwd: path.join(root, 'backend'),
     stdio: 'inherit',

@@ -7,10 +7,35 @@ import { createAuditLog } from '../models/auditLog';
 import { isDemoAccountId } from './routeUtils';
 import { listRules, createRule, updateRule, deleteRule } from '../services/rulesetService';
 
+import { config } from '../config';
+import { previewBatch, verifyPreview, executeBatch, type BatchPreview } from '../services/dnsBatch';
+import { dnsBatchRuntime, consumeDnsPreview } from '../services/dnsBatchRuntime';
+import { errorDetails } from '../services/cfErrors';
+
 const router = Router();
 function zoneContext(req: Request) {
   return { accountId: Number(req.query.accountId) || undefined, zoneId: typeof req.query.zoneId === 'string' ? req.query.zoneId : undefined };
 }
+
+router.post('/batch/preview', async (req, res, next) => {
+  try { res.json(await previewBatch(req.body, dnsBatchRuntime(), config.encryptionKey)); } catch (error) { next(error); }
+});
+router.post('/batch/execute', async (req, res, next) => {
+  try {
+    const plan = req.body as BatchPreview;
+    await verifyPreview(plan, config.encryptionKey);
+    consumeDnsPreview(plan);
+    res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', 'X-Accel-Buffering': 'no' });
+    res.flushHeaders();
+    const emit = async (event: unknown) => {
+      if (!res.destroyed) { res.write(`data: ${JSON.stringify(event)}\n\n`); (res as Response & { flush?: () => void }).flush?.(); }
+    };
+    const heartbeat = setInterval(() => { if (!res.destroyed) { res.write(': heartbeat\n\n'); (res as Response & { flush?: () => void }).flush?.(); } }, 10_000);
+    try { await executeBatch(plan, dnsBatchRuntime(), emit); }
+    catch (error) { await emit({ type: 'error', message: errorDetails(error).message }); }
+    finally { clearInterval(heartbeat); if (!res.destroyed) res.end(); }
+  } catch (error) { next(error); }
+});
 
 router.get('/domains', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -32,7 +57,7 @@ router.post('/domains/:domain/records', async (req: Request, res: Response, next
     const domain = req.params.domain as string;
     const { account, zoneId } = await findAccountByDomain(domain, zoneContext(req));
     const record = await createDnsRecord(account, zoneId, req.body);
-    createAuditLog(account.id, 'create_dns', domain, `${req.body.type} ${req.body.name} → ${req.body.content}`, 'success');
+    createAuditLog(account.id, 'create_dns', domain, `type=${req.body.type} name=${req.body.name}`, 'success');
     res.status(201).json(record);
   } catch (err) { next(err); }
 });
@@ -42,7 +67,7 @@ router.put('/domains/:domain/records/:id', async (req: Request, res: Response, n
     const domain = req.params.domain as string;
     const { account, zoneId } = await findAccountByDomain(domain, zoneContext(req));
     const record = await updateDnsRecord(account, zoneId, req.params.id as string, req.body);
-    createAuditLog(account.id, 'update_dns', domain, `${req.body.type || ''} ${req.body.name || ''} → ${req.body.content || ''}`, 'success');
+    createAuditLog(account.id, 'update_dns', domain, `record_id=${req.params.id} fields=${Object.keys(req.body).join(',')}`, 'success');
     res.json(record);
   } catch (err) { next(err); }
 });

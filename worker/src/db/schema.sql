@@ -79,3 +79,9 @@ CREATE TABLE IF NOT EXISTS catalog_sources (
   etag          TEXT,
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS dns_batch_executions (
+  id TEXT PRIMARY KEY,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dns_batch_expires ON dns_batch_executions(expires_at);
