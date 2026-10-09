@@ -343,7 +343,7 @@
     "title": "DNS 管理",
     "addDomain": "+ 添加域名",
     "selectAccount": "选择账户",
-    "searchDomain": "搜索域名...",
+    "searchDomain": "搜索域名，支持一行一个（匹配任意一行）",
     "domainList": "域名列表",
     "selectedCount": "已选择 {count} 个域名",
     "deleteSelected": "删除选中 ({count})",

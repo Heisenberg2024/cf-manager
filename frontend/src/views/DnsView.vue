@@ -15,17 +15,22 @@
         :options="accountOptions"
         :placeholder="t('dns.selectAccount')"
         :render-label="renderAccountLabel"
+        :node-props="accountFilterNodeProps"
         filterable
         style="width: 480px; max-width: 100%"
         size="small"
         @update:value="onAccountChange"
+        @search="accountFilterSearch = $event"
+        @update:show="(show: boolean) => { if (!show) accountFilterSearch = ''; }"
       />
       <n-input
         v-model:value="searchQuery"
         :placeholder="t('dns.searchDomain')"
+        type="textarea"
+        :autosize="{ minRows: 1, maxRows: 4 }"
         clearable
         size="small"
-        style="width: 200px"
+        style="width: 320px; max-width: 100%"
       />
     </n-space>
 
@@ -378,7 +383,10 @@
             :options="availableAccounts"
             :placeholder="t('dns.selectAccount')"
             :render-label="renderAccountLabel"
+            :node-props="accountCreateNodeProps"
             filterable
+            @search="accountCreateSearch = $event"
+            @update:show="(show: boolean) => { if (!show) accountCreateSearch = ''; }"
           />
         </n-form-item>
         <n-form-item :label="t('dns.plans.label')">
@@ -453,7 +461,7 @@
 <script setup lang="ts">
 import { ref, h, computed, onMounted, watch, reactive } from 'vue';
 import { NButton, NSwitch, NTag, NText, NCheckbox, useMessage, useDialog } from 'naive-ui';
-import type { DataTableColumns, FormInst, FormRules } from 'naive-ui';
+import type { DataTableColumns, FormInst, FormRules, SelectNodeProps } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 import { useDnsStore } from '../stores/dnsStore';
 import AutoFitTable from '../components/AutoFitTable.vue';
@@ -462,6 +470,7 @@ import DnsRecordFields from '../components/DnsRecordFields.vue';
 import type { BatchAction, BatchZone } from '../shared/dnsBatch';
 import { dnsApi } from '../api/dns';
 import { accountsApi } from '../api/accounts';
+import { credentialsApi } from '../api/credentials';
 import { buildDnsRecord, DNS_TYPES } from '../utils/dnsRecord';
 import { runBatch, type BatchResult } from '../utils/batchOperation';
 import type { ZoneContext } from '../api/dns';
@@ -477,20 +486,40 @@ const dialog = useDialog();
 // ===== 账户过滤 =====
 const selectedAccount = ref<string>('');
 const searchQuery = ref('');
+const domainSearchTerms = computed(() => [...new Set(searchQuery.value.split(/\r\n|\r|\n/).map(term => term.trim().toLowerCase()).filter(Boolean))]);
 const accounts = ref<Array<DnsAccountIdentity & { is_enabled?: number }>>([]);
+const credentialNames = ref(new Map<number, string>());
+const accountFilterSearch = ref('');
+const accountCreateSearch = ref('');
+const accountLabel = (account: DnsAccountIdentity) => dnsAccountLabel(account, credentialNames.value, t('dns.plans.credential'));
 const accountOptions = computed(() => [
   { label: t('dns.allAccounts'), value: '__all__' },
-  ...accounts.value.map(account => ({ label: dnsAccountLabel(account, t('dns.plans.credential')), value: String(account.id) })),
+  ...accounts.value.map(account => ({ label: accountLabel(account), value: String(account.id) })),
 ]);
 const availableAccounts = computed(() => accounts.value.filter(account => account.account_id).map(account => ({
-  label: dnsAccountLabel(account, t('dns.plans.credential')), value: account.id, disabled: account.is_enabled === 0 || isDemoAccount(account.id),
+  label: accountLabel(account), value: account.id, disabled: account.is_enabled === 0 || isDemoAccount(account.id),
 })));
-function renderAccountLabel(option: { label?: string | number }, selected: boolean) {
-  return h('span', { title: String(option.label || ''), style: selected ? '' : 'white-space: normal; overflow-wrap: anywhere; display: block' }, option.label);
+function accountOptionNodeProps(option: Parameters<SelectNodeProps>[0], choices: Array<{ label: string; value: string | number }>, query: string) {
+  const value = 'value' in option ? option.value : undefined;
+  const visible = choices.filter(choice => choice.value !== '__all__' && choice.label.toLowerCase().includes(query.toLowerCase()));
+  const index = visible.findIndex(choice => choice.value === value);
+  if (index < 0) return {};
+  const account = accounts.value.find(account => String(account.id) === String(value));
+  return {
+    class: index % 2 ? 'dns-account-option dns-account-option--striped' : 'dns-account-option',
+    title: `${visible[index].label}\nAccount ID: ${account?.account_id || '—'}\n${t('dns.plans.credential')} #${account?.credential_id ?? '?'}`,
+  };
+}
+const accountFilterNodeProps: SelectNodeProps = option => accountOptionNodeProps(option, accountOptions.value, accountFilterSearch.value);
+const accountCreateNodeProps: SelectNodeProps = option => accountOptionNodeProps(option, availableAccounts.value, accountCreateSearch.value);
+function renderAccountLabel(option: { label?: string | number; value?: string | number }, selected: boolean) {
+  const account = accounts.value.find(account => String(account.id) === String(option.value));
+  const title = account ? `${option.label}\nAccount ID: ${account.account_id || '—'}\n${t('dns.plans.credential')} #${account.credential_id ?? '?'}` : String(option.label || '');
+  return h('span', { title, style: selected ? '' : 'white-space: normal; overflow-wrap: anywhere; display: block' }, option.label);
 }
 function domainAccountLabel(domain: any) {
   const account = accounts.value.find(account => account.id === domain.cfAccountId);
-  return dnsAccountLabel(account || { id: domain.cfAccountId, name: domain.accountName, credential_id: domain.credentialId, account_id: domain.account?.id }, t('dns.plans.credential'));
+  return accountLabel(account || { id: domain.cfAccountId, name: domain.accountName, credential_id: domain.credentialId, account_id: domain.account?.id });
 }
 function domainPlanName(domain: any) { return zonePlan(domain.plan)?.name || t('dns.plans.unknown'); }
 
@@ -514,7 +543,7 @@ const allDomains = computed(() =>
 
 const filteredDomains = computed(() => {
   let list = allDomains.value;
-  // 账户筛选：选中具体账户时按账户名过滤
+  // 账户筛选仍使用本地绑定 ID。
   if (selectedAccount.value && selectedAccount.value !== '__all__') {
     const opt = accountOptions.value.find(o => o.value === selectedAccount.value);
     if (opt) {
@@ -522,9 +551,8 @@ const filteredDomains = computed(() => {
     }
   }
   // 域名搜索过滤
-  if (searchQuery.value) {
-    const q = searchQuery.value.toLowerCase();
-    list = list.filter((d: any) => d.name?.toLowerCase().includes(q));
+  if (domainSearchTerms.value.length) {
+    list = list.filter((d: any) => domainSearchTerms.value.some(term => d.name?.toLowerCase().includes(term)));
   }
   return list;
 });
@@ -1034,12 +1062,9 @@ function handleBatchDelete() {
 
 // ===== 加载账户列表 =====
 async function loadAccounts() {
-  try {
-    const { data } = await accountsApi.getAll();
-    accounts.value = data?.accounts || [];
-  } catch {
-    accounts.value = [];
-  }
+  const [accountResult, credentialResult] = await Promise.allSettled([accountsApi.getAll(), credentialsApi.list()]);
+  accounts.value = accountResult.status === 'fulfilled' ? accountResult.value.data?.accounts || [] : [];
+  credentialNames.value = new Map(credentialResult.status === 'fulfilled' ? credentialResult.value.data.map(credential => [credential.id, credential.name]) : []);
 }
 
 // ===== 搜索时自动展开分组 =====
@@ -1069,6 +1094,10 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+:global(.dns-account-option--striped:not(.n-base-select-option--pending):not(.n-base-select-option--selected)) {
+  background-color: var(--app-bg);
+}
+
 .dns-grid-container {
   flex: 1 1 0%;
   min-height: 0;

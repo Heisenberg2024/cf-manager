@@ -343,7 +343,7 @@
     "title": "DNS Management",
     "addDomain": "+ Add Domain",
     "selectAccount": "Select account",
-    "searchDomain": "Search domains...",
+    "searchDomain": "Search domains, one per line (match any line)",
     "domainList": "Domain List",
     "selectedCount": "{count} Zones selected",
     "deleteSelected": "Delete selected ({count})",
