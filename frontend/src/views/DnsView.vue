@@ -14,7 +14,9 @@
         v-model:value="selectedAccount"
         :options="accountOptions"
         :placeholder="t('dns.selectAccount')"
-        style="width: 200px; max-width: 50vw"
+        :render-label="renderAccountLabel"
+        filterable
+        style="width: 480px; max-width: 100%"
         size="small"
         @update:value="onAccountChange"
       />
@@ -53,12 +55,12 @@
                 <n-collapse v-if="groupedDomains.length > 0" :default-expanded-names="expandedGroups">
                   <n-collapse-item
                     v-for="group in groupedDomains"
-                    :key="group.accountName"
-                    :name="group.accountName"
+                    :key="group.accountId"
+                    :name="group.accountId"
                   >
                     <template #header>
                       <n-space align="center" :size="4">
-                        <span>{{ group.accountName }}</span>
+                        <span style="overflow-wrap: anywhere">{{ group.accountName }}</span>
                         <n-text depth="3" style="font-size: 12px">({{ group.domains.length }})</n-text>
                       </n-space>
                     </template>
@@ -81,7 +83,7 @@
                             <n-space align="center" :size="4" style="margin-top: 2px">
                               <span :style="{ color: statusColor(d.status), fontSize: '11px' }">●</span>
                               <n-text depth="3" style="font-size: 11px">{{ statusLabel(d.status) }}</n-text>
-                              <n-text depth="3" style="font-size: 11px">· {{ d.accountName }}</n-text>
+                              <n-tag size="small" :bordered="false">{{ domainPlanName(d) }}</n-tag>
                             </n-space>
                           </div>
                         </div>
@@ -112,6 +114,7 @@
                         <n-space align="center" :size="4" style="margin-top: 2px">
                           <span :style="{ color: statusColor(d.status), fontSize: '11px' }">●</span>
                           <n-text depth="3" style="font-size: 11px">{{ statusLabel(d.status) }}</n-text>
+                          <n-tag size="small" :bordered="false">{{ domainPlanName(d) }}</n-tag>
                         </n-space>
                       </div>
                     </div>
@@ -135,7 +138,8 @@
           <template #header>
             <n-space align="center">
               <span>{{ dnsStore.currentDomain }}</span>
-              <n-text v-if="currentDomainInfo" depth="3" style="font-size: 12px">· {{ currentDomainInfo.accountName }}</n-text>
+              <n-tag v-if="currentDomainInfo" size="small" :bordered="false">{{ domainPlanName(currentDomainInfo) }}</n-tag>
+              <n-text v-if="currentDomainInfo" depth="3" style="font-size: 12px; overflow-wrap: anywhere">{{ domainAccountLabel(currentDomainInfo) }}</n-text>
             </n-space>
           </template>
 
@@ -366,16 +370,23 @@
     </n-modal>
 
     <!-- 批量添加域名 Modal -->
-    <n-modal v-model:show="showAddDomainModal" preset="dialog" :title="t('dns.addDomainModalTitle')" style="width: 520px; max-width: 95vw">
-      <n-form :model="newDomain" label-placement="left" label-width="80">
+    <n-modal v-model:show="showAddDomainModal" preset="dialog" :title="t('dns.addDomainModalTitle')" :mask-closable="!creatingDomains" :close-on-esc="!creatingDomains" :closable="!creatingDomains" style="width: 640px; max-width: 95vw">
+      <n-form :model="newDomain" :disabled="creatingDomains" label-placement="left" label-width="80">
         <n-form-item :label="t('dns.targetAccount')">
           <n-select
             v-model:value="newDomain.account_id"
             :options="availableAccounts"
             :placeholder="t('dns.selectAccount')"
+            :render-label="renderAccountLabel"
             filterable
           />
         </n-form-item>
+        <n-form-item :label="t('dns.plans.label')">
+          <n-select v-model:value="newDomain.plan" :options="planOptions" :loading="plansLoading" :disabled="!newDomain.account_id || plansLoading || creatingDomains" />
+        </n-form-item>
+        <n-alert v-if="plansError" type="warning" :bordered="false" style="margin-bottom: 12px">{{ t('dns.plans.loadFailed') }} {{ plansError }}</n-alert>
+        <n-alert v-if="newDomain.plan !== 'free'" type="info" :bordered="false" style="margin-bottom: 12px">{{ t('dns.plans.allocationHint') }}</n-alert>
+        <n-text v-if="plansSource === 'new_zone'" depth="3">{{ t('dns.plans.newAccountHint') }}</n-text>
         <n-form-item :label="t('dns.zoneType')">
           <n-select v-model:value="newDomain.type" :options="zoneTypeOptions" />
         </n-form-item>
@@ -389,8 +400,8 @@
         </n-form-item>
       </n-form>
       <template #action>
-        <n-button @click="showAddDomainModal = false">{{ t('common.cancel') }}</n-button>
-        <n-button type="primary" :loading="creatingDomains" @click="handleCreateDomains">{{ t('common.create') }}</n-button>
+        <n-button :disabled="creatingDomains" @click="showAddDomainModal = false">{{ t('common.cancel') }}</n-button>
+        <n-button type="primary" :loading="creatingDomains" :disabled="plansLoading || creatingDomains" @click="handleCreateDomains">{{ t('common.create') }}</n-button>
       </template>
     </n-modal>
 
@@ -401,8 +412,12 @@
           <n-space align="center" :size="8">
             <span>{{ r.success ? '✅' : '❌' }}</span>
             <span style="font-weight: 500">{{ r.name }}</span>
+            <n-tag v-if="r.zone_created" size="small">{{ r.plan?.name || t('dns.plans.unknown') }}</n-tag>
           </n-space>
-          <div v-if="r.success && r.name_servers?.length" style="margin-top: 4px; padding-left: 24px">
+          <div v-if="r.zone_created && !r.success" style="margin-top: 4px; padding-left: 24px"><n-text type="warning">{{ t('dns.plans.createdButFailed') }}</n-text></div>
+          <div v-if="r.outcome_uncertain" style="margin-top: 4px; padding-left: 24px"><n-text type="warning">{{ t('dns.plans.creationUncertain') }}</n-text></div>
+          <div v-if="r.warning" style="margin-top: 4px; padding-left: 24px"><n-text type="warning" style="font-size: 12px">{{ r.warning }}</n-text></div>
+          <div v-if="r.zone_created && r.name_servers?.length" style="margin-top: 4px; padding-left: 24px">
             <n-text depth="3" style="font-size: 12px">NS:</n-text>
             <div v-for="ns in r.name_servers" :key="ns" style="font-size: 12px; font-family: monospace">{{ ns }}</div>
             <n-button size="tiny" @click="copyNS(r.name_servers)">{{ t('dns.copyNs') }}</n-button>
@@ -413,6 +428,7 @@
         </div>
         <n-divider style="margin: 8px 0" />
         <n-text depth="3">{{ t('dns.resultSummary', { total: createResult.total, succeeded: createResult.succeeded, failed: createResult.failed }) }}</n-text>
+        <n-text v-if="createResult.fallback_count" depth="3"> · {{ t('dns.plans.fallbackCount', { count: createResult.fallback_count }) }}</n-text>
       </div>
       <template #action>
         <n-button @click="showResultModal = false">{{ t('common.close') }}</n-button>
@@ -450,6 +466,8 @@ import { buildDnsRecord, DNS_TYPES } from '../utils/dnsRecord';
 import { runBatch, type BatchResult } from '../utils/batchOperation';
 import type { ZoneContext } from '../api/dns';
 import { loadDemoAccounts, isDemoAccount } from '../utils/demoAccounts';
+import { dnsAccountLabel, type DnsAccountIdentity } from '../utils/dnsAccountLabel';
+import { zonePlan, type ZonePlanId, type ZonePlanOption } from '../shared/zonePlans';
 
 const { t } = useI18n();
 const dnsStore = useDnsStore();
@@ -459,8 +477,22 @@ const dialog = useDialog();
 // ===== 账户过滤 =====
 const selectedAccount = ref<string>('');
 const searchQuery = ref('');
-const accountOptions = ref<{ label: string; value: string }[]>([]);
-const availableAccounts = ref<{ label: string; value: number }[]>([]);
+const accounts = ref<Array<DnsAccountIdentity & { is_enabled?: number }>>([]);
+const accountOptions = computed(() => [
+  { label: t('dns.allAccounts'), value: '__all__' },
+  ...accounts.value.map(account => ({ label: dnsAccountLabel(account, t('dns.plans.credential')), value: String(account.id) })),
+]);
+const availableAccounts = computed(() => accounts.value.filter(account => account.account_id).map(account => ({
+  label: dnsAccountLabel(account, t('dns.plans.credential')), value: account.id, disabled: account.is_enabled === 0 || isDemoAccount(account.id),
+})));
+function renderAccountLabel(option: { label?: string | number }, selected: boolean) {
+  return h('span', { title: String(option.label || ''), style: selected ? '' : 'white-space: normal; overflow-wrap: anywhere; display: block' }, option.label);
+}
+function domainAccountLabel(domain: any) {
+  const account = accounts.value.find(account => account.id === domain.cfAccountId);
+  return dnsAccountLabel(account || { id: domain.cfAccountId, name: domain.accountName, credential_id: domain.credentialId, account_id: domain.account?.id }, t('dns.plans.credential'));
+}
+function domainPlanName(domain: any) { return zonePlan(domain.plan)?.name || t('dns.plans.unknown'); }
 
 const STORAGE_KEY = 'dns_selected_account';
 function loadSavedAccount(): string | null {
@@ -498,26 +530,13 @@ const filteredDomains = computed(() => {
 });
 
 const groupedDomains = computed(() => {
-  let list = allDomains.value;
-  // 账户筛选：选中具体账户时仅保留该账户的域名
-  if (selectedAccount.value && selectedAccount.value !== '__all__') {
-    const opt = accountOptions.value.find(o => o.value === selectedAccount.value);
-    if (opt) {
-      list = list.filter((d: any) => String(d.cfAccountId) === opt.value);
-    }
-  }
-  // 域名搜索过滤
-  if (searchQuery.value) {
-    const q = searchQuery.value.toLowerCase();
-    list = list.filter((d: any) => d.name?.toLowerCase().includes(q));
-  }
   const groups: Record<string, any[]> = {};
-  for (const d of list) {
-    const key = `${d.accountName || 'Unknown'} (${d.cfAccountId})`;
+  for (const d of filteredDomains.value) {
+    const key = String(d.cfAccountId);
     if (!groups[key]) groups[key] = [];
     groups[key].push(d);
   }
-  return Object.entries(groups).map(([accountName, domains]) => ({ accountName, domains }));
+  return Object.entries(groups).map(([accountId, domains]) => ({ accountId, accountName: domainAccountLabel(domains[0]), domains }));
 });
 
 const currentDomainInfo = computed(() =>
@@ -567,7 +586,7 @@ function onAccountChange(val: string) {
   dnsStore.clearSelection();
   selectedRecordIds.value = [];
   if (val === '__all__') {
-    expandedGroups.value = groupedDomains.value.map(g => g.accountName);
+    expandedGroups.value = groupedDomains.value.map(g => g.accountId);
   }
 }
 
@@ -921,7 +940,31 @@ async function handleToggleZoneStatus() {
 // ===== 批量添加域名 =====
 const showAddDomainModal = ref(false);
 const creatingDomains = ref(false);
-const newDomain = ref<{ account_id: number | null; type: 'full' | 'partial'; names: string }>({ account_id: null, type: 'full', names: '' });
+const newDomain = ref<{ account_id: number | null; type: 'full' | 'partial'; names: string; plan: ZonePlanId }>({ account_id: null, type: 'full', names: '', plan: 'free' });
+const plans = ref<ZonePlanOption[]>([]);
+const plansLoading = ref(false);
+const plansError = ref('');
+const plansSource = ref('');
+let planRequest = 0;
+const planOptions = computed(() => {
+  const options = plans.value.map(plan => ({ value: plan.id, label: `${plan.name}${plan.price !== undefined ? ` · ${plan.price} ${plan.currency || ''}${plan.frequency ? ` / ${plan.frequency}` : ''}` : ''}${plan.can_subscribe === false && plan.id !== 'free' ? ` · ${t('dns.plans.unavailable')}` : ''}` }));
+  if (!options.some(option => option.value === 'free')) options.unshift({ value: 'free', label: 'Free' });
+  return options;
+});
+watch([showAddDomainModal, () => newDomain.value.account_id], async ([show, accountId]) => {
+  const identity = ++planRequest;
+  plans.value = []; plansError.value = ''; plansSource.value = ''; plansLoading.value = false;
+  newDomain.value.plan = 'free';
+  if (!show || !accountId) return;
+  plansLoading.value = true;
+  try {
+    const { data } = await dnsApi.getPlans(accountId);
+    if (identity !== planRequest) return;
+    plans.value = data.plans; plansSource.value = data.source;
+  } catch (error: any) {
+    if (identity === planRequest) plansError.value = error.errorMessage || error.message;
+  } finally { if (identity === planRequest) plansLoading.value = false; }
+});
 const showResultModal = ref(false);
 const createResult = ref<any>(null);
 const zoneTypeOptions = computed(() => [
@@ -930,6 +973,7 @@ const zoneTypeOptions = computed(() => [
 ]);
 
 async function handleCreateDomains() {
+  if (creatingDomains.value || plansLoading.value) return;
   if (!newDomain.value.account_id) {
     message.warning(t('dns.msg.accountRequired'));
     return;
@@ -946,11 +990,12 @@ async function handleCreateDomains() {
       names: uniqueNames,
       account_id: newDomain.value.account_id,
       type: newDomain.value.type,
+      plan: newDomain.value.plan,
     });
     createResult.value = result;
     showResultModal.value = true;
     showAddDomainModal.value = false;
-    newDomain.value = { account_id: null, type: 'full', names: '' };
+    newDomain.value = { account_id: null, type: 'full', names: '', plan: 'free' };
   } catch (err: any) {
     message.error(err?.response?.data?.error?.message || t('dns.msg.createFailed'));
   } finally {
@@ -991,23 +1036,16 @@ function handleBatchDelete() {
 async function loadAccounts() {
   try {
     const { data } = await accountsApi.getAll();
-    const accounts = data?.accounts || [];
-    accountOptions.value = [
-      { label: t('dns.allAccounts'), value: '__all__' },
-      ...accounts.map((a: any) => ({ label: a.name, value: String(a.id) })),
-    ];
-    availableAccounts.value = accounts
-      .filter((a: any) => a.account_id)
-      .map((a: any) => ({ label: a.name, value: a.id }));
+    accounts.value = data?.accounts || [];
   } catch {
-    accountOptions.value = [{ label: t('dns.allAccounts'), value: '__all__' }];
+    accounts.value = [];
   }
 }
 
 // ===== 搜索时自动展开分组 =====
 watch(searchQuery, (val) => {
   if (val && selectedAccount.value === '__all__') {
-    expandedGroups.value = groupedDomains.value.map(g => g.accountName);
+    expandedGroups.value = groupedDomains.value.map(g => g.accountId);
   }
 });
 
@@ -1026,7 +1064,7 @@ onMounted(async () => {
     selectedAccount.value = '__all__';
   }
 
-  expandedGroups.value = groupedDomains.value.map(g => g.accountName);
+  expandedGroups.value = groupedDomains.value.map(g => g.accountId);
 });
 </script>
 

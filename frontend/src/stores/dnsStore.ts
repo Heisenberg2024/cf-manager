@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import type { BatchZone } from '../shared/dnsBatch';
+import type { ZonePlanId } from '../shared/zonePlans';
 import { dnsApi, type ZoneContext, type ZoneSelection } from '../api/dns';
 
 export const useDnsStore = defineStore('dns', () => {
@@ -60,9 +61,11 @@ export const useDnsStore = defineStore('dns', () => {
       if (identity === settingsIdentity) { settingsError.value = error.errorMessage || error.message; zoneSettings.value = {}; }
     } finally { if (identity === settingsIdentity) settingsLoading.value = false; }
   }
-  async function createDomains(data: { names: string[]; account_id: number; type: 'full' | 'partial' }) {
+  async function createDomains(data: { names: string[]; account_id: number; type: 'full' | 'partial'; plan?: ZonePlanId }) {
     const { data: result } = await dnsApi.createDomains(data);
-    await fetchDomains(true); return result;
+    // Preserve the creation receipt even if the subsequent list refresh fails.
+    try { await fetchDomains(true); } catch { /* The result dialog still reports the actual writes. */ }
+    return result;
   }
   async function deleteDomains(names: Array<string | ZoneSelection>) {
     const { data } = await dnsApi.deleteDomains(names);

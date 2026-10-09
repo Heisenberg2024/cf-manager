@@ -95,3 +95,5 @@ worker/src/services/dnsRecord.ts
 backend/src/services/dnsBatch.ts
 worker/src/services/dnsBatch.ts
 frontend/src/shared/
+backend/src/services/zonePlans.ts
+worker/src/services/zonePlans.ts

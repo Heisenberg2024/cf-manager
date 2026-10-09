@@ -348,6 +348,18 @@
     "selectedCount": "{count} Zones selected",
     "deleteSelected": "Delete selected ({count})",
     "allAccounts": "All Accounts",
+    "plans": {
+      "label": "Zone plan",
+      "credential": "Credential",
+      "unknown": "Plan unconfirmed",
+      "unavailable": "Currently unavailable; checked again when adding",
+      "loadFailed": "Could not read plans; Free is still available. Other plans require Billing Read / Billing Write permissions.",
+      "allocationHint": "Plans are assigned in input order. Remaining domains use Free when the selected plan is unavailable or its capacity is exhausted. Paid plans are billed according to Cloudflare prices and your contract.",
+      "newAccountHint": "This account has no domains yet. Plan availability will be checked after the first domain is created.",
+      "createdButFailed": "The domain was created, but plan processing is incomplete. Refresh and verify before adding it again.",
+      "creationUncertain": "The creation result is unconfirmed. Refresh the domain list and verify in Cloudflare before retrying.",
+      "fallbackCount": "{count} domains used the Free fallback"
+    },
     "noDomain": "No domains",
     "addDomainBtn": "Add Domain",
     "selectFromLeft": "Please select a domain from the left",

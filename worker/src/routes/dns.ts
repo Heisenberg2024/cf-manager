@@ -12,6 +12,7 @@ import { streamSSE } from 'hono/streaming';
 import { previewBatch, verifyPreview, executeBatch, type BatchPreview } from '../services/dnsBatch';
 import { dnsBatchRuntime, consumeDnsPreview } from '../services/dnsBatchRuntime';
 import { errorDetails } from '../services/cfErrors';
+import { createZonesWithPlan, getZonePlanOptions, parseCreateZonesInput } from '../services/zonePlans';
 
 const app = new Hono<{ Bindings: Env }>();
 function zoneContext(c: { req: { query(name: string): string | undefined } }) {
@@ -169,47 +170,25 @@ async function batchProcess<T, R>(
 // 批量创建 Zone
 app.post('/domains', async (c) => {
   const body = await c.req.json();
-  const { names, account_id, type } = body;
-  if (!Array.isArray(names) || !names.length || !account_id) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'names (string[]) and account_id are required' } }, 400);
-  }
-
-  const account = await getAccountById(c.env.DB, parseInt(account_id, 10));
+  const input = parseCreateZonesInput(body);
+  const account = await getAccountById(c.env.DB, input.account_id);
   if (!account) {
     return c.json({ error: { code: 'NOT_FOUND', message: 'Account not found' } }, 404);
   }
   if (isDemoAccount(account.id, c.env.DEMO_ACCOUNT_IDS)) {
     return c.json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可创建 Zone' } }, 403);
   }
-  const zoneType = type === 'partial' ? 'partial' : 'full';
-
-  const results = await batchProcess(
-    names as string[],
-    async (name) => {
-      const data = await cfFetch<any>(account, '/zones', c.env.ENCRYPTION_KEY, {
-        method: 'POST',
-        body: JSON.stringify({ name: name.trim(), account: { id: account.account_id }, type: zoneType }),
-      });
-      return { zone_id: data.result?.id || '', name_servers: data.result?.name_servers || [] };
-    }
-  );
-
-  const formatted = results.map(r => ({
-    name: r.item,
-    success: !r.error,
-    ...(r.result ? { zone_id: r.result.zone_id, name_servers: r.result.name_servers } : {}),
-    ...(r.error ? { error: r.error } : {}),
-  }));
+  const result = await createZonesWithPlan(await accountRequest(account, c.env.ENCRYPTION_KEY), account.account_id || '', input);
 
   await invalidateZonesCache(c.env.KV);
-  await addAuditLog(c.env.DB, { account_id: account.id, action: 'batch_create_zone', target: `accounts/${account_id}`, detail: `created ${formatted.filter(r => r.success).length}/${names.length} zones: ${names.join(', ')}`, status: 'success' });
+  await addAuditLog(c.env.DB, { account_id: account.id, action: 'batch_create_zone', target: `accounts/${input.account_id}`, detail: `plan=${input.plan}; succeeded ${result.succeeded}/${result.total}; Free fallback ${result.fallback_count}; ${result.results.map(row => `${row.name}: ${row.plan?.name || 'unknown'}${row.error ? ' (failed)' : ''}`).join(', ')}`, status: result.failed ? 'error' : 'success' });
+  return c.json(result, 201);
+});
 
-  return c.json({
-    total: names.length,
-    succeeded: formatted.filter(r => r.success).length,
-    failed: formatted.filter(r => !r.success).length,
-    results: formatted,
-  }, 201);
+app.get('/accounts/:accountId/plans', async (c) => {
+  const account = await getAccountById(c.env.DB, Number(c.req.param('accountId')));
+  if (!account?.account_id) return c.json({ error: { code: 'NOT_FOUND', message: 'Account with Cloudflare Account ID not found' } }, 404);
+  return c.json(await getZonePlanOptions(await accountRequest(account, c.env.ENCRYPTION_KEY), account.account_id));
 });
 
 // 批量删除 Zone

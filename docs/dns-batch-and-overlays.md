@@ -1,4 +1,21 @@
-# 多 Zone DNS、浮层与列表滚动（2.5.2）
+# 多 Zone DNS、套餐、浮层与列表滚动（2.5.3）
+
+## 账户身份与域名套餐（2.5.3）
+
+DNS 筛选、添加弹窗和域名分组统一展示凭证名称/本地凭证编号、账户名称与真实 Account ID；选择值和分组仍使用本地账户绑定 ID，同一 CF Account 经不同凭证绑定也不会混用。列表与详情直接展示 Cloudflare Zone `plan`，缺失时显示待确认。
+
+`GET /api/dns/accounts/:accountId/plans` 读取选定账户已有 Zone 的可用套餐；无现有 Zone 时提供 Free/Pro/Business/Enterprise 候选，首次创建后验证。`POST /api/dns/domains` 支持可选 `plan`（默认 `free`），按规范化/去重后的输入顺序创建并分配。`shared/zonePlans.ts` 同步双端：用 available_plans 的公开 `legacy_id` 订阅，不能把其不透明 `id` 作为 rate_plan ID；写后 GET Zone 确认实际套餐。
+
+只有新 Zone 的套餐明确不可订阅，或订阅返回明确容量拒绝，才把该项及余下域名保留为 Free。权限、限流、网络或实际套餐未生效不会报告为名额不足；流程停止后续域名，返回已创建 Zone/NS、实际套餐或待确认状态、错误与 `fallback_count`。创建回执不会因列表刷新失败丢失。公开 API 没有可靠剩余 Enterprise 名额，不推算或承诺数量；真实合约容量以 Cloudflare 返回为准。套餐读取/写入分别需要 Billing Read/Write，Free 创建不依赖 Billing 权限。[可用套餐](https://developers.cloudflare.com/api/resources/zones/subresources/plans/methods/list/)、[套餐订阅](https://developers.cloudflare.com/api/resources/zones/subresources/subscriptions/methods/create/)
+
+`shared/tests/zonePlans.contract.ts` 覆盖 5 域名/3 Enterprise 名额、显式容量拒绝、失败域名不消耗名额、读写权限、未知结果、未实际生效、空账户与归属错误；两端还有 HTTP 路由测试。隔离 UI 脚本检查同名凭证/账户、套餐标签、账户切换迟到响应、Billing 权限失败与 Free 选择、桌面/390px 窄屏：
+
+```sh
+# 可使用临时产物，不覆盖 frontend/dist
+cd frontend && node node_modules/vite/bin/vite.js build --outDir /private/tmp/cf-manager-dns-plans-dist
+cd ..
+FRONTEND_DIST=/private/tmp/cf-manager-dns-plans-dist PLAYWRIGHT_MODULE=/path/to/playwright node scripts/test-dns-plans-ui.mjs
+```
 
 ## 定位审计与根因
 

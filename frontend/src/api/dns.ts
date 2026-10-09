@@ -1,6 +1,7 @@
 import apiClient, { API_BASE_URL } from './client';
 import { readBatchStream } from '../utils/batchStream';
 import type { BatchSpec, BatchPreview, BatchEvent } from '../shared/dnsBatch';
+import type { ZonePlanId, ZonePlanOption } from '../shared/zonePlans';
 
 export interface ZoneContext { accountId?: number; zoneId?: string }
 export interface ZoneSelection extends ZoneContext { name: string }
@@ -27,8 +28,9 @@ export const dnsApi = {
   updateProxy: (domain: string, recordId: string, proxied: boolean, context: ZoneContext = {}) => apiClient.patch(`${domainPath(domain)}/proxy`, { record_id: recordId, proxied }, { params: context }),
 
   // Zone 管理
-  createDomains: (data: { names: string[]; account_id: number; type: 'full' | 'partial' }) =>
-    apiClient.post('/dns/domains', data),
+  getPlans: (accountId: number) => apiClient.get<{ plans: ZonePlanOption[]; source: string }>(`/dns/accounts/${accountId}/plans`, { _silent: true }),
+  createDomains: (data: { names: string[]; account_id: number; type: 'full' | 'partial'; plan?: ZonePlanId }) =>
+    apiClient.post('/dns/domains', data, { timeout: 0 }),
   deleteDomains: (domains: Array<string | ZoneSelection>) =>
     apiClient.delete('/dns/domains', { data: { domains } }),
   updateSettings: (domain: string, settings: Record<string, any>, context: ZoneContext = {}) =>

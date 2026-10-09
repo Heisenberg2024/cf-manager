@@ -348,6 +348,18 @@
     "selectedCount": "已选择 {count} 个域名",
     "deleteSelected": "删除选中 ({count})",
     "allAccounts": "所有账户",
+    "plans": {
+      "label": "域名套餐",
+      "credential": "凭证",
+      "unknown": "套餐待确认",
+      "unavailable": "当前不可订阅，添加时复核",
+      "loadFailed": "无法读取套餐；仍可选择 Free。选择其他套餐需要 Billing Read / Billing Write 权限。",
+      "allocationHint": "按域名输入顺序使用所选套餐，套餐不可用或名额不足时，余下域名使用 Free。付费套餐按 Cloudflare 价格和合约计费。",
+      "newAccountHint": "此账户暂无域名，套餐可用性将在首个域名创建后确认。",
+      "createdButFailed": "域名已创建，套餐处理未完成。请先刷新确认，避免重复添加。",
+      "creationUncertain": "创建结果尚未确认；请先刷新域名列表并到 Cloudflare 核实，再决定是否重试。",
+      "fallbackCount": "{count} 个域名已使用 Free 兜底"
+    },
     "noDomain": "暂无域名",
     "addDomainBtn": "添加域名",
     "selectFromLeft": "请从左侧选择一个域名",

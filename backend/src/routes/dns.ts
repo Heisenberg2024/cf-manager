@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { findAccountByDomain, getAllZones } from '../services/accountRouter';
 import { listDnsRecords, createDnsRecord, updateDnsRecord, deleteDnsRecord } from '../services/dnsService';
-import { getZoneSettings, updateProxyStatus, createZone, deleteZone, updateZoneSettings, purgeZoneCache, setZoneStatus, invalidateZonesCache } from '../services/zoneService';
+import { getZoneSettings, updateProxyStatus, deleteZone, updateZoneSettings, purgeZoneCache, setZoneStatus, invalidateZonesCache } from '../services/zoneService';
 import { getAccountById } from '../models/account';
 import { createAuditLog } from '../models/auditLog';
 import { isDemoAccountId } from './routeUtils';
@@ -11,6 +11,8 @@ import { config } from '../config';
 import { previewBatch, verifyPreview, executeBatch, type BatchPreview } from '../services/dnsBatch';
 import { dnsBatchRuntime, consumeDnsPreview } from '../services/dnsBatchRuntime';
 import { errorDetails } from '../services/cfErrors';
+import { accountRequest } from '../services/cfFactory';
+import { createZonesWithPlan, getZonePlanOptions, parseCreateZonesInput } from '../services/zonePlans';
 
 const router = Router();
 function zoneContext(req: Request) {
@@ -42,6 +44,14 @@ router.get('/domains', async (req: Request, res: Response, next: NextFunction) =
     const zones = await getAllZones(req.query.refresh === 'true');
     res.json(zones);
   } catch (err) { next(err); }
+});
+
+router.get('/accounts/:accountId/plans', async (req, res, next) => {
+  try {
+    const account = getAccountById(Number(req.params.accountId));
+    if (!account?.account_id) { res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Account with Cloudflare Account ID not found' } }); return; }
+    res.json(await getZonePlanOptions(accountRequest(account), account.account_id));
+  } catch (error) { next(error); }
 });
 
 router.get('/domains/:domain/records', async (req: Request, res: Response, next: NextFunction) => {
@@ -130,12 +140,8 @@ async function batchProcess<T, R>(
 // 批量创建 Zone
 router.post('/domains', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { names, account_id, type } = req.body;
-    if (!Array.isArray(names) || !names.length || !account_id) {
-      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'names (string[]) and account_id are required' } });
-      return;
-    }
-    const account = getAccountById(parseInt(account_id, 10));
+    const input = parseCreateZonesInput(req.body);
+    const account = getAccountById(input.account_id);
     if (!account) {
       res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Account not found' } });
       return;
@@ -144,29 +150,11 @@ router.post('/domains', async (req: Request, res: Response, next: NextFunction) 
       res.status(403).json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可创建 Zone' } });
       return;
     }
-    const zoneType = type === 'partial' ? 'partial' : 'full';
-
-    const results = await batchProcess(
-      names as string[],
-      (name) => createZone(account, name.trim(), zoneType as 'full' | 'partial')
-    );
-
-    const formatted = results.map(r => ({
-      name: r.item,
-      success: !r.error,
-      ...(r.result ? { zone_id: r.result.zone_id, name_servers: r.result.name_servers } : {}),
-      ...(r.error ? { error: r.error } : {}),
-    }));
+    const result = await createZonesWithPlan(accountRequest(account), account.account_id || '', input);
 
     invalidateZonesCache();
-    createAuditLog(account.id, 'batch_create_zone', `accounts/${account_id}`, `created ${formatted.filter(r => r.success).length}/${names.length} zones: ${names.join(', ')}`, 'success');
-
-    res.status(201).json({
-      total: names.length,
-      succeeded: formatted.filter(r => r.success).length,
-      failed: formatted.filter(r => !r.success).length,
-      results: formatted,
-    });
+    createAuditLog(account.id, 'batch_create_zone', `accounts/${input.account_id}`, `plan=${input.plan}; succeeded ${result.succeeded}/${result.total}; Free fallback ${result.fallback_count}; ${result.results.map(row => `${row.name}: ${row.plan?.name || 'unknown'}${row.error ? ' (failed)' : ''}`).join(', ')}`, result.failed ? 'error' : 'success');
+    res.status(201).json(result);
   } catch (err) { next(err); }
 });
 
