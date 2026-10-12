@@ -10,20 +10,44 @@ vi.mock('../services/cfApi', () => ({ cfFetch: mocks.cfFetch, cfFetchAll: mocks.
 vi.mock('../db/models', () => ({ getActiveAccountsByFeature: async () => [account, { ...account, id: 2, name: 'Testing', account_id: cfB }], getAccountById: mocks.account, addAuditLog: vi.fn() }));
 vi.mock('../services/demo', () => ({ isDemoAccount: mocks.demo }));
 import workerDns from '../routes/dns';
+import { getDnsDirectory } from '../services/dnsDirectory';
+const env = { DB: {}, KV: { get: async () => null, put: async () => {}, delete: async () => {} }, ENCRYPTION_KEY: 'test-key' } as unknown as Env;
 import { fakeZonePlans } from '../../../shared/tests/zonePlans.fixture';
 import { errorDetails } from '../services/cfErrors';
 import { responseWrapper } from '../middleware/responseWrapper';
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
+  getDnsDirectory(env.DB).invalidate();
+  mocks.request.mockImplementation(async a => async (path: string) => path.startsWith('/zones?') ? { result: [zone, { ...zone, id: 'zone-b', account: { id: cfB } }], result_info: { total_pages: 1 } } : path.includes('/dns_records') ? { result: [{ id: 'record-1', type: 'A', content: '192.0.2.1' }], result_info: { total_pages: 1 } } : { result: { ...zone, account: { id: a.account_id } } });
   mocks.account.mockResolvedValue(account); mocks.demo.mockReturnValue(false);
   mocks.cfFetchAll.mockImplementation(async (_account, path) => path.startsWith('/zones?') ? [zone, { ...zone, id: 'zone-b', account: { id: cfB } }] : [{ id: 'record-1', type: 'A', content: '192.0.2.1' }]);
   mocks.cfFetch.mockImplementation(async (_account, _path, _key, init) => ({ result: { id: 'record-1', ...(init?.body ? JSON.parse(init.body) : {}) } }));
 });
 describe('Worker DNS routes', () => {
-  const env = { DB: {}, KV: { get: async () => null, put: async () => {}, delete: async () => {} }, ENCRYPTION_KEY: 'test-key' } as unknown as Env;
   const app = new Hono<{ Bindings: Env }>().route('/dns', workerDns);
   app.onError((error, c) => { const detail = errorDetails(error); return c.json({ error: detail }, detail.statusCode as 400); });
+  it('exposes the same bounded page contract and fresh Account snapshot metadata', async () => {
+    const snapshot = await app.request('/dns/accounts/1/domains?refresh=true', {}, env);
+    expect(snapshot.status).toBe(200);
+    expect(snapshot.headers.get('Cache-Control')).toBe('no-store');
+    expect(await snapshot.json()).toMatchObject({ zones: [{ id: 'zone-a', cfAccountId: 1 }], meta: { accountId: 1, state: 'miss' } });
+    const response = await app.request('/dns/domains/example.test/records?accountId=1&zoneId=zone-a&page=2&perPage=500&type=TXT', {}, env);
+    expect(await response.json()).toMatchObject({ records: [{ id: 'record-1' }], meta: { scope: 'page' } });
+    expect((await app.request('/dns/domains/example.test/records?page=-1', {}, env)).status).toBe(400);
+  });
+  it('rejects actual Zone ownership mismatch without issuing a write', async () => {
+    mocks.request.mockResolvedValue(async () => ({ result: { ...zone, account: { id: cfB } } }));
+    const response = await app.request('/dns/domains/example.test/records?accountId=1&zoneId=zone-a', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }, env);
+    expect(response.status).toBe(409); expect(mocks.cfFetch).not.toHaveBeenCalled();
+  });
+  it('rejects a binding without DNS capability before reading or writing Cloudflare', async () => {
+    const unsafe = await app.request('/dns/domains/example.test/proxy?accountId=1&zoneId=zone-a', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ record_id: '../../foreign-zone', proxied: true }) }, env);
+    expect(unsafe.status).toBe(400); expect(mocks.cfFetch).not.toHaveBeenCalled();
+    mocks.account.mockResolvedValue({ ...account, enabled_features: 'ai' });
+    const response = await app.request('/dns/domains/example.test/records?accountId=1&zoneId=zone-a', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }, env);
+    expect(response.status).toBe(409); expect(mocks.request).not.toHaveBeenCalled(); expect(mocks.cfFetch).not.toHaveBeenCalled();
+  });
   it('recognizes contract Enterprise rates and continues after a failed first creation', async () => {
     const cf = fakeZonePlans({ capacity: 10, omitLegacyEnterprise: true, enterpriseName: 'Enterprise Website', enterpriseRateId: 'd'.repeat(32), failedName: 'bad.test' });
     mocks.request.mockResolvedValue(cf.request);
@@ -86,7 +110,8 @@ describe('Worker DNS routes', () => {
     const zones = await result.json() as Array<{ cfAccountId: number }>; expect(zones).toHaveLength(2);
     expect(zones.map(z => z.cfAccountId)).toEqual([1, 2]);
     await app.request('/dns/domains/example.test/records?accountId=1&zoneId=zone-a', {}, env);
-    expect(mocks.cfFetchAll).toHaveBeenCalledWith(account, '/zones/zone-a/dns_records', 'test-key', 100);
+    expect(mocks.request).toHaveBeenCalledWith(account, 'test-key');
+    expect(mocks.cfFetchAll).not.toHaveBeenCalled();
   });
   it('uses PATCH at Cloudflare for partial TTL edits, preserving existing record fields', async () => {
     const result = await app.request('/dns/domains/example.test/records/record-1?accountId=1&zoneId=zone-a', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ttl: 600 }) }, env);

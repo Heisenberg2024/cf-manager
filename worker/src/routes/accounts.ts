@@ -10,9 +10,11 @@ import { errorDetails } from '../services/cfErrors';
 import { updateCredential } from '../db/credentials';
 import { getQuotaSummary, invalidateAiCache } from '../services/quotaTracker';
 import { isDemoAccount, isDemoMode } from '../services/demo';
+import { getDnsDirectory } from '../services/dnsDirectory';
 
 const app = new Hono<{ Bindings: Env }>();
 async function invalidateAccountCaches(env: Env) {
+  getDnsDirectory(env.DB).invalidate();
   await env.KV.delete('dns_zones_all');
   await invalidateAiCache(env);
 }

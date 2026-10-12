@@ -135,6 +135,7 @@
 </template>
 
 <script setup lang="ts">
+import { useDnsStore } from './stores/dnsStore';
 import { ref, reactive, computed, h, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
@@ -267,6 +268,7 @@ function onResize() {
 }
 
 function onAuthExpired() {
+  useDnsStore().resetSensitiveState();
   isAuthenticated.value = false;
   showLogin.value = true;
 }
@@ -306,6 +308,7 @@ async function handleLogin() {
     showLogin.value = false;
   } catch {
     localStorage.removeItem('api_token');
+    useDnsStore().resetSensitiveState();
     isAuthenticated.value = false;
     globalMessage.error(t('app.invalidApiSecret'));
   } finally {
@@ -315,6 +318,7 @@ async function handleLogin() {
 
 function handleLogout() {
   localStorage.removeItem('api_token');
+  useDnsStore().resetSensitiveState();
   isAuthenticated.value = false;
   showLogin.value = true;
   loginSecret.value = '';

@@ -23,11 +23,12 @@ export const dnsApi = {
   },
   // 现有方法
   getDomains: (refresh = false) => apiClient.get('/dns/domains', { params: refresh ? { refresh: true } : {} }),
-  getRecords: (domain: string, context: ZoneContext = {}) => apiClient.get(`${domainPath(domain)}/records`, { params: context }),
+  getAccountDomains: (accountId: number, refresh = false, signal?: AbortSignal) => apiClient.get(`/dns/accounts/${accountId}/domains`, { params: { refresh }, signal, _silent: true }),
+  getRecords: (domain: string, context: ZoneContext = {}, signal?: AbortSignal) => apiClient.get(`${domainPath(domain)}/records`, { params: context, signal, _silent: true }),
   createRecord: (domain: string, data: any, context: ZoneContext = {}) => apiClient.post(`${domainPath(domain)}/records`, data, { params: context }),
   updateRecord: (domain: string, id: string, data: any, context: ZoneContext = {}) => apiClient.put(`${domainPath(domain)}/records/${id}`, data, { params: context }),
   deleteRecord: (domain: string, id: string, context: ZoneContext = {}) => apiClient.delete(`${domainPath(domain)}/records/${id}`, { params: context }),
-  getSettings: (domain: string, context: ZoneContext = {}) => apiClient.get(`${domainPath(domain)}/settings`, { params: context }),
+  getSettings: (domain: string, context: ZoneContext = {}, signal?: AbortSignal) => apiClient.get(`${domainPath(domain)}/settings`, { params: context, signal, _silent: true }),
   updateProxy: (domain: string, recordId: string, proxied: boolean, context: ZoneContext = {}) => apiClient.patch(`${domainPath(domain)}/proxy`, { record_id: recordId, proxied }, { params: context }),
 
   // Zone 管理

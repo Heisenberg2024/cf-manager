@@ -71,7 +71,7 @@ app.use('/api/*', authMiddleware);
 
 app.onError((err: any, c) => {
   const { statusCode: status, message, code } = errorDetails(err);
-  console.error(`[OnError] ${c.req.method} ${c.req.path}: ${message}`);
+  console.error(JSON.stringify({ event: 'api_error', method: c.req.method, path: c.req.path, status, code }));
   const path = c.req.path;
   if (path.startsWith('/v1') || path.startsWith('/api/v1')) {
     return c.json(

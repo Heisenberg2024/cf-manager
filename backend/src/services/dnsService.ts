@@ -1,5 +1,8 @@
 import { Account } from '../models/account';
-import { getCfClient } from './cfFactory';
+import { getCfClient, accountRequest } from './cfFactory';
+import { dnsDirectory } from './dnsDirectory';
+import { measureDnsWrite } from './performanceMetrics';
+import { dnsRecordId } from './dnsRecord';
 
 export interface DnsRecord {
   id: string;
@@ -11,26 +14,23 @@ export interface DnsRecord {
   priority?: number;
 }
 
-export async function listDnsRecords(account: Account, zoneId: string): Promise<DnsRecord[]> {
-  const cf = getCfClient(account);
-  const records: DnsRecord[] = [];
-  for await (const record of cf.dns.records.list({ zone_id: zoneId, per_page: 100 })) {
-    records.push(record as any);
-  }
-  return records;
+export async function listDnsRecords(account: Account, zoneId: string, signal?: AbortSignal): Promise<DnsRecord[]> {
+  return await dnsDirectory.all(account, accountRequest(account), `/zones/${zoneId}/dns_records`, 500, { signal }) as DnsRecord[];
 }
 
 export async function createDnsRecord(account: Account, zoneId: string, data: Partial<DnsRecord>): Promise<DnsRecord> {
-  const cf = getCfClient(account);
-  return await cf.dns.records.create({ zone_id: zoneId, ...data } as any) as any;
+  const cf = getCfClient(account, 0);
+  return await measureDnsWrite(account.id, () => cf.dns.records.create({ ...data, zone_id: zoneId } as any)) as any;
 }
 
 export async function updateDnsRecord(account: Account, zoneId: string, recordId: string, data: Partial<DnsRecord>): Promise<DnsRecord> {
-  const cf = getCfClient(account);
-  return await cf.dns.records.edit(recordId, { zone_id: zoneId, ...data } as any) as any;
+  recordId = dnsRecordId(recordId);
+  const cf = getCfClient(account, 0);
+  return await measureDnsWrite(account.id, () => cf.dns.records.edit(recordId, { ...data, zone_id: zoneId } as any)) as any;
 }
 
 export async function deleteDnsRecord(account: Account, zoneId: string, recordId: string): Promise<void> {
-  const cf = getCfClient(account);
-  await cf.dns.records.delete(recordId, { zone_id: zoneId });
+  recordId = dnsRecordId(recordId);
+  const cf = getCfClient(account, 0);
+  await measureDnsWrite(account.id, () => cf.dns.records.delete(recordId, { zone_id: zoneId }));
 }

@@ -1,6 +1,8 @@
 import NodeCache from 'node-cache';
-import { getActiveAccounts, getActiveAccountsByFeature, isPaidPlan, Account, AccountFeature } from '../models/account';
-import { getCfClient } from './cfFactory';
+import { getActiveAccounts, getActiveAccountsByFeature, isPaidPlan, getAccountById, Account, AccountFeature } from '../models/account';
+import { accountRequest } from './cfFactory';
+import { dnsDirectory } from './dnsDirectory';
+import { requireDnsBinding, parseZoneContext, type ZoneSnapshot } from './zoneDirectory';
 import { isPaidModelName } from './aiService';
 import { getAccountQuota, ResourceType } from './quotaTracker';
 import { getQuotaTodayByResource } from '../models/quotaUsage';
@@ -8,7 +10,6 @@ import { appLogger } from './logger';
 import pricingData from '../data/model-pricing.json';
 import { mapConcurrent } from '../utils/concurrent';
 
-const ZONES_CACHE_TTL = 300; // 5 minutes
 const QUOTA_CACHE_TTL = 60;  // 1 minute
 const AI_CACHE_KEY = 'ai_neuron_snapshot';
 const AI_CACHE_TTL = 600; // 10 min
@@ -24,63 +25,44 @@ function modelSupportsCaching(model: string): boolean {
   return !!(pricingData.models[model as keyof typeof pricingData.models] as any)?.cachedInput;
 }
 
-interface Zone {
-  id: string;
-  name: string;
-  status: string;
-  paused?: boolean;
-  account: { id: string; name: string };
-}
-
 interface AiSnapshotEntry {
   account: Account;
   used: number;
   _optimistic?: number;  // 乐观预估量，在 updateAiCacheAfterUsage 时修正
 }
 
-const zonesCache = new NodeCache({ stdTTL: ZONES_CACHE_TTL });
 const quotaCache = new NodeCache({ stdTTL: QUOTA_CACHE_TTL });
 
-export async function getAllZones(refresh = false): Promise<Array<Zone & { cfAccountId: number; credentialId?: number; accountName: string }>> {
-  const cacheKey = 'all_zones';
-  const cached = zonesCache.get<Array<Zone & { cfAccountId: number; credentialId?: number; accountName: string }>>(cacheKey);
-  if (cached && !refresh) return cached;
-
-  const accounts = getActiveAccountsByFeature('dns');
-
-  const results = await mapConcurrent(accounts, 3, async (account) => {
-    try {
-      if (!account.account_id) return [];
-      const cf = getCfClient(account);
-      const zones: Zone[] = [];
-      for await (const zone of cf.zones.list({ per_page: 50, account: { id: account.account_id } })) {
-        zones.push(zone as any);
-      }
-      return zones.filter(zone => zone.account?.id === account.account_id).map(zone => ({ ...zone, status: zone.paused ? 'paused' : zone.status, cfAccountId: account.id, credentialId: account.credential_id, accountName: account.name }));
-    } catch (err) {
-      appLogger.error(`Failed to fetch zones for account ${account.name}: ${err}`);
-      return [];
-    }
-  });
-  const allZones = results.flat();
-
-  zonesCache.set(cacheKey, allZones);
-  return allZones;
+export async function getAccountZones(accountId: number, refresh = false) {
+  const account = requireDnsBinding(getAccountById(accountId));
+  return dnsDirectory.list(account, accountRequest(account), { refresh });
 }
-
+export async function getZoneSnapshots(refresh = false, accountId?: number): Promise<ZoneSnapshot[]> {
+  if (accountId !== undefined) return [await getAccountZones(accountId, refresh)];
+  return mapConcurrent(getActiveAccountsByFeature('dns'), 3, async account => {
+    try { return await dnsDirectory.list(account, accountRequest(account), { refresh }); }
+    catch { appLogger.warn(`DNS Zone list failed for local Account ${account.id}`); return { zones: [], meta: { accountId: account.id, state: 'error', error: 'Account Zone fetch failed' } }; }
+  });
+}
+export async function getAllZones(refresh = false, accountId?: number) {
+  return (await getZoneSnapshots(refresh, accountId)).flatMap(snapshot => snapshot.zones);
+}
 export async function findAccountByDomain(domain: string, context: { accountId?: number; zoneId?: string } = {}): Promise<{ account: Account; zoneId: string }> {
-  const zones = await getAllZones();
-  const matches = zones.filter(z => z.name === domain && (!context.accountId || z.cfAccountId === context.accountId) && (!context.zoneId || z.id === context.zoneId));
+  context = parseZoneContext(context);
+  if (context.accountId && context.zoneId) {
+    const account = requireDnsBinding(getAccountById(context.accountId));
+    return dnsDirectory.resolve(account, accountRequest(account), domain, context.zoneId);
+  }
+  // Legacy callers still detect ambiguity, then validate the selected binding live.
+  const snapshots = await getZoneSnapshots(true, context.accountId);
+  if (snapshots.some(snapshot => snapshot.meta.state === 'error')) throw Object.assign(new Error('Account scan incomplete; specify accountId and zoneId'), { statusCode: 503, code: 'INCOMPLETE_ACCOUNT_SCAN' });
+  const zones = snapshots.flatMap(snapshot => snapshot.zones);
+  const matches = zones.filter(z => z.name.toLowerCase() === domain.toLowerCase() && (!context.zoneId || z.id === context.zoneId));
   if (matches.length > 1) throw Object.assign(new Error(`Domain ${domain} has multiple local Account bindings; specify accountId and zoneId`), { statusCode: 409, code: 'AMBIGUOUS_ACCOUNT' });
   const zone = matches[0];
-  if (!zone) {
-    throw Object.assign(new Error(`Domain ${domain} not found in any account`), { statusCode: 404, code: 'DOMAIN_NOT_FOUND' });
-  }
-  const account = getActiveAccounts().find(a => a.id === zone.cfAccountId);
-  if (!account) {
-    throw Object.assign(new Error('Account not found'), { statusCode: 500, code: 'ACCOUNT_NOT_FOUND' });
-  }
-  return { account, zoneId: zone.id };
+  if (!zone) throw Object.assign(new Error(`Domain ${domain} not found in any account`), { statusCode: 404, code: 'DOMAIN_NOT_FOUND' });
+  const account = requireDnsBinding(getAccountById(zone.cfAccountId));
+  return dnsDirectory.resolve(account, accountRequest(account), domain, zone.id);
 }
 
 const RESOURCE_FEATURE_MAP: Record<ResourceType, AccountFeature> = {
@@ -247,7 +229,7 @@ export function clearCache(resource?: ResourceType): void {
     }
   } else {
     // Clear all caches (backward compatibility)
-    zonesCache.flushAll();
+    dnsDirectory.invalidate();
     quotaCache.flushAll();
   }
 }

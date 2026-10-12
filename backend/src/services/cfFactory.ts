@@ -4,6 +4,7 @@ import { decrypt, DecryptError } from './encryptionService';
 import { getHttpAgentForAccount } from './proxyService';
 import { proxyFetch } from './proxyService';
 import { createCfRequest, authHeaders, type AuthInput, type CfRequest } from './accountDiscovery';
+import { recordPerformance } from './performanceMetrics';
 
 /** 错误提示里用的账号标识：让用户在几十个账号里知道是哪一个坏了。 */
 function accountLabel(account: Account): string {
@@ -34,10 +35,10 @@ export function getAuthHeaders(account: Account): Record<string, string> {
   return { 'X-Auth-Email': account.email, 'X-Auth-Key': decryptCredential(account.api_key, account) };
 }
 
-export function getCfClient(account: Account): Cloudflare {
+export function getCfClient(account: Account, maxRetries = 2): Cloudflare {
   if (account.is_enabled === 0) throw Object.assign(new Error(`Account ${account.name} (${account.account_id}) is disabled`), { statusCode: 409, code: 'ACCOUNT_DISABLED' });
   const httpAgent = getHttpAgentForAccount(account);
-  const opts: Record<string, any> = { timeout: 30000, maxRetries: 2 };
+  const opts: Record<string, any> = { timeout: maxRetries === 0 ? 15000 : 30000, maxRetries };
   if (httpAgent) opts.httpAgent = httpAgent;
 
   if (account.auth_type === 'token') {
@@ -58,5 +59,5 @@ export function credentialRequest(input: AuthInput, account?: Account): CfReques
 }
 
 export function accountRequest(account: Account): CfRequest {
-  return createCfRequest((path, init) => proxyFetch(`https://api.cloudflare.com/client/v4${path}`, { ...init, signal: AbortSignal.timeout(15000) }, 15000, undefined, account), getAuthHeaders(account), `Account ${account.name} (${account.account_id})`);
+  return createCfRequest((path, init) => proxyFetch(`https://api.cloudflare.com/client/v4${path}`, { ...init, signal: init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000) }, 15000, undefined, account), getAuthHeaders(account), `Account ${account.name} (${account.account_id})`, undefined, metric => recordPerformance({ accountId: account.id, proxy: !!account.proxy_enabled, ...metric }));
 }

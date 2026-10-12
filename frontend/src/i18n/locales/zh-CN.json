@@ -565,6 +565,12 @@
       "summary": "共 {total} 个：成功 {success}，失败 {failed}，结果未确认 {uncertain}",
       "refreshFailed": "删除结果已保留，域名列表刷新失败，请手动刷新。",
       "processing": "处理中"
+    },
+    "cacheStatus": {
+      "refreshing": "正在刷新，已有数据仍可浏览",
+      "stale": "显示上次成功快照，正在后台更新",
+      "accountFailed": "获取失败；已有列表可能过期",
+      "retry": "重试"
     }
   },
   "workers": {

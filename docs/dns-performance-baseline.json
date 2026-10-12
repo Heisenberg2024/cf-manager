@@ -1,0 +1,51 @@
+{
+  "baselineRef": "7d45afd49ca307ca3264ef8c23ab5e3a7da51b6a",
+  "runtime": "v24.21.0",
+  "scenario": "20 Accounts, 600 Zones, synthetic 5ms/page; local Vitest, not production latency",
+  "before": {
+    "accounts": 20,
+    "zones": 600,
+    "pageLatencyMs": 5,
+    "measurements": {
+      "allCold": {
+        "ms": 42.71,
+        "calls": 20
+      },
+      "allWarm": {
+        "ms": 1.34,
+        "calls": 0
+      },
+      "preciseCold": {
+        "ms": 41.66,
+        "calls": 20
+      },
+      "tenConcurrentCold": {
+        "ms": 53.37,
+        "calls": 200
+      }
+    }
+  },
+  "after": {
+    "accounts": 20,
+    "zones": 600,
+    "pageLatencyMs": 5,
+    "measurements": {
+      "allCold": {
+        "ms": 43.27,
+        "calls": 20
+      },
+      "allWarm": {
+        "ms": 0.32,
+        "calls": 0
+      },
+      "preciseCold": {
+        "ms": 5.89,
+        "calls": 1
+      },
+      "tenConcurrentCold": {
+        "ms": 41.64,
+        "calls": 20
+      }
+    }
+  }
+}

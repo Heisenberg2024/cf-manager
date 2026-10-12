@@ -9,7 +9,7 @@ export interface AppError extends Error {
 
 export function errorHandler(err: AppError, req: Request, res: Response, _next: NextFunction): void {
   const { statusCode, code, message } = errorDetails(err);
-  appLogger.error(`[${code}] ${req.method} ${req.originalUrl} - ${err.message}`);
+  appLogger.error(JSON.stringify({ event: 'api_error', code, status: statusCode, method: req.method, path: req.originalUrl.split('?')[0] }));
   if (res.headersSent) {
     return;
   }

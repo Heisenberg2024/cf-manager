@@ -87,7 +87,7 @@ DNS 记录统一流程：配置 → Preview → 核对变更/目标数量 → �
 - 共用 `createCfRequest`：只对明确 429 重试，最多两次，优先 Retry-After，否则 500ms/1000ms backoff；超过 5 秒的等待指示返回真实限流错误而不提前重试。模糊网络写入失败不自动重试。
 - SSE 支持 PENDING/RUNNING/SUCCESS/SKIPPED/CONFLICT/NOT_FOUND/FAILED；结果可按成功/失败/跳过/冲突/未找到过滤，携带 Zone/记录/动作/HTTP status/CF code/message。发生断流时显示结果未确认，刷新并重新预览，不能重发已消费预览。
 - 日志/审计只保存身份、动作、结果和错误码，不无条件记录 TXT Content。认证信息沿用现有脱敏流程。
-- 完成或断流后刷新受影响的当前 Zone；其他 Zone 没有记录缓存，下次打开直接请求 CF。记录/设置请求身份与 Preview generation 防止旧请求覆盖新状态。
+- 完成或断流后刷新受影响的当前 Zone；2.6.0 起记录使用按 Account/Zone 隔离的有限内存 LRU；批量只失效受影响 Zone（含凭证别名），近期未受影响 Zone 复访可直接展示。详见 `dns-performance.md`。记录/设置请求身份与 Preview generation 防止旧请求覆盖新状态。
 
 ## 升级、构建与限制
 

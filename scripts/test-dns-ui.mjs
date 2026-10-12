@@ -42,6 +42,7 @@ const server=createServer(async(req,res)=>{
    if(path==='/credentials')return json([]);
    if(path==='/quota')return json(accounts.map(a=>({accountId:a.id,accountName:a.name,resources:[{resource:'ai_neurons',count:5,limit:10000}]})));
    if(path.startsWith('/audit-log'))return json([]);
+    if (/^\/dns\/accounts\/\d+\/domains$/.test(path)) return json({ zones: zones.filter(zone => zone.cfAccountId === Number(path.split('/')[3])), meta: { state: 'miss' } });
    if(path==='/dns/domains')return json(zones);
    if(path==='/dns/batch/preview'){lastSpec=body;lastPlan=await batch.previewBatch(body,runtime,secret);return json(lastPlan);}
    if(path==='/dns/batch/execute'){

@@ -565,6 +565,12 @@
       "summary": "Total {total}: succeeded {success}, failed {failed}, unconfirmed {uncertain}",
       "refreshFailed": "Deletion results were preserved, but the domain list refresh failed. Refresh manually.",
       "processing": "Processing"
+    },
+    "cacheStatus": {
+      "refreshing": "Refreshing; existing data remains available",
+      "stale": "Showing the last successful snapshot; refreshing in the background",
+      "accountFailed": "Fetch failed; existing results may be stale",
+      "retry": "Retry"
     }
   },
   "workers": {

@@ -97,3 +97,7 @@ worker/src/services/dnsBatch.ts
 frontend/src/shared/
 backend/src/services/zonePlans.ts
 worker/src/services/zonePlans.ts
+backend/src/services/readScheduler.ts
+worker/src/services/readScheduler.ts
+backend/src/services/zoneDirectory.ts
+worker/src/services/zoneDirectory.ts

@@ -1,13 +1,13 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { ref, shallowRef } from 'vue';
 import type { BatchZone } from '../shared/dnsBatch';
 import type { CreateZoneResult, ZonePlanId } from '../shared/zonePlans';
 import type { ApiError } from '../api/client';
 import { dnsApi, type ZoneContext, type ZoneSelection } from '../api/dns';
 
 export const useDnsStore = defineStore('dns', () => {
-  const domains = ref<any[]>([]);
-  const records = ref<any[]>([]);
+  const domains = shallowRef<any[]>([]);
+  const records = shallowRef<any[]>([]);
   const currentDomain = ref('');
   const currentContext = ref<ZoneContext>({});
   const loading = ref(false);
@@ -16,47 +16,197 @@ export const useDnsStore = defineStore('dns', () => {
   const settingsLoading = ref(false);
   const recordsError = ref('');
   const settingsError = ref('');
+  const domainErrors = ref<Record<number, string>>({});
+  const domainStates = ref<Record<number, string>>({});
   let domainIdentity = 0;
   let recordIdentity = 0;
   let settingsIdentity = 0;
+  let sessionRevision = 0;
+  let activeRecordsComplete = false;
+  let accountIds: number[] | undefined;
+  let accountVersions = new Map<number, string>();
+  let domainScope: number[] | undefined;
+  let domainController: AbortController | undefined;
+  let recordController: AbortController | undefined;
+  let settingsController: AbortController | undefined;
+  const recordCache = new Map<string, { rows: any[]; fetchedAt: number }>();
+  const revisions = new Map<string, number>();
+  let recordFlight: { key: string; promise: Promise<void> } | undefined;
   const key = (domain: string, context: ZoneContext) => `${context.accountId || ''}:${context.zoneId || ''}:${domain}`;
   const isCurrent = (domain: string, context: ZoneContext) => key(domain, context) === key(currentDomain.value, currentContext.value);
-
+  function cacheRecords(cacheKey: string, rows: any[], fetchedAt = Date.now()) {
+    recordCache.delete(cacheKey);
+    if (rows.length <= 20000) recordCache.set(cacheKey, { rows, fetchedAt });
+    while (recordCache.size > 30 || [...recordCache.values()].reduce((count, entry) => count + entry.rows.length, 0) > 50000) recordCache.delete(recordCache.keys().next().value!);
+  }
+  function configureAccounts(bindings: Array<{ id: number } & Record<string, unknown>>) {
+    const next = new Map(bindings.map(account => [account.id, JSON.stringify(account)]));
+    for (const [id, version] of accountVersions) if (next.get(id) !== version) {
+      for (const cacheKey of recordCache.keys()) if (cacheKey.startsWith(`${id}:`)) { recordCache.delete(cacheKey); revisions.set(cacheKey, (revisions.get(cacheKey) || 0) + 1); }
+      domains.value = domains.value.filter(zone => zone.cfAccountId !== id);
+      if (currentContext.value.accountId === id) clearSelection();
+    }
+    accountVersions = next; accountIds = bindings.map(account => account.id);
+  }
   function clearSelection() {
+    recordController?.abort(); settingsController?.abort();
     ++recordIdentity; ++settingsIdentity;
     currentDomain.value = ''; currentContext.value = {};
     records.value = []; zoneSettings.value = {};
+    activeRecordsComplete = false;
     loading.value = false; settingsLoading.value = false;
     recordsError.value = ''; settingsError.value = '';
   }
-  async function fetchDomains(refresh = false) {
+  function resetSensitiveState() {
+    sessionRevision++;
+    clearSelection(); domainController?.abort(); ++domainIdentity;
+    domains.value = []; domainErrors.value = {}; domainStates.value = {}; domainsLoading.value = false;
+    recordCache.clear(); revisions.clear(); accountVersions.clear(); accountIds = undefined; domainScope = undefined;
+  }
+  function setDomainScope(scope: number[]) { domainScope = scope; }
+  async function fetchDomains(refresh = false, scope: number[] | undefined = domainScope ?? accountIds) {
     const identity = ++domainIdentity;
+    domainController?.abort(); const controller = domainController = new AbortController();
     domainsLoading.value = true;
+    if (scope) for (const id of scope) { delete domainErrors.value[id]; delete domainStates.value[id]; }
+    else { domainErrors.value = {}; domainStates.value = {}; }
+    const reconcile = (ids?: number[]) => {
+      if ((!ids || ids.includes(currentContext.value.accountId!)) && currentDomain.value && !domains.value.some(d => d.name === currentDomain.value && (!currentContext.value.accountId || d.cfAccountId === currentContext.value.accountId) && (!currentContext.value.zoneId || d.id === currentContext.value.zoneId))) clearSelection();
+    };
     try {
-      const { data } = await dnsApi.getDomains(refresh);
-      if (identity !== domainIdentity) return;
-      domains.value = data;
-      if (currentDomain.value && !domains.value.some(d => d.name === currentDomain.value && (!currentContext.value.accountId || d.cfAccountId === currentContext.value.accountId) && (!currentContext.value.zoneId || d.id === currentContext.value.zoneId))) clearSelection();
+      if (!scope) {
+        const { data } = await dnsApi.getDomains(refresh);
+        if (identity !== domainIdentity) return;
+        domains.value = data; reconcile(); return;
+      }
+      const queue = [...scope];
+      const staleIds: number[] = [];
+      const order = new Map((accountIds ?? scope).map((id, index) => [id, index]));
+      const merge = (id: number, zones: any[]) => {
+        domains.value = [...domains.value.filter(zone => zone.cfAccountId !== id), ...zones].sort((a, b) => (order.get(a.cfAccountId) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.cfAccountId) ?? Number.MAX_SAFE_INTEGER));
+      };
+      await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => {
+        while (queue.length && identity === domainIdentity) {
+          const id = queue.shift()!;
+          try {
+            const { data } = await dnsApi.getAccountDomains(id, refresh, controller.signal);
+            if (identity !== domainIdentity) return;
+            merge(id, data.zones);
+            domainStates.value[id] = data.meta.state;
+            if (data.meta.error) domainErrors.value[id] = data.meta.error;
+            reconcile([id]);
+            if (data.meta.state === 'stale') staleIds.push(id);
+          } catch (error: any) {
+            if (identity === domainIdentity) { domainErrors.value[id] = error.errorMessage || error.message; domainStates.value[id] = 'error'; }
+          }
+        }
+      }));
+      // Show the stale snapshot first, then join server revalidation after other accounts can render.
+      await Promise.all(Array.from({ length: Math.min(2, staleIds.length) }, async () => {
+        while (staleIds.length && identity === domainIdentity) {
+          const id = staleIds.shift()!;
+          try {
+            const { data } = await dnsApi.getAccountDomains(id, true, controller.signal);
+            if (identity !== domainIdentity) return;
+            merge(id, data.zones);
+            domainStates.value[id] = data.meta.state; delete domainErrors.value[id]; reconcile([id]);
+          } catch (error: any) { if (identity === domainIdentity) { domainErrors.value[id] = error.errorMessage || error.message; domainStates.value[id] = 'error'; } }
+        }
+      }));
     } finally { if (identity === domainIdentity) domainsLoading.value = false; }
   }
-  async function fetchRecords(domain: string, context: ZoneContext = currentContext.value) {
+  function fetchRecords(domain: string, context: ZoneContext = currentContext.value, refresh = false): Promise<void> {
+    context = { ...context };
+    const cacheKey = key(domain, context);
+    if (!refresh && recordFlight?.key === cacheKey && isCurrent(domain, context)) return recordFlight.promise;
     const changed = !isCurrent(domain, context);
-    if (changed) { records.value = []; zoneSettings.value = {}; ++settingsIdentity; settingsLoading.value = false; settingsError.value = ''; }
-    currentDomain.value = domain; currentContext.value = { ...context };
+    recordController?.abort();
+    recordFlight = undefined;
+    if (changed) { records.value = []; activeRecordsComplete = false; zoneSettings.value = {}; ++settingsIdentity; settingsController?.abort(); settingsLoading.value = false; settingsError.value = ''; }
+    currentDomain.value = domain; currentContext.value = context;
     const identity = ++recordIdentity;
+    const revision = revisions.get(cacheKey) || 0;
+    const cacheable = !!context.accountId && !!context.zoneId;
+    const cached = cacheable ? recordCache.get(cacheKey) : undefined;
+    if (cached && Date.now() - cached.fetchedAt < 120000) {
+      records.value = cached.rows; cacheRecords(cacheKey, cached.rows, cached.fetchedAt);
+      activeRecordsComplete = true;
+      if (!refresh && Date.now() - cached.fetchedAt < 30000) { recordsError.value = ''; loading.value = false; return Promise.resolve(); }
+    } else if (changed) records.value = [];
+    const controller = recordController = new AbortController();
     loading.value = true; recordsError.value = '';
+    const promise: Promise<void> = (async () => {
+      try {
+        const { data } = await dnsApi.getRecords(domain, context, controller.signal);
+        if (controller.signal.aborted || revision !== (revisions.get(cacheKey) || 0)) return;
+        if (cacheable) cacheRecords(cacheKey, data);
+        if (identity === recordIdentity && isCurrent(domain, context)) { records.value = data; activeRecordsComplete = true; }
+      } catch (error: any) {
+        if (identity === recordIdentity && !controller.signal.aborted) { recordsError.value = error.errorMessage || error.message; recordCache.delete(cacheKey); }
+      } finally { if (identity === recordIdentity) { loading.value = false; recordFlight = undefined; } }
+    })();
+    recordFlight = { key: cacheKey, promise }; return promise;
+  }
+  function applyRecord(domain: string, context: ZoneContext, recordId: string, row?: any) {
+    const cacheKey = key(domain, context);
+    revisions.set(cacheKey, (revisions.get(cacheKey) || 0) + 1);
+    for (const alias of recordCache.keys()) if (alias !== cacheKey && alias.split(':')[1] === context.zoneId) { recordCache.delete(alias); revisions.set(alias, (revisions.get(alias) || 0) + 1); }
+    if (!isCurrent(domain, context) && currentContext.value.zoneId === context.zoneId) void fetchRecords(currentDomain.value, { ...currentContext.value }, true);
+    const cached = recordCache.get(cacheKey);
+    const current = isCurrent(domain, context);
+    if (current && !cached && !activeRecordsComplete) { void fetchRecords(domain, context, true); return; }
+    const rows = cached?.rows ?? (current ? records.value : undefined);
+    if (!rows) return;
+    const exists = rows.some(record => record.id === recordId);
+    const next = row ? (exists ? rows.map(record => record.id === recordId ? row : record) : [...rows, row]) : rows.filter(record => record.id !== recordId);
+    if (context.accountId && context.zoneId) cacheRecords(cacheKey, next, cached?.fetchedAt ?? 0);
+    if (current) { ++recordIdentity; recordController?.abort(); loading.value = false; records.value = next; }
+  }
+  async function saveRecord(domain: string, context: ZoneContext, body: any, recordId?: string) {
+    const session = sessionRevision, version = accountVersions.get(context.accountId!);
+    const valid = () => session === sessionRevision && version === accountVersions.get(context.accountId!);
     try {
-      const { data } = await dnsApi.getRecords(domain, { ...context });
-      if (identity === recordIdentity && isCurrent(domain, context)) records.value = data;
-    } catch (error: any) {
-      if (identity === recordIdentity) recordsError.value = error.errorMessage || error.message;
-    } finally { if (identity === recordIdentity) loading.value = false; }
+      const { data } = recordId ? await dnsApi.updateRecord(domain, recordId, body, context) : await dnsApi.createRecord(domain, body, context);
+      if (!valid()) return data;
+      if (data?.id) applyRecord(domain, context, data.id, data);
+      else await invalidateRecords([{ accountId: context.accountId!, zoneId: context.zoneId!, zoneName: domain, credentialId: 0 }]);
+      return data;
+    } catch (error) { if (valid()) recordCache.delete(key(domain, context)); throw error; }
+  }
+  async function removeRecord(domain: string, context: ZoneContext, recordId: string) {
+    const session = sessionRevision, version = accountVersions.get(context.accountId!);
+    const valid = () => session === sessionRevision && version === accountVersions.get(context.accountId!);
+    try { await dnsApi.deleteRecord(domain, recordId, context); if (valid()) applyRecord(domain, context, recordId); }
+    catch (error) { if (valid()) recordCache.delete(key(domain, context)); throw error; }
+  }
+  const proxyPending = ref<Set<string>>(new Set());
+  async function toggleProxy(domain: string, context: ZoneContext, recordId: string, proxied: boolean) {
+    const session = sessionRevision, version = accountVersions.get(context.accountId!);
+    const valid = () => session === sessionRevision && version === accountVersions.get(context.accountId!);
+    const pendingKey = `${key(domain, context)}:${recordId}`;
+    if (proxyPending.value.has(pendingKey)) return;
+    proxyPending.value = new Set([...proxyPending.value, pendingKey]);
+    const old = (recordCache.get(key(domain, context))?.rows ?? records.value).find(row => row.id === recordId);
+    if (!old) { proxyPending.value.delete(pendingKey); return; }
+    applyRecord(domain, context, recordId, { ...old, proxied, ...(proxied ? { ttl: 1 } : {}) });
+    try {
+      const { data } = await dnsApi.updateProxy(domain, recordId, proxied, context);
+      if (!valid()) return;
+      const confirmed = data?.record || data;
+      if (confirmed?.id) applyRecord(domain, context, recordId, confirmed);
+      else {
+        await invalidateRecords([{ accountId: context.accountId!, zoneId: context.zoneId!, zoneName: domain, credentialId: 0 }]);
+        if (currentContext.value.zoneId === context.zoneId && recordsError.value) throw new Error(recordsError.value);
+      }
+    } catch (error) { if (valid()) { applyRecord(domain, context, recordId, old); recordCache.delete(key(domain, context)); } throw error; }
+    finally { const next = new Set(proxyPending.value); next.delete(pendingKey); proxyPending.value = next; }
   }
   async function fetchZoneSettings(domain: string, context: ZoneContext = currentContext.value) {
+    settingsController?.abort(); const controller = settingsController = new AbortController();
     const identity = ++settingsIdentity;
     settingsLoading.value = true; settingsError.value = '';
     try {
-      const { data } = await dnsApi.getSettings(domain, { ...context });
+      const { data } = await dnsApi.getSettings(domain, { ...context }, controller.signal);
       if (identity === settingsIdentity && isCurrent(domain, context)) zoneSettings.value = data;
     } catch (error: any) {
       if (identity === settingsIdentity) { settingsError.value = error.errorMessage || error.message; zoneSettings.value = {}; }
@@ -91,14 +241,23 @@ export const useDnsStore = defineStore('dns', () => {
       onProgress?.(name, results[results.length - 1]);
     }
     // Preserve the creation receipt even if the subsequent list refresh fails.
-    try { await fetchDomains(true); } catch { /* The result dialog still reports the actual writes. */ }
+    try { await fetchDomains(true, [input.account_id]); } catch { /* The result dialog still reports the actual writes. */ }
     return { total: results.length, succeeded: results.filter(row => row.success).length, failed: results.filter(row => !row.success).length,
       fallback_count: results.filter(row => row.fallback).length, pending_count: results.filter(row => row.activation_pending).length, results };
   }
   async function deleteDomains(names: Array<string | ZoneSelection>) {
     const { data } = await dnsApi.deleteDomains(names);
-    try { await fetchDomains(true); } catch { /* Preserve per-Zone deletion receipts when refresh fails. */ }
+    forgetDeletedZones(data.results || []);
+    try { await fetchDomains(true, names.every(name => typeof name !== 'string' && name.accountId) ? [...new Set(names.map(name => (name as ZoneSelection).accountId!))] : accountIds); } catch { /* Preserve per-Zone deletion receipts when refresh fails. */ }
     return data;
+  }
+  function forgetDeletedZones(results: Array<ZoneSelection & { success?: boolean }>) {
+    const touched = new Set(results.map(result => result.zoneId).filter(Boolean));
+    const deleted = new Set(results.filter(result => result.success).map(result => result.zoneId).filter(Boolean));
+    if (recordFlight && touched.has(recordFlight.key.split(':')[1])) revisions.set(recordFlight.key, (revisions.get(recordFlight.key) || 0) + 1);
+    for (const cacheKey of recordCache.keys()) if (touched.has(cacheKey.split(':')[1])) { recordCache.delete(cacheKey); revisions.set(cacheKey, (revisions.get(cacheKey) || 0) + 1); }
+    domains.value = domains.value.filter(zone => !deleted.has(zone.id));
+    if (deleted.has(currentContext.value.zoneId)) clearSelection();
   }
   async function updateZoneSettings(domain: string, settings: Record<string, any>) {
     const context = { ...currentContext.value };
@@ -112,16 +271,16 @@ export const useDnsStore = defineStore('dns', () => {
   }
   async function updateZoneStatus(domain: string, paused: boolean) {
     await dnsApi.updateStatus(domain, paused, { ...currentContext.value });
-    await fetchDomains(true);
+    await fetchDomains(true, currentContext.value.accountId ? [currentContext.value.accountId] : accountIds);
   }
-  // Records are never cached outside the active Zone. All other Zones read CF on next open.
   async function invalidateRecords(zones: BatchZone[]) {
-    if(zones.some(z => isCurrent(z.zoneName, {accountId:z.accountId, zoneId:z.zoneId}))) {
-      records.value = []; ++recordIdentity;
-      await fetchRecords(currentDomain.value, {...currentContext.value});
+    for (const zone of zones) {
+      const keys = new Set([key(zone.zoneName, { accountId: zone.accountId, zoneId: zone.zoneId }), ...[...recordCache.keys()].filter(cacheKey => cacheKey.split(':')[1] === zone.zoneId)]);
+      for (const cacheKey of keys) { recordCache.delete(cacheKey); revisions.set(cacheKey, (revisions.get(cacheKey) || 0) + 1); }
     }
+    if (zones.some(z => z.zoneId === currentContext.value.zoneId)) await fetchRecords(currentDomain.value, { ...currentContext.value }, true);
   }
-  return { invalidateRecords, domains, records, currentDomain, currentContext, loading, domainsLoading, recordsError,
+  return { forgetDeletedZones, resetSensitiveState, setDomainScope, configureAccounts, domainErrors, domainStates, saveRecord, removeRecord, toggleProxy, proxyPending, invalidateRecords, domains, records, currentDomain, currentContext, loading, domainsLoading, recordsError,
     zoneSettings, settingsLoading, settingsError, fetchDomains, fetchRecords, clearSelection, isCurrent,
     createDomains, deleteDomains, fetchZoneSettings, updateZoneSettings, purgeZoneCache, updateZoneStatus };
 });

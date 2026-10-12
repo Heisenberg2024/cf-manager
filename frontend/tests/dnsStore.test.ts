@@ -1,10 +1,11 @@
-import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
-const mock=vi.hoisted(()=>({getRecords:vi.fn(),getSettings:vi.fn(),getDomains:vi.fn(),createDomains:vi.fn(),deleteDomains:vi.fn()}));
+const mock=vi.hoisted(()=>({getRecords:vi.fn(),getSettings:vi.fn(),getDomains:vi.fn(),getAccountDomains:vi.fn(),createDomains:vi.fn(),deleteDomains:vi.fn(),createRecord:vi.fn(),updateRecord:vi.fn(),deleteRecord:vi.fn(),updateProxy:vi.fn()}));
 vi.mock('../src/api/dns',()=>({dnsApi:mock}));
 import { useDnsStore } from '../src/stores/dnsStore';
 function deferred<T>() {let resolve!: (value:T)=>void, reject!: (error:unknown)=>void;const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
 beforeEach(()=>{setActivePinia(createPinia());vi.clearAllMocks();});
+afterEach(()=>vi.restoreAllMocks());
 describe('DNS Account/Zone request scope and invalidation',()=>{
  it('preserves individual deletion failures when refreshing the list fails',async()=>{
   const result={total:1,succeeded:0,failed:1,results:[{name:'a.test',accountId:1,zoneId:'a',success:false,error:'Active Enterprise subscription'}]};
@@ -59,10 +60,100 @@ describe('DNS Account/Zone request scope and invalidation',()=>{
   const read=deferred<{data:unknown[]}>(),settings=deferred<{data:unknown}>();mock.getRecords.mockReturnValueOnce(read.promise).mockResolvedValueOnce({data:[{id:'B'}]});mock.getSettings.mockReturnValueOnce(settings.promise);const store=useDnsStore();
   const a=store.fetchRecords('a.com',{accountId:1,zoneId:'a'}),s=store.fetchZoneSettings('a.com',{accountId:1,zoneId:'a'});await store.fetchRecords('b.com',{accountId:2,zoneId:'b'});read.reject(Error('Old A failed'));settings.resolve({data:{ssl:'off'}});await Promise.all([a,s]);expect(store.recordsError).toBe('');expect(store.zoneSettings).toEqual({});expect(store.loading).toBe(false);
  });
- it('refreshes an affected current Zone and reads all other Zones fresh on next open',async()=>{
+ it('refreshes only affected Zones and reuses the successful refreshed snapshot',async()=>{
   const store=useDnsStore();mock.getRecords.mockResolvedValue({data:[]});await store.fetchRecords('a.com',{accountId:1,zoneId:'a'});
   await store.invalidateRecords([{accountId:2,credentialId:20,zoneId:'b',zoneName:'b.com'}]);expect(mock.getRecords).toHaveBeenCalledTimes(1);
   await store.invalidateRecords([{accountId:1,credentialId:10,zoneId:'a',zoneName:'a.com'}]);expect(mock.getRecords).toHaveBeenCalledTimes(2);
-  await store.fetchRecords('b.com',{accountId:2,zoneId:'b'});await store.fetchRecords('a.com',{accountId:1,zoneId:'a'});expect(mock.getRecords).toHaveBeenCalledTimes(4);
+  await store.fetchRecords('b.com',{accountId:2,zoneId:'b'});await store.fetchRecords('a.com',{accountId:1,zoneId:'a'});expect(mock.getRecords).toHaveBeenCalledTimes(3);
+ });
+});
+
+describe('DNS progressive reads and bounded in-memory snapshots', () => {
+ const a = { accountId: 1, zoneId: 'a' }, b = { accountId: 2, zoneId: 'b' };
+ const row = { id: 'record-1', type: 'A', name: 'api.a.test', content: '192.0.2.1', proxied: false, ttl: 300 };
+ it('renders completed accounts while a slow account is still pending', async () => {
+  const slow = deferred<any>();
+  mock.getAccountDomains.mockImplementation((id: number) => id === 1 ? slow.promise : Promise.resolve({ data: { zones: [{ id: 'b', name: 'b.test', cfAccountId: 2 }], meta: { state: 'miss' } } }));
+  const store = useDnsStore(); store.configureAccounts([{ id: 1 }, { id: 2 }]);
+  const pending = store.fetchDomains(); await vi.waitFor(() => expect(store.domains).toHaveLength(1));
+  expect(store.domainsLoading).toBe(true); expect(store.domains[0].cfAccountId).toBe(2);
+  slow.resolve({ data: { zones: [{ id: 'a', name: 'a.test', cfAccountId: 1 }], meta: { state: 'miss' } } }); await pending;
+  expect(store.domains).toHaveLength(2);
+  expect(store.domains.map(zone => zone.cfAccountId)).toEqual([1, 2]);
+ });
+ it('keeps successful account data and exposes individual failure/retry state', async () => {
+  mock.getAccountDomains.mockImplementation((id: number) => id === 2 ? Promise.reject(Error('CF permission denied')) : Promise.resolve({ data: { zones: [{ id: 'a', name: 'a.test', cfAccountId: 1 }], meta: { state: 'fresh' } } }));
+  const store = useDnsStore(); store.configureAccounts([{ id: 1 }, { id: 2 }]); await store.fetchDomains();
+  expect(store.domains).toHaveLength(1); expect(store.domainErrors[2]).toBe('CF permission denied'); expect(store.domainStates[1]).toBe('fresh');
+ });
+ it('shows stale Zones immediately, then replaces them with live revalidation', async () => {
+  const fresh = deferred<any>(); mock.getAccountDomains.mockResolvedValueOnce({ data: { zones: [{ id: 'old', cfAccountId: 1 }], meta: { state: 'stale' } } }).mockReturnValueOnce(fresh.promise);
+  const store = useDnsStore(); const pending = store.fetchDomains(false, [1]); await vi.waitFor(() => expect(store.domains[0]?.id).toBe('old'));
+  fresh.resolve({ data: { zones: [{ id: 'new', cfAccountId: 1 }], meta: { state: 'miss' } } }); await pending; expect(store.domains[0].id).toBe('new'); expect(store.domainStates[1]).toBe('miss');
+ });
+ it('scopes loading to the chosen account and ignores previous scope responses', async () => {
+  const slow = deferred<any>(); mock.getAccountDomains.mockReturnValueOnce(slow.promise).mockResolvedValueOnce({ data: { zones: [{ id: 'b', cfAccountId: 2 }], meta: { state: 'miss' } } });
+  const store = useDnsStore(); const old = store.fetchDomains(false, [1]); await store.fetchDomains(false, [2]);
+  slow.resolve({ data: { zones: [{ id: 'a', cfAccountId: 1 }], meta: { state: 'miss' } } }); await old; expect(store.domains.map(zone => zone.id)).toEqual(['b']);
+ });
+ it('reuses fresh records, displays stale records immediately, and forces a live refresh', async () => {
+  mock.getRecords.mockResolvedValue({ data: [row] }); const store = useDnsStore(); await store.fetchRecords('a.test', a); await store.fetchRecords('b.test', b); await store.fetchRecords('a.test', a);
+  expect(mock.getRecords).toHaveBeenCalledTimes(2);
+  const slow = deferred<any>(); mock.getRecords.mockReturnValueOnce(slow.promise); const now = Date.now(); vi.spyOn(Date, 'now').mockReturnValue(now + 31000);
+  const refresh = store.fetchRecords('a.test', a); expect(store.records).toEqual([row]); expect(store.loading).toBe(true);
+  slow.resolve({ data: [{ ...row, ttl: 600 }] }); await refresh;
+  await store.fetchRecords('a.test', a, true); expect(mock.getRecords).toHaveBeenCalledTimes(4);
+ });
+ it('updates/adds/removes confirmed records without downloading the entire Zone again', async () => {
+  mock.getRecords.mockResolvedValue({ data: [row] }); const store = useDnsStore(); await store.fetchRecords('a.test', a);
+  mock.updateRecord.mockResolvedValue({ data: { ...row, ttl: 600 } }); await store.saveRecord('a.test', a, { ttl: 600 }, row.id); expect(store.records[0].ttl).toBe(600);
+  mock.createRecord.mockResolvedValue({ data: { ...row, id: 'new' } }); await store.saveRecord('a.test', a, row); expect(store.records).toHaveLength(2);
+  mock.deleteRecord.mockResolvedValue({}); await store.removeRecord('a.test', a, row.id); expect(store.records.map(record => record.id)).toEqual(['new']); expect(mock.getRecords).toHaveBeenCalledTimes(1);
+ });
+ it('never treats a mutation during the first read as a complete one-row Zone snapshot', async () => {
+  const first = deferred<any>(), fresh = deferred<any>(); mock.getRecords.mockReturnValueOnce(first.promise).mockReturnValueOnce(fresh.promise); mock.createRecord.mockResolvedValue({ data: { ...row, id: 'added' } });
+  const store = useDnsStore(); const pending = store.fetchRecords('a.test', a); await store.saveRecord('a.test', a, row);
+  expect(store.records).toEqual([]); expect(store.loading).toBe(true); fresh.resolve({ data: [row, { ...row, id: 'added' }] }); await vi.waitFor(() => expect(store.records).toHaveLength(2));
+  first.resolve({ data: [] }); await pending; expect(store.records).toHaveLength(2);
+ });
+ it('optimistically toggles Proxy, restores the original value on failure, and evicts uncertain snapshots', async () => {
+  mock.getRecords.mockResolvedValue({ data: [row] }); const store = useDnsStore(); await store.fetchRecords('a.test', a);
+  const slow = deferred<any>(); mock.updateProxy.mockReturnValueOnce(slow.promise);
+  const pending = store.toggleProxy('a.test', a, row.id, true); expect(store.records[0]).toMatchObject({ proxied: true, ttl: 1 });
+  slow.reject(Error('Permission denied')); await expect(pending).rejects.toThrow('Permission'); expect(store.records[0]).toEqual(row);
+  await store.fetchRecords('a.test', a); expect(mock.getRecords).toHaveBeenCalledTimes(2);
+ });
+ it('rolls back an acknowledged Proxy change when legacy response revalidation fails', async () => {
+  mock.getRecords.mockResolvedValueOnce({ data: [row] }).mockRejectedValueOnce(Error('Revalidation failed')); mock.updateProxy.mockResolvedValueOnce({ data: { success: true } });
+  const store = useDnsStore(); await store.fetchRecords('a.test', a); await expect(store.toggleProxy('a.test', a, row.id, true)).rejects.toThrow('Revalidation failed'); expect(store.records[0]).toEqual(row);
+ });
+ it('keeps a late successful mutation in its captured Account/Zone', async () => {
+  mock.getRecords.mockResolvedValueOnce({ data: [row] }).mockResolvedValueOnce({ data: [{ ...row, id: 'B' }] }); const store = useDnsStore(); await store.fetchRecords('a.test', a);
+  const slow = deferred<any>(); mock.updateRecord.mockReturnValueOnce(slow.promise); const save = store.saveRecord('a.test', a, { ttl: 600 }, row.id);
+  await store.fetchRecords('b.test', b); slow.resolve({ data: { ...row, ttl: 600 } }); await save; expect(store.records[0].id).toBe('B');
+  await store.fetchRecords('a.test', a); expect(store.records[0].ttl).toBe(600); expect(mock.getRecords).toHaveBeenCalledTimes(2);
+ });
+ it('evicts least-recently-used Zones and invalidates changed credential metadata', async () => {
+  mock.getRecords.mockResolvedValue({ data: [row] }); const store = useDnsStore(); store.configureAccounts([{ id: 1, credential_id: 10 }]);
+  for (let i = 0; i < 31; i++) await store.fetchRecords(`z${i}.test`, { accountId: 1, zoneId: `z${i}` });
+  await store.fetchRecords('z0.test', { accountId: 1, zoneId: 'z0' }); expect(mock.getRecords).toHaveBeenCalledTimes(32);
+  store.configureAccounts([{ id: 1, credential_id: 20 }]); expect(store.currentDomain).toBe(''); await store.fetchRecords('z0.test', { accountId: 1, zoneId: 'z0' }); expect(mock.getRecords).toHaveBeenCalledTimes(33);
+ });
+ it('bounds total record retention and clears sensitive data when the session ends', async () => {
+  mock.getRecords.mockResolvedValue({ data: Array.from({ length: 10000 }, (_, i) => ({ ...row, id: String(i) })) }); const store = useDnsStore();
+  for (let i = 0; i < 6; i++) await store.fetchRecords(`z${i}.test`, { accountId: 1, zoneId: `z${i}` });
+  await store.fetchRecords('z0.test', { accountId: 1, zoneId: 'z0' }); expect(mock.getRecords).toHaveBeenCalledTimes(7);
+  store.resetSensitiveState(); expect(store.records).toEqual([]); await store.fetchRecords('z0.test', { accountId: 1, zoneId: 'z0' }); expect(mock.getRecords).toHaveBeenCalledTimes(8);
+ });
+ it('does not let a write from an expired session poison the new session snapshot', async () => {
+  mock.getRecords.mockResolvedValue({ data: [row] }); const store = useDnsStore(); await store.fetchRecords('a.test', a);
+  const slow = deferred<any>(); mock.updateRecord.mockReturnValueOnce(slow.promise); const save = store.saveRecord('a.test', a, { ttl: 600 }, row.id);
+  store.resetSensitiveState(); await store.fetchRecords('a.test', a); slow.resolve({ data: { ...row, ttl: 600 } }); await save; expect(store.records[0].ttl).toBe(300);
+ });
+ it('evicts deleted Zone aliases while preserving unrelated and failed Zone selections', async () => {
+  mock.getRecords.mockResolvedValue({ data: [row] }); const store = useDnsStore(); await store.fetchRecords('alias.test', { accountId: 2, zoneId: 'shared-zone' });
+  store.domains = [{ id: 'shared-zone', cfAccountId: 1 }, { id: 'shared-zone', cfAccountId: 2 }, { id: 'kept', cfAccountId: 3 }];
+  store.forgetDeletedZones([{ name: 'alias.test', accountId: 1, zoneId: 'shared-zone', success: true }, { name: 'kept.test', accountId: 3, zoneId: 'kept', success: false }]);
+  expect(store.currentDomain).toBe(''); expect(store.domains).toEqual([{ id: 'kept', cfAccountId: 3 }]); await store.fetchRecords('alias.test', { accountId: 2, zoneId: 'shared-zone' }); expect(mock.getRecords).toHaveBeenCalledTimes(2);
  });
 });

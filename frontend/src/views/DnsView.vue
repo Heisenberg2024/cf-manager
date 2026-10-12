@@ -53,11 +53,15 @@
             <n-dropdown trigger="click" :options="[{key:'delete-zones', label:t('dns.multi.deleteZones')}]" @select="handleBatchDelete"><n-button size="tiny" :disabled="!selectedDomains.size">{{ t('dns.multi.more') }} ▾</n-button></n-dropdown>
           </n-space>
 
+          <n-text v-if="dnsStore.domainsLoading && filteredDomains.length" depth="3">{{ t('dns.cacheStatus.refreshing') }}</n-text>
+          <n-alert v-for="(error, id) in dnsStore.domainErrors" :key="id" type="warning" :bordered="false">{{ accounts.find(account => account.id === Number(id))?.name || id }}: {{ t('dns.cacheStatus.accountFailed') }}: {{ error }} <n-button size="tiny" @click="dnsStore.fetchDomains(true, [Number(id)])">{{ t('dns.cacheStatus.retry') }}</n-button></n-alert>
+          <n-text v-if="Object.values(dnsStore.domainStates).includes('stale')" depth="3">{{ t('dns.cacheStatus.stale') }}</n-text>
           <div class="dns-zone-list" role="region" :aria-label="t('dns.domainList')" tabindex="0">
-            <n-spin :show="dnsStore.domainsLoading">
+            <n-spin :show="false">
+              <n-skeleton v-if="dnsStore.domainsLoading && !filteredDomains.length" :repeat="6" text />
               <!-- 所有账户模式：分组折叠 -->
               <template v-if="selectedAccount === '__all__'">
-                <n-collapse v-if="groupedDomains.length > 0" :default-expanded-names="expandedGroups">
+                <n-collapse v-if="groupedDomains.length > 0" :expanded-names="expandedGroups" @update:expanded-names="expandedGroups = $event">
                   <n-collapse-item
                     v-for="group in groupedDomains"
                     :key="group.accountId"
@@ -69,62 +73,14 @@
                         <n-text depth="3" style="font-size: 12px">({{ group.domains.length }})</n-text>
                       </n-space>
                     </template>
-                    <n-list hoverable clickable>
-                      <n-list-item
-                        v-for="d in group.domains"
-                        :key="zoneKey(d)"
-                        @click="selectDomain(d)"
-                        :style="{ background: dnsStore.currentDomain === d.name && dnsStore.currentContext.accountId === d.cfAccountId ? 'var(--n-color-hover)' : '' }"
-                      >
-                        <div style="display: flex; align-items: flex-start; gap: 8px; width: 100%">
-                          <n-checkbox
-                            v-if="!isDemoDomain(d)"
-                            :checked="selectedDomains.has(zoneKey(d))"
-                            @update:checked="(v: boolean) => toggleDomainSelect(zoneKey(d), v)"
-                            @click.stop
-                          />
-                          <div style="flex: 1; min-width: 0">
-                            <div style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ d.name }}</div>
-                            <n-space align="center" :size="4" style="margin-top: 2px">
-                              <span :style="{ color: statusColor(d.status), fontSize: '11px' }">●</span>
-                              <n-text depth="3" style="font-size: 11px">{{ statusLabel(d.status) }}</n-text>
-                              <n-tag size="small" :bordered="false">{{ domainPlanName(d) }}</n-tag>
-                            </n-space>
-                          </div>
-                        </div>
-                      </n-list-item>
-                    </n-list>
+                    <DnsZoneList :zones="group.domains" :selected="selectedDomains" :current-key="`${dnsStore.currentContext.accountId}:${dnsStore.currentContext.zoneId}`" :is-demo="isDemoDomain" :status-label="statusLabel" :status-color="statusColor" :plan-name="domainPlanName" @select="selectDomain" @toggle="(zone, checked) => toggleDomainSelect(zoneKey(zone), checked)" />
                   </n-collapse-item>
                 </n-collapse>
               </template>
 
               <!-- 单账户模式：平铺列表 -->
               <template v-else>
-                <n-list v-if="filteredDomains.length > 0" hoverable clickable>
-                  <n-list-item
-                    v-for="d in filteredDomains"
-                    :key="zoneKey(d)"
-                    @click="selectDomain(d)"
-                    :style="{ background: dnsStore.currentDomain === d.name && dnsStore.currentContext.accountId === d.cfAccountId ? 'var(--n-color-hover)' : '' }"
-                  >
-                    <div style="display: flex; align-items: flex-start; gap: 8px; width: 100%">
-                      <n-checkbox
-                        v-if="!isDemoDomain(d)"
-                        :checked="selectedDomains.has(zoneKey(d))"
-                        @update:checked="(v: boolean) => toggleDomainSelect(zoneKey(d), v)"
-                        @click.stop
-                      />
-                      <div style="flex: 1; min-width: 0">
-                        <div style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ d.name }}</div>
-                        <n-space align="center" :size="4" style="margin-top: 2px">
-                          <span :style="{ color: statusColor(d.status), fontSize: '11px' }">●</span>
-                          <n-text depth="3" style="font-size: 11px">{{ statusLabel(d.status) }}</n-text>
-                          <n-tag size="small" :bordered="false">{{ domainPlanName(d) }}</n-tag>
-                        </n-space>
-                      </div>
-                    </div>
-                  </n-list-item>
-                </n-list>
+                <DnsZoneList :zones="filteredDomains" :selected="selectedDomains" :current-key="`${dnsStore.currentContext.accountId}:${dnsStore.currentContext.zoneId}`" :is-demo="isDemoDomain" :status-label="statusLabel" :status-color="statusColor" :plan-name="domainPlanName" @select="selectDomain" @toggle="(zone, checked) => toggleDomainSelect(zoneKey(zone), checked)" />
               </template>
 
               <n-empty v-if="!dnsStore.domainsLoading && filteredDomains.length === 0" :description="t('dns.noDomain')" style="margin: 20px 0">
@@ -159,7 +115,8 @@
           >
             <!-- Tab 1: DNS 记录 -->
             <n-tab-pane name="records" :tab="t('dns.records')">
-              <n-alert v-if="dnsStore.recordsError" type="error" :bordered="false">{{ dnsStore.recordsError }}</n-alert>
+              <n-alert v-if="dnsStore.recordsError" type="error" :bordered="false">{{ dnsStore.recordsError }} <n-button size="tiny" @click="dnsStore.fetchRecords(dnsStore.currentDomain, dnsStore.currentContext, true)">{{ t('dns.cacheStatus.retry') }}</n-button></n-alert>
+              <n-text v-if="dnsStore.loading && dnsStore.records.length" depth="3">{{ t('dns.cacheStatus.refreshing') }}</n-text>
               <n-space align="center" style="margin-bottom: 8px; flex-shrink: 0">
                 <n-button size="small" :disabled="batchRunning" @click="selectPageRecords">{{ t('dns.batch.selectPage') }}</n-button>
                 <n-button size="small" :disabled="batchRunning" @click="selectedRecordIds = filteredRecords.map(r => r.id)">{{ t('dns.batch.selectAll', { count: filteredRecords.length }) }}</n-button>
@@ -167,7 +124,7 @@
                 <n-text>{{ t('dns.batch.selected', { count: selectedRecordIds.length }) }}</n-text>
                 <n-button size="small" :disabled="!selectedRecordIds.length || currentDomainIsDemo || batchRunning" @click="showBatchRecordEdit = true">{{ t('dns.batch.edit') }}</n-button>
                 <n-button size="small" type="error" :disabled="!selectedRecordIds.length || currentDomainIsDemo || batchRunning" @click="confirmRecordBatch('delete')">{{ t('common.delete') }}</n-button>
-                <n-button size="small" :loading="dnsStore.loading" @click="dnsStore.fetchRecords(dnsStore.currentDomain)">{{ t('common.refresh') }}</n-button>
+                <n-button size="small" :loading="dnsStore.loading" @click="dnsStore.fetchRecords(dnsStore.currentDomain, dnsStore.currentContext, true)">{{ t('common.refresh') }}</n-button>
                 <n-button size="small" type="primary" @click="openAddRecordModal">{{ t('dns.addRecord') }}</n-button>
               </n-space>
               <n-space align="center" style="margin-bottom: 8px; flex-shrink: 0">
@@ -175,11 +132,12 @@
                 <n-select v-model:value="recordType" :options="recordTypeOptions" :placeholder="t('dns.recordType')" clearable size="small" style="width: 120px" />
               </n-space>
               <n-progress v-if="batchRunning" type="line" :percentage="Math.round(batchCompleted / Math.max(batchTotal, 1) * 100)" :show-indicator="true" />
+              <n-skeleton v-if="dnsStore.loading && !dnsStore.records.length" :repeat="6" text />
               <AutoFitTable
                 style="flex: 1 1 0%; min-height: 0; margin-top: 0;"
                 :columns="recordColumns"
                 :data="filteredRecords"
-                :loading="dnsStore.loading"
+                :loading="dnsStore.loading && !dnsStore.records.length"
                 :scroll-x="680"
                 :pagination="{ page: recordPage, pageSize: recordPageSize, showSizePicker: true, pageSizes: [20, 50, 100], onUpdatePage: (page: number) => recordPage = page, onUpdatePageSize: (size: number) => { recordPageSize = size; recordPage = 1; } }"
                 :row-key="(row: any) => row.id"
@@ -422,7 +380,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, h, computed, onMounted, watch, reactive } from 'vue';
+import DnsZoneList from '../components/DnsZoneList.vue';
+import { ref, h, computed, onMounted, onUnmounted, watch, reactive } from 'vue';
 import { NButton, NSwitch, NTag, NText, NCheckbox, useMessage, useDialog } from 'naive-ui';
 import type { DataTableColumns, FormInst, FormRules, SelectNodeProps } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
@@ -441,27 +400,35 @@ import { credentialsApi } from '../api/credentials';
 import { buildDnsRecord, DNS_TYPES } from '../utils/dnsRecord';
 import { runBatch, type BatchResult } from '../utils/batchOperation';
 import type { DeleteZonesResult, PlanChangeTarget, ZoneContext } from '../api/dns';
-import { loadDemoAccounts, isDemoAccount } from '../utils/demoAccounts';
+import { setDemoAccounts, isDemoAccount } from '../utils/demoAccounts';
 import { dnsAccountLabel, type DnsAccountIdentity } from '../utils/dnsAccountLabel';
 import { zonePlan, type CreateZoneResult, type ZonePlanId, type ZonePlanOption } from '../shared/zonePlans';
 
 const { t } = useI18n();
 const dnsStore = useDnsStore();
+let viewActive = true;
+onUnmounted(() => { viewActive = false; });
 const message = useMessage();
 const dialog = useDialog();
 
 // ===== 账户过滤 =====
 const selectedAccount = ref<string>('');
 const searchQuery = ref('');
-const domainSearchTerms = computed(() => [...new Set(searchQuery.value.split(/\r\n|\r|\n/).map(term => term.trim().toLowerCase()).filter(Boolean))]);
-const accounts = ref<Array<DnsAccountIdentity & { is_enabled?: number }>>([]);
+const debouncedSearch = ref('');
+let searchTimer: ReturnType<typeof setTimeout>;
+watch(searchQuery, value => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { debouncedSearch.value = value; }, 150); });
+onUnmounted(() => clearTimeout(searchTimer));
+const domainSearchTerms = computed(() => [...new Set(debouncedSearch.value.split(/\r\n|\r|\n/).map(term => term.trim().toLowerCase()).filter(Boolean))]);
+const accounts = ref<Array<DnsAccountIdentity & { is_enabled?: number; is_active?: number; enabled_features?: string }>>([]);
+const isDnsBindingAvailable = (account: typeof accounts.value[number]) => account.is_enabled !== 0 && account.is_active !== 0 && !!account.account_id && (account.enabled_features ?? 'dns').split(',').includes('dns');
+const dnsAccounts = computed(() => accounts.value.filter(isDnsBindingAvailable));
 const credentialNames = ref(new Map<number, string>());
 const accountFilterSearch = ref('');
 const accountCreateSearch = ref('');
 const accountLabel = (account: DnsAccountIdentity) => dnsAccountLabel(account, credentialNames.value, t('dns.plans.credential'));
 const accountOptions = computed(() => [
   { label: t('dns.allAccounts'), value: '__all__' },
-  ...accounts.value.map(account => ({ label: accountLabel(account), value: String(account.id) })),
+  ...accounts.value.map(account => ({ label: accountLabel(account), value: String(account.id), disabled: !isDnsBindingAvailable(account) })),
 ]);
 const availableAccounts = computed(() => accounts.value.filter(account => account.account_id).map(account => ({
   label: accountLabel(account), value: account.id, disabled: account.is_enabled === 0 || isDemoAccount(account.id),
@@ -577,6 +544,8 @@ function selectDomain(zone: any) {
 }
 
 function onAccountChange(val: string) {
+  dnsStore.setDomainScope(val === '__all__' ? dnsAccounts.value.map(account => account.id) : [Number(val)]);
+  void dnsStore.fetchDomains();
   saveAccount(val);
   dnsStore.clearSelection();
   selectedRecordIds.value = [];
@@ -602,6 +571,7 @@ async function onPlanChanged() {
   try { await dnsStore.fetchDomains(true); } catch { message.warning(t('dns.plans.refreshFailed')); }
 }
 function selectMatchingDomains() {
+  clearTimeout(searchTimer); debouncedSearch.value = searchQuery.value;
   for(const domain of filteredDomains.value) if(!isDemoDomain(domain)) selectedDomains.value.add(zoneKey(domain));
   selectedDomains.value = new Set(selectedDomains.value);
 }
@@ -674,16 +644,15 @@ async function handleSubmitRecord() {
     const target = { domain: recordTarget.value.domain, context: { ...recordTarget.value.context } };
     const payload = buildRecordPayload();
     if (editingRecordId.value) {
-      await dnsApi.updateRecord(target.domain, editingRecordId.value, payload, target.context);
+      await dnsStore.saveRecord(target.domain, target.context, payload, editingRecordId.value);
       message.success(t('dns.msg.recordUpdated'));
     } else {
-      await dnsApi.createRecord(target.domain, payload, target.context);
+      await dnsStore.saveRecord(target.domain, target.context, payload);
       message.success(t('dns.msg.recordAdded'));
     }
     showAddRecordModal.value = false;
     editingRecordId.value = null;
     newRecord.value = { type: 'A', name: '', content: '', ttl: 300, proxied: true, priority: 10, weight: 0, port: 443 };
-    if (dnsStore.isCurrent(target.domain, target.context)) await dnsStore.fetchRecords(target.domain, target.context);
   } catch (err: any) {
     message.error(err?.response?.data?.error?.message || t('dns.msg.saveFailed'));
   } finally {
@@ -694,9 +663,8 @@ async function handleSubmitRecord() {
 async function handleDeleteRecord(row: any, target = captureTarget()) {
   if (!dnsStore.currentDomain) return;
   try {
-    await dnsApi.deleteRecord(target.domain, row.id, target.context);
+    await dnsStore.removeRecord(target.domain, target.context, row.id);
     message.success(t('dns.msg.recordDeleted'));
-    if (dnsStore.isCurrent(target.domain, target.context)) await dnsStore.fetchRecords(target.domain, target.context);
   } catch (err: any) {
     message.error(err?.response?.data?.error?.message || t('dns.msg.deleteFailed'));
   }
@@ -706,8 +674,7 @@ async function handleProxyToggle(row: any, proxied: boolean) {
   if (!dnsStore.currentDomain) return;
   try {
     const target = captureTarget();
-    await dnsApi.updateProxy(target.domain, row.id, proxied, target.context);
-    if (dnsStore.isCurrent(target.domain, target.context)) await dnsStore.fetchRecords(target.domain, target.context);
+    await dnsStore.toggleProxy(target.domain, target.context, row.id, proxied);
     message.success(t('dns.msg.proxyUpdated'));
   } catch (err: any) {
     message.error(err?.response?.data?.error?.message || t('dns.msg.updateFailed'));
@@ -756,15 +723,15 @@ function confirmRecordBatch(action: 'delete' | 'ttl' | 'proxy') {
       batchRunning.value = true; batchCompleted.value = 0; batchTotal.value = rows.length;
       try {
         recordBatchResults.value = await runBatch(rows, async row => {
-          if (action === 'delete') return dnsApi.deleteRecord(target.domain, row.id, target.context);
+          if (action === 'delete') return dnsStore.removeRecord(target.domain, target.context, row.id);
           if (action === 'proxy') {
             if (!['A', 'AAAA', 'CNAME'].includes(row.type)) throw new Error(t('dns.batch.proxyUnsupported', { name: row.name, type: row.type }));
-            return dnsApi.updateRecord(target.domain, row.id, { proxied }, target.context);
+            return dnsStore.saveRecord(target.domain, target.context, { proxied }, row.id);
           }
           if (row.proxied && ttl !== 1) throw new Error(t('dns.batch.proxyTtl', { name: row.name }));
-          return dnsApi.updateRecord(target.domain, row.id, { ttl }, target.context);
+          return dnsStore.saveRecord(target.domain, target.context, { ttl }, row.id);
         }, count => { batchCompleted.value = count; });
-        if (dnsStore.isCurrent(target.domain, target.context)) { await dnsStore.fetchRecords(target.domain, target.context); selectedRecordIds.value = []; }
+        if (dnsStore.isCurrent(target.domain, target.context)) selectedRecordIds.value = [];
         showRecordBatchResult.value = true;
       } finally { batchRunning.value = false; }
     },
@@ -784,7 +751,7 @@ const recordColumns = computed<DataTableColumns<any>>(() => [
   { title: t('dns.ttl'), key: 'ttl', width: 80, render: (row) => row.ttl === 1 ? t('dns.ttlAuto') : String(row.ttl) },
   {
     title: t('dns.proxied'), key: 'proxied', width: 80,
-    render: (row) => h(NSwitch, { value: row.proxied, disabled: currentDomainIsDemo.value || !['A', 'AAAA', 'CNAME'].includes(row.type) || batchRunning.value, onUpdateValue: (v: boolean) => handleProxyToggle(row, v), size: 'small' }),
+    render: (row) => h(NSwitch, { value: row.proxied, loading: dnsStore.proxyPending.has(`${dnsStore.currentContext.accountId}:${dnsStore.currentContext.zoneId}:${dnsStore.currentDomain}:${row.id}`), disabled: currentDomainIsDemo.value || !['A', 'AAAA', 'CNAME'].includes(row.type) || batchRunning.value, onUpdateValue: (v: boolean) => handleProxyToggle(row, v), size: 'small' }),
   },
   {
     title: t('common.actions'), key: 'actions', width: 120,
@@ -1050,6 +1017,7 @@ function handleBatchDelete() {
   if (zoneDeleteTargets.value.length) showZoneDelete.value = true;
 }
 async function onZonesDeleted(result: DeleteZonesResult) {
+  dnsStore.forgetDeletedZones(result.results);
   const deleted = new Set(result.results.filter(row => row.success).map(row => `${row.accountId}:${row.zoneId}`));
   selectedDomains.value = new Set([...selectedDomains.value].filter(key => !deleted.has(key)));
   try { await dnsStore.fetchDomains(true); } catch { message.warning(t('dns.zoneBatch.refreshFailed')); }
@@ -1057,13 +1025,18 @@ async function onZonesDeleted(result: DeleteZonesResult) {
 
 // ===== 加载账户列表 =====
 async function loadAccounts() {
-  const [accountResult, credentialResult] = await Promise.allSettled([accountsApi.getAll(), credentialsApi.list()]);
-  accounts.value = accountResult.status === 'fulfilled' ? accountResult.value.data?.accounts || [] : [];
-  credentialNames.value = new Map(credentialResult.status === 'fulfilled' ? credentialResult.value.data.map(credential => [credential.id, credential.name]) : []);
+  // Credential labels enrich the UI independently; a slow credential response does not delay Zones.
+  void credentialsApi.list().then(({ data }) => { if (viewActive) credentialNames.value = new Map(data.map(credential => [credential.id, credential.name])); }).catch(() => { if (viewActive) credentialNames.value = new Map(); });
+  try { const { data } = await accountsApi.getAll(); if (!viewActive) return; accounts.value = data?.accounts || []; setDemoAccounts(data?.accounts || []); }
+  catch { if (!viewActive) return; accounts.value = []; }
+  dnsStore.configureAccounts(dnsAccounts.value.map(account => ({ ...account })));
 }
 
 // ===== 搜索时自动展开分组 =====
-watch(searchQuery, (val) => {
+watch(groupedDomains, (groups, previous) => {
+  if (selectedAccount.value === '__all__') { const old = new Set(previous.map(group => group.accountId)); expandedGroups.value = [...new Set([...expandedGroups.value, ...groups.filter(group => !old.has(group.accountId)).map(group => group.accountId)])]; }
+});
+watch(debouncedSearch, (val) => {
   if (val && selectedAccount.value === '__all__') {
     expandedGroups.value = groupedDomains.value.map(g => g.accountId);
   }
@@ -1071,20 +1044,18 @@ watch(searchQuery, (val) => {
 
 // ===== 初始化 =====
 onMounted(async () => {
-  loadDemoAccounts();
   await loadAccounts();
-  await dnsStore.fetchDomains();
-
+  if (!viewActive) return;
   const saved = loadSavedAccount();
-  if (saved && accountOptions.value.some(o => o.value === saved)) {
+  if (saved && (saved === '__all__' || dnsAccounts.value.some(account => String(account.id) === saved))) {
     selectedAccount.value = saved;
-  } else if (accountOptions.value.length > 1) {
-    selectedAccount.value = accountOptions.value[1].value;
+  } else if (dnsAccounts.value.length) {
+    selectedAccount.value = String(dnsAccounts.value[0].id);
   } else {
     selectedAccount.value = '__all__';
   }
 
-  expandedGroups.value = groupedDomains.value.map(g => g.accountId);
+  onAccountChange(selectedAccount.value);
 });
 </script>
 

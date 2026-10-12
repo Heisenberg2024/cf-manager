@@ -5,7 +5,7 @@ import { useDnsStore } from '../src/stores/dnsStore';
 import { runBatch } from '../src/utils/batchOperation';
 import { createRequestScope } from '../src/utils/requestScope';
 
-vi.mock('../src/api/dns', () => ({ dnsApi: { getDomains: vi.fn(), getRecords: vi.fn(), getSettings: vi.fn(), updateSettings: vi.fn(), deleteDomains: vi.fn(), updateStatus: vi.fn() } }));
+vi.mock('../src/api/dns', () => ({ dnsApi: { getDomains: vi.fn(), getAccountDomains: vi.fn(), getRecords: vi.fn(), getSettings: vi.fn(), updateSettings: vi.fn(), deleteDomains: vi.fn(), updateStatus: vi.fn() } }));
 const a = { accountId: 1, zoneId: 'zone-a' };
 const b = { accountId: 2, zoneId: 'zone-b' };
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
@@ -56,9 +56,9 @@ describe('DNS state ownership', () => {
   it('forces Cloudflare refresh after deletion and clears the removed Zone', async () => {
     vi.mocked(dnsApi.getRecords).mockResolvedValue({ data: [{ id: 'a' }] } as any);
     vi.mocked(dnsApi.deleteDomains).mockResolvedValue({ data: { succeeded: 1 } } as any);
-    vi.mocked(dnsApi.getDomains).mockResolvedValue({ data: [] } as any);
+    vi.mocked(dnsApi.getAccountDomains).mockResolvedValue({ data: { zones: [], meta: { state: 'miss' } } } as any);
     const store = useDnsStore(); await store.fetchRecords('a.test', a); await store.deleteDomains([{ name: 'a.test', ...a }]);
-    expect(dnsApi.getDomains).toHaveBeenCalledWith(true); expect(store.currentDomain).toBe(''); expect(store.records).toEqual([]);
+    expect(dnsApi.getAccountDomains).toHaveBeenCalledWith(1, true, expect.any(AbortSignal)); expect(store.currentDomain).toBe(''); expect(store.records).toEqual([]);
   });
 });
 

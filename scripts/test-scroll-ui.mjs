@@ -27,6 +27,7 @@ const server=createServer(async(req,res)=>{
    if(api==='/settings')return json({platform:'docker',version:'2.5.2',demo_account_ids:''});
    if(api==='/accounts')return json({accounts,quota:[],total:2,counts:{all:2,active:2,unverified:0}});
    if(api==='/credentials')return json([]);
+   if(/^\/dns\/accounts\/\d+\/domains$/.test(api)){if(delayedDomains)await new Promise(r=>setTimeout(r,350));return json({zones:zones.filter(zone=>zone.cfAccountId===Number(api.split('/')[3])),meta:{state:'miss'}});}
    if(api==='/dns/domains'){if(delayedDomains)await new Promise(r=>setTimeout(r,350));return json(zones);}
    if(api.includes('/records'))return json(rows('record').map((name,i)=>({id:name,type:'A',name:`${name}.${url.searchParams.get('zoneId')}.test`,content:'192.0.2.1',ttl:300,proxied:false})));
    if(/^\/storage\/\d+\/kv$/.test(api))return json(rows('namespace').map(name=>({id:name,title:name})));
@@ -87,14 +88,14 @@ try {
   page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));page.on('console',e=>{if(e.type()==='error')errors.push(e.text());});
   await page.goto(origin+base+'/dns');await page.locator('.dns-zone-list .n-list-item').nth(99).waitFor();
   const toolbar=page.locator('.dns-zone-actions'),before=await toolbar.boundingBox();
-  await wheel(page.locator('.dns-zone-list'),`DNS grouped ${viewport.width}x${viewport.height}`);assert.deepEqual(await toolbar.boundingBox(),before,'DNS toolbar moved with list');
+  await wheel(page.locator('.dns-zone-list'),`DNS grouped ${viewport.width}x${viewport.height}`);const after=await toolbar.boundingBox();assert(Math.abs(after.y-before.y)<1&&Math.abs(after.x-before.x)<1,'DNS toolbar moved with list');
   await page.locator('.dns-zone-list').evaluate(e=>{e.scrollTop=0;});await page.locator('.dns-zone-list').focus();await page.keyboard.press('PageDown');await page.waitForFunction(()=>document.querySelector('.dns-zone-list').scrollTop>0);console.log(`PASS keyboard: DNS ${viewport.width}`);
   await page.locator('.dns-zone-list').evaluate(e=>{e.scrollTop=e.scrollHeight;});await page.locator('.dns-zone-list .n-list-item').last().click();
   await page.locator('.dns-zone-list .n-list-item').last().getByRole('checkbox').click();await page.getByText('已选择 1 个域名',{exact:true}).waitFor();
-  const account=page.locator('.page-view > .n-space .n-select').first();await account.click();await page.locator('.n-base-select-menu:visible').getByText('Account 1',{exact:true}).click();
+  const account=page.locator('.page-view > .n-space .n-select').first();await account.click();await page.locator('.n-base-select-menu:visible').getByText(/Account 1｜/).click();
   await page.locator('.dns-zone-list .n-list-item').nth(79).waitFor();await wheel(page.locator('.dns-zone-list'),`DNS single Account ${viewport.width}`);
-  delayedDomains=true;await page.getByRole('button',{name:zh.common.refresh,exact:true}).first().click();await page.locator('.dns-zone-list .n-spin-content--spinning').waitFor();await page.locator('.dns-zone-list .n-spin-content--spinning').waitFor({state:'hidden'});delayedDomains=false;
-  await page.getByPlaceholder(zh.dns.searchDomain).fill('zone-079');await page.locator('.dns-zone-list .n-list-item').getByRole('checkbox').click();await page.getByPlaceholder(zh.dns.searchDomain).fill('');await page.getByText('已选择 2 个域名',{exact:true}).waitFor();
+  delayedDomains=true;await page.getByRole('button',{name:zh.common.refresh,exact:true}).first().click();await page.getByText(zh.dns.cacheStatus.refreshing,{exact:true}).waitFor();assert.equal(await page.locator('.dns-zone-list .n-list-item').count(),80,'refresh must preserve visible rows');await page.getByText(zh.dns.cacheStatus.refreshing,{exact:true}).waitFor({state:'hidden'});delayedDomains=false;
+  await page.getByPlaceholder(zh.dns.searchDomain).fill('zone-079');await page.waitForTimeout(200);await page.locator('.dns-zone-list .n-list-item').getByRole('checkbox').click();await page.getByPlaceholder(zh.dns.searchDomain).fill('');await page.waitForTimeout(200);await page.getByText('已选择 2 个域名',{exact:true}).waitFor();
   await page.locator('.dns-zone-list .n-list-item').last().click();await tableWheel('DNS records independent');
   await page.goto(origin+base+'/storage');await page.getByText('namespace-099',{exact:true}).waitFor();await wheel(page.locator('.storage-left-card .storage-card-content'),'KV namespace list');await page.getByText('namespace-099',{exact:true}).click();await tableWheel('KV keys');
   await page.getByText(zh.storage.d1,{exact:true}).first().click();await page.locator('.d1-toolbar-row .n-select').click();await page.locator('.n-base-select-menu:visible').getByText('scroll-db',{exact:true}).click();await page.getByText('table-099',{exact:true}).waitFor();await wheel(page.locator('.storage-list-scroll'),'D1 table list');

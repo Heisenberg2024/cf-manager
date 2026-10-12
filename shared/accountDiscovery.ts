@@ -29,10 +29,15 @@ export function authHeaders(input: AuthInput): Record<string, string> {
 }
 
 // Retry only explicit 429 responses, never ambiguous network failures of a write operation.
-export function createCfRequest(transport: Transport, headers: Record<string, string>, context = '', sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))): CfRequest {
+export function createCfRequest(transport: Transport, headers: Record<string, string>, context = '', sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)), metric: (value: { event: string; attempt: number; durationMs: number; status?: number }) => void = () => {}): CfRequest {
   return async (path, init = {}) => {
     for (let attempt = 0; ; attempt++) {
-      const response = await transport(path, { ...init, headers: { 'Content-Type': 'application/json', ...headers, ...init.headers } });
+      init.signal?.throwIfAborted();
+      const started = Date.now();
+      let response: HttpResponse;
+      try { response = await transport(path, { ...init, headers: { 'Content-Type': 'application/json', ...headers, ...init.headers } }); }
+      catch (error) { metric({ event: `cf_${errorDetails(error).kind}`, attempt, durationMs: Date.now() - started }); throw error; }
+      metric({ event: response.status === 429 ? 'cf_rate_limited' : 'cf_attempt', attempt, status: response.status, durationMs: Date.now() - started });
       if (response.status === 429 && attempt < 2) {
         const retry = response.headers.get('retry-after');
         const seconds = retry && /^\d+(\.\d+)?$/.test(retry) ? Number(retry) : retry ? Math.max(0, (Date.parse(retry) - Date.now()) / 1000) : NaN;

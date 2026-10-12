@@ -10,7 +10,7 @@ vi.mock('../src/models/auditLog',()=>({createAuditLog:mocks.audit}));
 vi.mock('../src/db',()=>({getDb:()=>mocks.db}));
 vi.mock('../src/config',()=>({config:{encryptionKey:'synthetic-test-key'}}));
 vi.mock('../src/services/accountRouter',()=>({getAllZones:vi.fn(),findAccountByDomain:vi.fn(),clearCache:vi.fn()}));
-vi.mock('../src/services/logger',()=>({appLogger:{error:vi.fn()}}));
+vi.mock('../src/services/logger',()=>({appLogger:{error:vi.fn()},apiLogger:{info:vi.fn()}}));
 vi.mock('../src/routes/routeUtils',()=>({isDemoAccountId:()=>false}));
 import backendDns from '../src/routes/dns';
 import { responseWrapper } from '../src/middleware/responseWrapper';

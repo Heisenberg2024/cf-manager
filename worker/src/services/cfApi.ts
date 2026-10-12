@@ -52,7 +52,7 @@ export function credentialRequest(input: AuthInput): CfRequest {
 }
 
 export async function accountRequest(account: Account, encryptionKey: string): Promise<CfRequest> {
-  return createCfRequest((path, init) => fetch(`${CF_BASE}${path}`, { ...init, signal: AbortSignal.timeout(15000) }), await getAuthHeaders(account, encryptionKey), `Account ${account.name} (${account.account_id})`);
+  return createCfRequest((path, init) => fetch(`${CF_BASE}${path}`, { ...init, signal: init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000) }), await getAuthHeaders(account, encryptionKey), `Account ${account.name} (${account.account_id})`, undefined, metric => console.info(JSON.stringify({ scope: 'cf_performance', accountId: account.id, ...metric })));
 }
 
 export async function cfFetch<T = any>(

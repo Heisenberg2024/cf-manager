@@ -6,6 +6,7 @@ import { encrypt, decrypt } from './encryption';
 import { credentialRequest } from './cfApi';
 import { isDemoAccount } from './demo';
 import { invalidateAiCache } from './quotaTracker';
+import { getDnsDirectory } from './dnsDirectory';
 
 export function credentials(env: Env) {
   const db = env.DB;
@@ -28,7 +29,7 @@ export function credentials(env: Env) {
     assertMutable: bindings => {
       if (bindings.some(a => isDemoAccount(a.id, env.DEMO_ACCOUNT_IDS))) throw Object.assign(new Error('Demo credential is protected'), { code: 'DEMO_PROTECTED', statusCode: 403 });
     },
-    invalidate: async () => { await env.KV.delete('dns_zones_all'); await invalidateAiCache(env); },
+    invalidate: async () => { getDnsDirectory(env.DB).invalidate(); await env.KV.delete('dns_zones_all'); await invalidateAiCache(env); },
     request: auth => credentialRequest(auth),
   });
 }

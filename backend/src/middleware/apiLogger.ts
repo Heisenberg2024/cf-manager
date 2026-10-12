@@ -1,9 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import { apiLogger as logger } from '../services/logger';
+import { performanceContext } from '../services/performanceMetrics';
 
 export function apiRequestLogger(req: Request, res: Response, next: NextFunction): void {
   const start = Date.now();
   const { method, originalUrl } = req;
+  const metrics = { upstreamCalls: 0, cacheLookups: 0, cacheHits: 0, staleHits: 0, merged: 0, rateLimited: 0, timeouts: 0 };
 
   let logged = false;
 
@@ -11,8 +13,7 @@ export function apiRequestLogger(req: Request, res: Response, next: NextFunction
     if (logged) return;
     logged = true;
     const duration = Date.now() - start;
-    const tag = suffix ? ` [${suffix}]` : '';
-    logger.info(`${method} ${originalUrl} ${res.statusCode} ${duration}ms${tag}`);
+    logger.info(JSON.stringify({ event: 'api_request', method, path: originalUrl.split('?')[0], status: res.statusCode, durationMs: duration, ...(suffix ? { outcome: suffix } : {}), ...metrics, cacheHitRate: metrics.cacheLookups ? metrics.cacheHits / metrics.cacheLookups : null }));
   }
 
   res.on('finish', () => log());
@@ -20,5 +21,5 @@ export function apiRequestLogger(req: Request, res: Response, next: NextFunction
     if (!res.writableFinished) log('client_disconnected');
   });
 
-  next();
+  performanceContext.run(metrics, next);
 }

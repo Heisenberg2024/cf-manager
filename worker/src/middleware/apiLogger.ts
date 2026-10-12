@@ -13,5 +13,5 @@ export const apiLoggerMiddleware = createMiddleware<{ Bindings: Env }>(async (c,
   const duration = Date.now() - start;
   const status = c.res?.status ?? 0;
   const reqId = getRequestId(c);
-  console.log(`[API] ${c.req.method} ${c.req.path} ${status} ${duration}ms reqId=${reqId}`);
+  console.log(JSON.stringify({ event: 'api_request', method: c.req.method, path: c.req.path, status, durationMs: duration, requestId: reqId }));
 });

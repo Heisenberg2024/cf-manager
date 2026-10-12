@@ -6,6 +6,8 @@ import { accountsApi } from '../api/accounts';
 const accountsCache = ref<Array<{ id: number; is_demo?: boolean }>>([]);
 let loaded = false;
 
+export function setDemoAccounts(accounts: Array<{ id: number; is_demo?: boolean }>): void { accountsCache.value = accounts; loaded = true; }
+
 export async function loadDemoAccounts(): Promise<void> {
   if (loaded) return;
   try {

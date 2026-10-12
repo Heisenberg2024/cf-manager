@@ -11,7 +11,7 @@ import {
   NNotificationProvider, NPopconfirm, NPopover, NProgress, NRadio, NRadioButton, NRadioGroup,
   NSelect, NSlider, NSpace, NSpin, NStatistic, NSwitch, NTab,
   NTabPane, NTabs, NTag, NText, NTimeline, NTimelineItem, NTooltip,
-  NUpload,
+  NUpload, NVirtualList, NSkeleton,
 } from 'naive-ui';
 import App from './App.vue';
 import router from './router';
@@ -33,6 +33,6 @@ app.use(create({ components: [
   NList, NListItem, NLoadingBarProvider, NMenu, NMessageProvider, NModal, NNotificationProvider,
   NPopconfirm, NPopover, NProgress, NRadio, NRadioButton, NRadioGroup, NSelect,
   NSlider, NSpace, NSpin, NStatistic, NSwitch, NTab, NTabPane,
-  NTabs, NTag, NText, NTimeline, NTimelineItem, NTooltip, NUpload,
+  NTabs, NTag, NText, NTimeline, NTimelineItem, NTooltip, NUpload, NVirtualList, NSkeleton,
 ] }));
 app.mount('#app');

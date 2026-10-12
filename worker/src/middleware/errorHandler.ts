@@ -8,7 +8,7 @@ export const errorHandler = createMiddleware<{ Bindings: Env }>(async (c, next) 
     await next();
   } catch (err: any) {
     const { statusCode: status, message, code } = errorDetails(err);
-    console.error(`[Error] ${c.req.method} ${c.req.path}: ${message}`);
+    console.error(JSON.stringify({ event: 'api_error', method: c.req.method, path: c.req.path, status, code }));
     // P1-11: 与 backend responseWrapper 对齐；OpenAI 兼容路径用 OpenAI 错误体，内部 /api 用 {success:false,error}
     const path = c.req.path;
     if (path.startsWith('/v1') || path.startsWith('/api/v1')) {

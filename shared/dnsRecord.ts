@@ -1,6 +1,11 @@
 /** Shared single-Zone and multi-Zone DNS definitions. */
 export const DNS_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'CAA', 'SRV', 'NS', 'PTR'] as const;
 export const PROXY_TYPES = ['A', 'AAAA', 'CNAME'];
+/** Resource IDs are single path segments; never let a record ID redirect a verified Zone write. */
+export function dnsRecordId(value: unknown): string {
+  if (typeof value !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(value)) throw Object.assign(new Error('Invalid DNS record ID'), { statusCode: 400, code: 'VALIDATION_ERROR' });
+  return value;
+}
 export interface DnsRecordForm { type: string; name: string; content: string; ttl: number; proxied: boolean; priority?: number; weight?: number; port?: number; flags?: number; tag?: string; comment?: string }
 export interface DnsRecordInput { type?: string; name?: string; content?: string; ttl?: number; proxied?: boolean; priority?: number; comment?: string; data?: Record<string, string | number> }
 export function dnsName(host: string, zone: string, relativeOnly = false): string {

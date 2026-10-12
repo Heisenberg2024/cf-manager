@@ -109,6 +109,7 @@ const server = createServer(async (req, res) => {
       const results = posted.names.map((name, i) => ({ name, zone_created: true, success: true, requested_plan: posted.plan, zone_id: `new-${offset + i}`, name_servers: ['ns.example.test'], plan: { id: offset + i < 3 ? posted.plan : 'free', name: offset + i < 3 ? 'Enterprise' : 'Free' }, ...(offset + i >= 3 && posted.plan !== 'free' ? { fallback: true, warning: 'Enterprise quota exceeded; using Free' } : {}) }));
       return json({ total: results.length, succeeded: results.length, failed: 0, fallback_count: results.filter(row => row.fallback).length, results }, 201);
     }
+    if (/^\/dns\/accounts\/\d+\/domains$/.test(path)) return json({ zones: zones.filter(zone => zone.cfAccountId === Number(path.split('/')[3])), meta: { state: 'miss' } });
     if (path === '/dns/domains') return json(zones);
     if (path.endsWith('/records')) return json([]);
     if (path.endsWith('/settings')) return json({});
@@ -173,20 +174,20 @@ try {
     await page.keyboard.press('Escape');
     assert.equal(await page.locator('.dns-zone-list .n-tag').count(), 3);
     const search = page.getByPlaceholder(zh.dns.searchDomain, { exact: true });
-    await search.fill('  EXISTING-1.TEST\n\nexisting-3.test  \nexisting-1.test');
+    await search.fill('  EXISTING-1.TEST\n\nexisting-3.test  \nexisting-1.test'); await page.waitForTimeout(200);
     assert.equal(await page.locator('.dns-zone-list .n-list-item').count(), 2, 'multi-line search matches either domain, ignoring blank lines and case');
-    await search.fill('  \n ');
+    await search.fill('  \n '); await page.waitForTimeout(200);
     assert.equal(await page.locator('.dns-zone-list .n-list-item').count(), 3, 'whitespace-only search must show all domains');
-    await search.fill('');
+    await search.fill(''); await page.waitForTimeout(200);
     await select(filter, labels[1]);
     assert.equal(await page.locator('.dns-zone-list .n-list-item').count(), 1);
-    await search.fill('existing-1.test\nexisting-2.test\nexisting-3.test');
+    await search.fill('existing-1.test\nexisting-2.test\nexisting-3.test'); await page.waitForTimeout(200);
     assert.equal(await page.locator('.dns-zone-list .n-list-item').count(), 1, 'multi-line search must preserve selected Account scope');
-    await search.fill('existing-1.test\nexisting-3.test');
+    await search.fill('existing-1.test\nexisting-3.test'); await page.waitForTimeout(200);
     assert.equal(await page.locator('.dns-zone-list .n-list-item').count(), 0);
-    await search.fill('existing-2');
+    await search.fill('existing-2'); await page.waitForTimeout(200);
     assert.equal(await page.locator('.dns-zone-list .n-list-item').count(), 1, 'single partial search remains supported');
-    await search.fill('');
+    await search.fill(''); await page.waitForTimeout(200);
     assert.equal(await page.locator('.dns-zone-list .n-tag').innerText(), 'Enterprise Website');
     await page.locator('.dns-zone-list .n-list-item').click();
     assert((await page.locator('.dns-right-card .n-card-header').innerText()).includes(labels[1]));
@@ -341,7 +342,7 @@ try {
     await page.locator('.n-modal').getByRole('button', { name: zh.common.close, exact: true }).click();
     // A remote Zone exposed by two credential bindings must not be submitted twice, even if it fails.
     zones.push({ ...zones.find(zone => zone.id === 'zone-1'), cfAccountId: 3, credentialId: 20, accountName: accounts[2].name });
-    const refreshed = page.waitForResponse(response => response.url().includes('/dns/domains?refresh=true'));
+    const refreshed = page.waitForResponse(response => response.url().includes('/domains?refresh=true'));
     await page.getByRole('button', { name: zh.common.refresh, exact: true }).first().click(); await refreshed;
     await page.locator('.dns-zone-list .n-list-item').nth(3).waitFor();
     await page.locator('.dns-zone-actions button').first().click();
@@ -355,7 +356,7 @@ try {
     assert.equal(await page.locator('.n-modal').getByRole('button', { name: zh.dns.plans.confirmChange, exact: true }).count(), 0);
     await page.locator('.n-modal').getByRole('button', { name: zh.common.close, exact: true }).click();
     zones = zones.filter(zone => !(zone.id === 'zone-1' && zone.cfAccountId === 3));
-    const restored = page.waitForResponse(response => response.url().includes('/dns/domains?refresh=true'));
+    const restored = page.waitForResponse(response => response.url().includes('/domains?refresh=true'));
     await page.getByRole('button', { name: zh.common.refresh, exact: true }).first().click(); await restored;
     await page.locator('.dns-zone-list .n-list-item').nth(3).waitFor({ state: 'hidden' });
     // Partial deletion retains failed selection and displays its actionable reason.

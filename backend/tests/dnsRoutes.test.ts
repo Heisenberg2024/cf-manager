@@ -5,13 +5,13 @@ import type { Server } from 'node:http';
 const mocks = vi.hoisted(() => ({ find: vi.fn(), list: vi.fn(), create: vi.fn(), edit: vi.fn(), remove: vi.fn(), cfFetch: vi.fn(), cfFetchAll: vi.fn(), account: vi.fn(), request: vi.fn(), demo: vi.fn() }));
 const cfA = 'a'.repeat(32);
 const account = { id: 1, name: 'Production', credential_id: 10, account_id: cfA, is_active: 1, is_enabled: 1, auth_type: 'token', api_token: 'ciphertext', api_key: null, email: null, enabled_features: 'dns', proxy_url: '', proxy_enabled: 0 };
-vi.mock('../src/services/accountRouter', () => ({ findAccountByDomain: mocks.find, getAllZones: vi.fn(async () => []), clearCache: vi.fn() }));
+vi.mock('../src/services/accountRouter', () => ({ findAccountByDomain: mocks.find, getAllZones: vi.fn(async () => []), getZoneSnapshots: vi.fn(async () => []), getAccountZones: vi.fn(), clearCache: vi.fn() }));
 vi.mock('../src/services/dnsService', () => ({ listDnsRecords: mocks.list, createDnsRecord: mocks.create, updateDnsRecord: mocks.edit, deleteDnsRecord: mocks.remove }));
 vi.mock('../src/models/auditLog', () => ({ createAuditLog: vi.fn() }));
 vi.mock('../src/models/account', () => ({ getAccountById: mocks.account }));
 vi.mock('../src/services/cfFactory', () => ({ accountRequest: mocks.request, getCfClient: vi.fn() }));
 vi.mock('../src/routes/routeUtils', () => ({ isDemoAccountId: mocks.demo }));
-vi.mock('../src/services/logger', () => ({ appLogger: { error: vi.fn(), warn: vi.fn() } }));
+vi.mock('../src/services/logger', () => ({ appLogger: { error: vi.fn(), warn: vi.fn() }, apiLogger: { info: vi.fn() } }));
 import backendDns from '../src/routes/dns';
 import { responseWrapper } from '../src/middleware/responseWrapper';
 import { errorHandler } from '../src/middleware/errorHandler';
@@ -36,6 +36,14 @@ beforeEach(() => {
 });
 
 describe('Docker DNS routes', () => {
+  it('exposes bounded record pages with explicit page scope and validates filters', async () => {
+    mocks.request.mockReturnValue(async () => ({ result: [{ id: 'record-page' }], result_info: { page: 2, total_pages: 20, total_count: 10000 } }));
+    const response = await fetch(`${base}/dns/domains/example.test/records?accountId=1&zoneId=zone-a&page=2&perPage=500&type=TXT`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect((await response.json()).data).toMatchObject({ records: [{ id: 'record-page' }], meta: { page: 2, scope: 'page', total_count: 10000 } });
+    expect((await fetch(`${base}/dns/domains/example.test/records?page=-1`)).status).toBe(400);
+  });
   it('uses Enterprise contract rate IDs and continues creating after the first domain fails', async () => {
     const cf = fakeZonePlans({ capacity: 10, omitLegacyEnterprise: true, enterpriseName: 'Enterprise Website', enterpriseRateId: 'd'.repeat(32), failedName: 'bad.test' });
     mocks.request.mockReturnValue(cf.request);
