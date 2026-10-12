@@ -12,7 +12,7 @@ import { previewBatch, verifyPreview, executeBatch, type BatchPreview } from '..
 import { dnsBatchRuntime, consumeDnsPreview } from '../services/dnsBatchRuntime';
 import { errorDetails } from '../services/cfErrors';
 import { accountRequest } from '../services/cfFactory';
-import { createZonesWithPlan, getZonePlanOptions, parseCreateZonesInput } from '../services/zonePlans';
+import { changeZonePlan, createZonesWithPlan, getExistingZonePlanOptions, getZonePlanOptions, parseCreateZonesInput, parseZonePlan } from '../services/zonePlans';
 
 const router = Router();
 function zoneContext(req: Request) {
@@ -51,6 +51,28 @@ router.get('/accounts/:accountId/plans', async (req, res, next) => {
     const account = getAccountById(Number(req.params.accountId));
     if (!account?.account_id) { res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Account with Cloudflare Account ID not found' } }); return; }
     res.json(await getZonePlanOptions(accountRequest(account), account.account_id));
+  } catch (error) { next(error); }
+});
+
+router.get('/domains/:domain/plans', async (req, res, next) => {
+  try {
+    const { account, zoneId } = await findAccountByDomain(req.params.domain as string, zoneContext(req));
+    res.json(await getExistingZonePlanOptions(accountRequest(account), account.account_id || '', zoneId));
+  } catch (error) { next(error); }
+});
+
+router.patch('/domains/:domain/plan', async (req, res, next) => {
+  try {
+    const plan = parseZonePlan(req.body);
+    const domain = req.params.domain as string;
+    const { account, zoneId } = await findAccountByDomain(domain, zoneContext(req));
+    if (isDemoAccountId(account.id)) {
+      res.status(403).json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可修改 Zone 套餐' } }); return;
+    }
+    const result = await changeZonePlan(accountRequest(account), account.account_id || '', zoneId, plan);
+    invalidateZonesCache();
+    createAuditLog(account.id, 'change_zone_plan', domain, `zone=${zoneId}; requested=${plan}; actual=${result.plan?.id || 'unknown'}; pending=${!!result.activation_pending}; uncertain=${!!result.outcome_uncertain}`, result.success ? 'success' : 'error');
+    res.json({ success: true, data: result });
   } catch (error) { next(error); }
 });
 
@@ -131,7 +153,7 @@ async function batchProcess<T, R>(
     results.push(...settled.map((s, j) => ({
       item: batch[j],
       result: s.status === 'fulfilled' ? (s as PromiseFulfilledResult<R>).value : undefined,
-      error: s.status === 'rejected' ? String((s as PromiseRejectedResult).reason) : undefined,
+      error: s.status === 'rejected' ? errorDetails((s as PromiseRejectedResult).reason).message : undefined,
     })));
   }
   return results;
@@ -153,7 +175,7 @@ router.post('/domains', async (req: Request, res: Response, next: NextFunction) 
     const result = await createZonesWithPlan(accountRequest(account), account.account_id || '', input);
 
     invalidateZonesCache();
-    createAuditLog(account.id, 'batch_create_zone', `accounts/${input.account_id}`, `plan=${input.plan}; succeeded ${result.succeeded}/${result.total}; Free fallback ${result.fallback_count}; ${result.results.map(row => `${row.name}: ${row.plan?.name || 'unknown'}${row.error ? ' (failed)' : ''}`).join(', ')}`, result.failed ? 'error' : 'success');
+    createAuditLog(account.id, 'batch_create_zone', `accounts/${input.account_id}`, `plan=${input.plan}; succeeded ${result.succeeded}/${result.total}; Free fallback ${result.fallback_count}; pending ${result.pending_count}; ${result.results.map(row => `${row.name}: ${row.plan?.name || 'unknown'}${row.activation_pending ? ' (pending)' : row.error ? ' (failed)' : ''}`).join(', ')}`, result.failed ? 'error' : 'success');
     res.status(201).json(result);
   } catch (err) { next(err); }
 });

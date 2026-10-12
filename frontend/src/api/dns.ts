@@ -1,10 +1,13 @@
 import apiClient, { API_BASE_URL } from './client';
 import { readBatchStream } from '../utils/batchStream';
 import type { BatchSpec, BatchPreview, BatchEvent } from '../shared/dnsBatch';
-import type { ZonePlanId, ZonePlanOption } from '../shared/zonePlans';
+import type { ChangeZonePlanResult, CreateZoneResult, ZonePlan, ZonePlanId, ZonePlanOption } from '../shared/zonePlans';
 
 export interface ZoneContext { accountId?: number; zoneId?: string }
 export interface ZoneSelection extends ZoneContext { name: string }
+export interface PlanChangeTarget { name: string; accountId: number; zoneId: string; accountLabel: string; plan?: ZonePlan }
+export interface DeleteZoneResult extends ZoneSelection { success: boolean; error?: string; outcome_uncertain?: boolean }
+export interface DeleteZonesResult { total: number; succeeded: number; failed: number; results: DeleteZoneResult[] }
 const domainPath = (domain: string) => `/dns/domains/${encodeURIComponent(domain)}`;
 
 export const dnsApi = {
@@ -29,10 +32,12 @@ export const dnsApi = {
 
   // Zone 管理
   getPlans: (accountId: number) => apiClient.get<{ plans: ZonePlanOption[]; source: string }>(`/dns/accounts/${accountId}/plans`, { _silent: true }),
+  getZonePlans: (domain: string, context: ZoneContext) => apiClient.get<{ plans: ZonePlanOption[]; plan?: ZonePlan }>(`${domainPath(domain)}/plans`, { params: context, _silent: true }),
+  changePlan: (domain: string, plan: ZonePlanId, context: ZoneContext) => apiClient.patch<ChangeZonePlanResult>(`${domainPath(domain)}/plan`, { plan }, { params: context, timeout: 0, _silent: true }),
   createDomains: (data: { names: string[]; account_id: number; type: 'full' | 'partial'; plan?: ZonePlanId }) =>
-    apiClient.post('/dns/domains', data, { timeout: 0 }),
+    apiClient.post<{ total: number; results: CreateZoneResult[] }>('/dns/domains', data, { timeout: 0, _silent: true }),
   deleteDomains: (domains: Array<string | ZoneSelection>) =>
-    apiClient.delete('/dns/domains', { data: { domains } }),
+    apiClient.delete<DeleteZonesResult>('/dns/domains', { data: { domains }, timeout: 0, _silent: true }),
   updateSettings: (domain: string, settings: Record<string, any>, context: ZoneContext = {}) =>
     apiClient.patch(`${domainPath(domain)}/settings`, settings, { params: context }),
   purgeCache: (domain: string, data: { purge_everything?: boolean; files?: string[] }, context: ZoneContext = {}) =>

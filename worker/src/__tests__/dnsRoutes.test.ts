@@ -12,6 +12,7 @@ vi.mock('../services/demo', () => ({ isDemoAccount: mocks.demo }));
 import workerDns from '../routes/dns';
 import { fakeZonePlans } from '../../../shared/tests/zonePlans.fixture';
 import { errorDetails } from '../services/cfErrors';
+import { responseWrapper } from '../middleware/responseWrapper';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -23,6 +24,46 @@ describe('Worker DNS routes', () => {
   const env = { DB: {}, KV: { get: async () => null, put: async () => {}, delete: async () => {} }, ENCRYPTION_KEY: 'test-key' } as unknown as Env;
   const app = new Hono<{ Bindings: Env }>().route('/dns', workerDns);
   app.onError((error, c) => { const detail = errorDetails(error); return c.json({ error: detail }, detail.statusCode as 400); });
+  it('recognizes contract Enterprise rates and continues after a failed first creation', async () => {
+    const cf = fakeZonePlans({ capacity: 10, omitLegacyEnterprise: true, enterpriseName: 'Enterprise Website', enterpriseRateId: 'd'.repeat(32), failedName: 'bad.test' });
+    mocks.request.mockResolvedValue(cf.request);
+    const names = ['bad.test', 'one.test', 'two.test'];
+    const response = await app.request('/dns/domains', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account_id: 1, names, plan: 'enterprise' }) }, env);
+    const result = await response.json() as { total: number; results: Array<{ plan?: { id: string } }> };
+    expect(result).toMatchObject({ total: 3, succeeded: 2, failed: 1, fallback_count: 0 });
+    expect(result.results[1].plan?.id).toBe('enterprise');
+    expect(cf.calls.filter(call => call.path === '/zones').map(call => call.body?.name)).toEqual(names);
+    expect(cf.calls.filter(call => call.path.endsWith('/subscription')).map(call => call.body?.rate_plan)).toEqual([{ id: 'd'.repeat(32) }, { id: 'd'.repeat(32) }]);
+  });
+  it('returns accepted pending changes without confusing actual activation with submission success', async () => {
+    const cf = fakeZonePlans({ noActivation: true });
+    cf.zones.set('zone-a', { id: 'zone-a', name: 'example.test', account: { id: cf.accountId }, plan: { id: 'opaque-ent', legacy_id: 'enterprise', name: 'Enterprise Website' }, name_servers: [] });
+    mocks.request.mockResolvedValue(cf.request);
+    const response = await app.request('/dns/domains/example.test/plan?accountId=1&zoneId=zone-a', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan: 'free' }) }, env);
+    expect(response.status).toBe(200);
+    expect((await response.json() as { data: unknown }).data).toMatchObject({ success: true, activation_pending: true, outcome_uncertain: false, plan: { id: 'enterprise' } });
+    expect(cf.calls.filter(call => call.path.endsWith('/subscription'))).toHaveLength(1);
+  });
+  it('changes only the selected Zone and preserves failed plan receipts through the production response wrapper', async () => {
+    const wrapped = new Hono<{ Bindings: Env }>(); wrapped.use('*', responseWrapper); wrapped.route('/dns', workerDns);
+    wrapped.onError((error, c) => { const detail = errorDetails(error); return c.json({ error: detail }, detail.statusCode as 400); });
+    const cf = fakeZonePlans();
+    cf.zones.set('zone-a', { id: 'zone-a', name: 'example.test', account: { id: cf.accountId }, plan: { id: 'opaque-ent', legacy_id: 'enterprise', name: 'Enterprise Website' }, name_servers: [] });
+    mocks.request.mockResolvedValue(cf.request);
+    const path = '/dns/domains/example.test'; const query = '?accountId=1&zoneId=zone-a';
+    const options = await wrapped.request(`${path}/plans${query}`, {}, env);
+    expect((await options.json() as { data: { plan: { id: string } } }).data.plan.id).toBe('enterprise');
+    const send = (plan: string) => wrapped.request(`${path}/plan${query}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan }) }, env);
+    expect((await (await send('free')).json() as { data: unknown }).data).toMatchObject({ success: true, plan: { id: 'free' } });
+    cf.zones.get('zone-a')!.plan.legacy_id = 'enterprise';
+    mocks.request.mockResolvedValue(async (path: string, init: RequestInit) => {
+      if (path.endsWith('/subscription')) throw Object.assign(new Error('Request timed out'), { name: 'TimeoutError' });
+      return cf.request(path, init);
+    });
+    expect((await (await send('free')).json() as { data: unknown }).data).toMatchObject({ success: false, outcome_uncertain: true });
+    expect((await send('opaque-ent')).status).toBe(400);
+    mocks.demo.mockReturnValue(true); expect((await send('free')).status).toBe(403);
+  });
   it('returns the same ordered plan allocation and Free fallback as Express', async () => {
     const cf = fakeZonePlans(); mocks.request.mockResolvedValue(cf.request);
     const result = await app.request('/dns/domains', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account_id: 1, names: ['1.test', '2.test', '3.test', '4.test', '5.test'], plan: 'enterprise' }) }, env);

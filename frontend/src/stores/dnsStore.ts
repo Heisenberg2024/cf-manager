@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import type { BatchZone } from '../shared/dnsBatch';
-import type { ZonePlanId } from '../shared/zonePlans';
+import type { CreateZoneResult, ZonePlanId } from '../shared/zonePlans';
+import type { ApiError } from '../api/client';
 import { dnsApi, type ZoneContext, type ZoneSelection } from '../api/dns';
 
 export const useDnsStore = defineStore('dns', () => {
@@ -61,15 +62,43 @@ export const useDnsStore = defineStore('dns', () => {
       if (identity === settingsIdentity) { settingsError.value = error.errorMessage || error.message; zoneSettings.value = {}; }
     } finally { if (identity === settingsIdentity) settingsLoading.value = false; }
   }
-  async function createDomains(data: { names: string[]; account_id: number; type: 'full' | 'partial'; plan?: ZonePlanId }) {
-    const { data: result } = await dnsApi.createDomains(data);
+  async function createDomains(data: { names: string[]; account_id: number; type: 'full' | 'partial'; plan?: ZonePlanId }, onProgress?: (name: string, result?: CreateZoneResult) => void) {
+    const input = { ...data };
+    const requested = input.plan || 'free';
+    const names = [...new Set(input.names.map(name => name.trim().toLowerCase()).filter(Boolean))];
+    const results: CreateZoneResult[] = [];
+    let capacityExhausted = false;
+    let capacityWarning = '';
+    // One domain per invocation isolates HTTP failures and Worker subrequest budgets.
+    // Never repeat a processed name, including an unknown creation/write response.
+    for (const name of names) {
+      onProgress?.(name);
+      try {
+        const { data: receipt } = await dnsApi.createDomains({ ...input, names: [name], plan: capacityExhausted ? 'free' : requested });
+        if (receipt.total !== 1 || receipt.results?.length !== 1 || receipt.results[0]?.name !== name) throw new Error('Zone creation receipt could not be confirmed; refresh before retrying');
+        const row = { ...receipt.results[0], requested_plan: requested };
+        if (capacityExhausted && row.success && (row.plan?.id === 'free' || row.plan?.id === 'partners_free')) {
+          row.fallback = true; row.warning ||= capacityWarning;
+        }
+        results.push(row);
+        // The server marks fallback only after an explicit upstream capacity rejection.
+        if (row.fallback) { capacityExhausted = true; capacityWarning = row.warning || ''; }
+      } catch (error) {
+        const failure = error as ApiError;
+        const status = failure.response?.status;
+        results.push({ name, success: false, zone_created: false, requested_plan: requested, outcome_uncertain: !status || status >= 500, error: failure.errorMessage || failure.message });
+      }
+      onProgress?.(name, results[results.length - 1]);
+    }
     // Preserve the creation receipt even if the subsequent list refresh fails.
     try { await fetchDomains(true); } catch { /* The result dialog still reports the actual writes. */ }
-    return result;
+    return { total: results.length, succeeded: results.filter(row => row.success).length, failed: results.filter(row => !row.success).length,
+      fallback_count: results.filter(row => row.fallback).length, pending_count: results.filter(row => row.activation_pending).length, results };
   }
   async function deleteDomains(names: Array<string | ZoneSelection>) {
     const { data } = await dnsApi.deleteDomains(names);
-    await fetchDomains(true); return data;
+    try { await fetchDomains(true); } catch { /* Preserve per-Zone deletion receipts when refresh fails. */ }
+    return data;
   }
   async function updateZoneSettings(domain: string, settings: Record<string, any>) {
     const context = { ...currentContext.value };

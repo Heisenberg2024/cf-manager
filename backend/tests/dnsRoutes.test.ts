@@ -36,6 +36,48 @@ beforeEach(() => {
 });
 
 describe('Docker DNS routes', () => {
+  it('uses Enterprise contract rate IDs and continues creating after the first domain fails', async () => {
+    const cf = fakeZonePlans({ capacity: 10, omitLegacyEnterprise: true, enterpriseName: 'Enterprise Website', enterpriseRateId: 'd'.repeat(32), failedName: 'bad.test' });
+    mocks.request.mockReturnValue(cf.request);
+    const names = ['bad.test', 'one.test', 'two.test'];
+    const response = await fetch(`${base}/dns/domains`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account_id: 1, names, plan: 'enterprise' }) });
+    const result = (await response.json()).data;
+    expect(result).toMatchObject({ total: 3, succeeded: 2, failed: 1, fallback_count: 0 });
+    expect(result.results[1]).toMatchObject({ zone_created: true, plan: { id: 'enterprise' } });
+    expect(cf.calls.filter(call => call.path === '/zones').map(call => call.body?.name)).toEqual(names);
+    expect(cf.calls.filter(call => call.path.endsWith('/subscription')).map(call => call.body?.rate_plan)).toEqual([{ id: 'd'.repeat(32) }, { id: 'd'.repeat(32) }]);
+  });
+  it('returns accepted pending changes instead of local 409 errors when Zone plan activation is delayed', async () => {
+    const cf = fakeZonePlans({ noActivation: true });
+    cf.zones.set('zone-a', { id: 'zone-a', name: 'example.test', account: { id: cf.accountId }, plan: { id: 'opaque-ent', legacy_id: 'enterprise', name: 'Enterprise Website' }, name_servers: [] });
+    mocks.request.mockReturnValue(cf.request);
+    const response = await fetch(`${base}/dns/domains/example.test/plan?accountId=1&zoneId=zone-a`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan: 'free' }) });
+    expect(response.status).toBe(200);
+    expect((await response.json()).data).toMatchObject({ success: true, activation_pending: true, outcome_uncertain: false, plan: { id: 'enterprise' } });
+    expect(cf.calls.filter(call => call.path.endsWith('/subscription'))).toHaveLength(1);
+  });
+  it('reads and changes the exact Zone plan and preserves unsuccessful receipts inside the response envelope', async () => {
+    const cf = fakeZonePlans();
+    cf.zones.set('zone-a', { id: 'zone-a', name: 'example.test', account: { id: cf.accountId }, plan: { id: 'opaque-ent', legacy_id: 'enterprise', name: 'Enterprise Website' }, name_servers: [] });
+    mocks.request.mockReturnValue(cf.request);
+    const path = `${base}/dns/domains/example.test`; const query = '?accountId=1&zoneId=zone-a';
+    const options = await fetch(`${path}/plans${query}`);
+    expect((await options.json()).data.plan.id).toBe('enterprise');
+    const send = (plan: string) => fetch(`${path}/plan${query}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan }) });
+    const changed = await send('free');
+    expect((await changed.json()).data).toMatchObject({ success: true, plan: { id: 'free' } });
+    cf.zones.get('zone-a')!.plan.legacy_id = 'enterprise';
+    mocks.request.mockReturnValue(async (path: string, init: RequestInit) => {
+      if (path.endsWith('/subscription')) throw Object.assign(new Error('Request timed out'), { name: 'TimeoutError' });
+      return cf.request(path, init);
+    });
+    const failed = await send('free');
+    expect((await failed.json()).data).toMatchObject({ success: false, outcome_uncertain: true, plan: { id: 'enterprise' } });
+    expect(mocks.find).toHaveBeenCalledWith('example.test', { accountId: 1, zoneId: 'zone-a' });
+    expect((await send('opaque-ent')).status).toBe(400);
+    mocks.demo.mockReturnValue(true);
+    expect((await send('free')).status).toBe(403);
+  });
   it('returns ordered actual plans and Free fallback receipts for the selected local binding', async () => {
     const cf = fakeZonePlans(); mocks.request.mockReturnValue(cf.request);
     const result = await fetch(`${base}/dns/domains`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account_id: 1, names: ['1.test', '2.test', '3.test', '4.test', '5.test'], plan: 'enterprise' }) });

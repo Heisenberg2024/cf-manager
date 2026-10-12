@@ -1,4 +1,38 @@
-# 多 Zone DNS、套餐、浮层与列表滚动（2.5.4）
+# 多 Zone DNS、套餐、浮层与列表滚动（2.5.9）
+
+## 域名操作面板与套餐名称（2.5.9）
+
+添加、删除、单/批量修改套餐共用 `DnsOperationModal.vue`：860px（最大 95vw），内容限高滚动，表格独立滚动，关闭/提交按钮在内容外。遮罩点击和 Esc 始终不可关闭；只允许手动点击右上角或底部关闭按钮，执行期间两者禁用。结果留在原面板，关闭后重新打开才开始新的操作。
+
+添加保留账户/套餐/类型/多行域名表单，显示去重后的目标预览，执行时通过 `dnsStore.createDomains` 的逐项回调展示真实状态和进度；结果表含账户、目标套餐、实际套餐、状态、NS 与原因，保留 NS 复制及 Free/待生效汇总。删除使用 `ZoneDeleteDialog.vue`，展示捕获的 Account/Zone 目标与当前套餐，勾选不可撤销确认后调用原删除 API；逐项回执留在同面板，失败项选择保留，不自动重发。
+
+`dnsPlanLabel.ts` 只格式化套餐选择项，显示公开 tier 名称及本地化周期。共享 `knownPlanId` 兼容明确的 CF_FREE/CF_BIZ/CF_PRO_20_20/CF_ENT/CF_LITE/CF_PRO_PLUS 代码；实际 Zone 的 `plan.name`（Free Website、Enterprise Website 等）和订阅 `rate_plan_id` 原样保留。价格仍来自上游字段，不把 Enterprise 的 0 USD 价格当作 Free 套餐。
+
+回归覆盖六种内部套餐名称、本地化月价、实际套餐名保留、添加预览/进度/结果、删除确认/结果、修改套餐，以及准备阶段和结果阶段的遮罩/Esc 不关闭与手动关闭；沿用下方隔离浏览器命令，不连接真实 Cloudflare。
+
+## Enterprise 识别与批量添加（2.5.8）
+
+上一版仅用 `available_plans.legacy_id` 匹配固定枚举，条目缺失或 `can_subscribe=false` 就把新域名当作无名额；套餐订阅后只读一次状态，尚未同步会在本地生成 409 并停止整个创建批次。2.5.8 同时分页读取 `available_plans` 和 `available_rate_plans`，根据公开 tier ID 或明确网站套餐名称识别 Enterprise/Enterprise Website；不把附加产品的名字模糊归入 Enterprise。`available_plans.id` 是产品 ID，不能直接作为订阅 ID；`available_rate_plans.id` 是实际 rate-plan 标识，独立保存为 `rate_plan_id`，由服务端按所选 tier 解析用于订阅，不接收前端任意订阅 ID。[可订阅 rate plans](https://developers.cloudflare.com/api/resources/zones/subresources/rate_plans/methods/get/)
+
+基础 Free/Pro/Business/Enterprise 候选不会因 Billing Read 失败或账户暂无 Zone 而消失。列表只是套餐来源/提示，条目缺失、未知可用性或旧 `can_subscribe=false` 不等于 Enterprise 名额为零；明确选中的套餐由订阅写入检查权限、合约与容量。没有可用 rate-plan 信息时可尝试所选公开 tier ID，若被拒绝则保留真实错误；不猜测专属合约 ID、剩余名额或计费组件数量。
+
+界面的 `dnsStore.createDomains` 按规范化/去重输入顺序每次请求一个域名并汇总回执，HTTP 失败也继续，前面结果不会丢失；这样大批量创建不会共用一次 Worker invocation 的 subrequest 预算。服务器明确容量 fallback 后，余下请求使用 Free，并在汇总回执保留原 requested_plan。后端原批量 API 仍逐项独立处理。每个新 Zone 的套餐处理复用 `changeZonePlan`，有限只读确认，不重发创建或订阅；“已提交待生效”与实际 Free 分开展示。创建、订阅、权限、网络或未知结果失败都不阻止后续域名，保留 Zone ID/NS 与实际套餐。仅当订阅明确返回套餐容量拒绝时，当前及余下项使用已经确认的 Free，不能把遗漏条目、读取失败、延迟生效或其他 409 当作容量不足。
+
+共享契约新增 10 个 Enterprise 名额/第 11 项明确容量拒绝、不同产品 ID 与真实订阅 ID、Enterprise Website/非标准 legacy_id、旧接口遗漏/可用性 false、rate-plan 分页、首项失败/未知后继续与待生效回执；双端 HTTP 用合成合约验证首项失败后继续，UI 在 Billing 读取失败时仍能选择 Enterprise，并展示逐项失败/未知/待生效及余下成功结果。真实账户合约与剩余名额仍需部署环境验证。
+
+## 修改现有域名套餐与删除（2.5.5）
+
+勾选域名后进入“批量 DNS → 批量修改套餐”；单域名详情标题旁的“修改套餐”使用同一 `ZonePlanDialog.vue`。弹窗展示域名/账户与修改前套餐，选择目标套餐并确认计费影响后执行，显示进度、逐项实际套餐及失败原因。套餐选项取各目标 Zone 的可订阅套餐；是否允许修改最终由每个 Zone 写入前的 Cloudflare 校验决定。读取 Billing 权限失败时仍可尝试 Free。
+
+`GET /api/dns/domains/:domain/plans` 与 `PATCH /api/dns/domains/:domain/plan` 均携带本地 accountId/zoneId，双端从绑定解析凭证，并 GET Zone 确认真实 Account。共享 `changeZonePlan` 对 Free 升级用 POST subscription，对现有付费套餐修改/降级用 PUT subscription，使用公开 rate_plan ID；已是目标套餐无需写入。写后读回 Zone，订阅接受和实际生效分别展示。[Cloudflare 更新订阅](https://developers.cloudflare.com/api/resources/zones/subresources/subscriptions/methods/update/)、[Tenant 套餐流程](https://developers.cloudflare.com/tenant/how-to/manage-subscriptions/)
+
+套餐批量修改由浏览器按选中列表顺序逐 Zone 请求。保持页面打开；失败、网络异常和结果未确认均逐项保留并继续后续域名，不中断整批。结果分别统计已生效、已提交待生效、失败、结果未确认和重复项跳过。固定批次目标快照，请求前按真实 zoneId 标记已处理；同一 Zone 经不同凭证/本地绑定重复选择，也只提交一次，重复行明确显示跳过原因。运行中不能再次执行，完成的结果对话框不可重新提交；未知项重试前先单独刷新核实。现有域名无隐式套餐兜底。管理 API 将业务成功/失败回执放入 `data`，避免与响应包装器的 `success` 字段混淆。
+
+2.5.6 修复上一版只读一次 `Zone.plan`、不一致即生成本地 409 的误判。现仅在首次读回及最多两次短暂等待（250ms、750ms）后确认，不重发订阅；读回是目标套餐则已生效，Cloudflare 接受提交但尚未生效/读取失败则返回 `success: true, activation_pending: true`，显示“已提交，待生效”，实际套餐仍保留读回值，不伪造目标套餐。写入响应丢失后读回目标套餐可恢复成功；既无成功回执又读不到目标套餐则标记该域名“结果未确认”，2.5.7 起继续处理后续域名。降级可能在计费周期结束才生效，不应因为即时状态仍为原套餐重复提交。[Cloudflare 套餐变更时机](https://developers.cloudflare.com/billing/manage/change-plan/)
+
+付费/Enterprise 域名无法删除时，先明确修改为 Free 并确认实际生效，再进入“更多 → 删除域名配置（Zone）”。删除不自动改变订阅；结果逐域名展示上游拒绝，失败项仍保持选择，刷新失败不丢失操作回执。真实计费周期、Enterprise 合约降级和删除权限受 Cloudflare 限制；未生效或被拒绝时先处理上游限制。
+
+共享契约覆盖 Enterprise Website→Free、POST/PUT 分支、精确 Zone 选项、归属错误、重复目标、套餐不可用、Billing 拒绝及未知/未生效写入；双端 HTTP 测试验证包装后的成功和失败回执。`test-dns-plans-ui.mjs` 覆盖单域名降级、跨账户顺序修改、失败/未知结果均继续、HTTP 异常隔离、同 Zone 跨凭证重复选择只提交一次、部分删除和失败选择保留，并沿用下方临时产物命令。
 
 ## 账户身份与域名套餐（2.5.4）
 
@@ -6,9 +40,9 @@ DNS 筛选、添加弹窗和域名分组统一展示“账户名称｜凭证名�
 
 域名搜索框可粘贴多行，每行独立按子串匹配，任意一行命中即保留；忽略首尾空白、空行、重复项和大小写。账户筛选、分组与“选择全部搜索结果”使用同一过滤结果，不扩大到其他账户。
 
-`GET /api/dns/accounts/:accountId/plans` 读取选定账户已有 Zone 的可用套餐；无现有 Zone 时提供 Free/Pro/Business/Enterprise 候选，首次创建后验证。`POST /api/dns/domains` 支持可选 `plan`（默认 `free`），按规范化/去重后的输入顺序创建并分配。`shared/zonePlans.ts` 同步双端：用 available_plans 的公开 `legacy_id` 订阅，不能把其不透明 `id` 作为 rate_plan ID；写后 GET Zone 确认实际套餐。
+`GET /api/dns/accounts/:accountId/plans` 读取选定账户已有 Zone 的可用套餐；无现有 Zone 时提供 Free/Pro/Business/Enterprise 候选，首次创建后验证。`POST /api/dns/domains` 支持可选 `plan`（默认 `free`），按规范化/去重后的输入顺序创建并分配。`shared/zonePlans.ts` 同步双端：优先用 available_rate_plans 的真实 ID，否则用所选公开 tier ID；不能把 available_plans 的产品 ID 直接作为 rate_plan ID。写后有限回读 Zone 并返回实际套餐或已提交待生效。
 
-只有新 Zone 的套餐明确不可订阅，或订阅返回明确容量拒绝，才把该项及余下域名保留为 Free。权限、限流、网络或实际套餐未生效不会报告为名额不足；流程停止后续域名，返回已创建 Zone/NS、实际套餐或待确认状态、错误与 `fallback_count`。创建回执不会因列表刷新失败丢失。公开 API 没有可靠剩余 Enterprise 名额，不推算或承诺数量；真实合约容量以 Cloudflare 返回为准。套餐读取/写入分别需要 Billing Read/Write，Free 创建不依赖 Billing 权限。[可用套餐](https://developers.cloudflare.com/api/resources/zones/subresources/plans/methods/list/)、[套餐订阅](https://developers.cloudflare.com/api/resources/zones/subresources/subscriptions/methods/create/)
+只有订阅返回明确容量拒绝，才把该项及余下新域名保留为已确认的 Free。权限、限流、网络、读取失败或实际套餐未生效不会报告为名额不足；各项独立返回已创建 Zone/NS、实际套餐或待确认状态、错误与 `fallback_count`/`pending_count`，继续后续域名。创建回执不会因列表刷新失败丢失。剩余 Enterprise 名额不从公开计费组件推算，真实合约容量以 Cloudflare 返回为准。Free 创建不依赖 Billing 权限；付费套餐是否可提交由订阅接口授权。[可用套餐](https://developers.cloudflare.com/api/resources/zones/subresources/plans/methods/list/)、[套餐订阅](https://developers.cloudflare.com/api/resources/zones/subresources/subscriptions/methods/create/)
 
 `shared/tests/zonePlans.contract.ts` 覆盖 5 域名/3 Enterprise 名额、显式容量拒绝、失败域名不消耗名额、读写权限、未知结果、未实际生效、空账户与归属错误；两端还有 HTTP 路由测试。隔离 UI 脚本检查凭证管理名称与账户字段不一致时的标签、两处交替底色及下拉过滤、多行域名匹配与账户范围、套餐标签、账户切换迟到响应、Billing 权限失败与 Free 选择；覆盖 1440px/390px × light/dark：
 
@@ -37,9 +71,9 @@ Naive Grid 的 `m` 断点为 1024px；断点以下 DNS、KV/D1/R2 上下排列�
 
 ## 操作入口与流程
 
-DNS 左侧保留跨搜索、跨账户筛选的复合身份选择。`选择全部搜索结果` 明确选择当前账户/搜索过滤后的全部结果；Zone 列表没有隐藏分页。`批量 DNS` 提供新增、修改、删除、Proxy、TTL；`更多 → 删除域名配置（Zone）` 仍是独立的 Zone 删除流程。
+DNS 左侧保留跨搜索、跨账户筛选的复合身份选择。`选择全部搜索结果` 明确选择当前账户/搜索过滤后的全部结果；Zone 列表没有隐藏分页。`批量 DNS` 提供记录新增、修改、删除、Proxy、TTL 以及套餐修改；`更多 → 删除域名配置（Zone）` 是独立的 Zone 删除流程。
 
-统一流程：配置 → Preview → 核对变更/目标数量 → 勾选明确确认 → Execute → 进度与结果。匹配使用相对 Host + Type，可附加严格 Current Content。`@` 对应各 Zone apex，`www` 对应 `www.<zone>`。
+DNS 记录统一流程：配置 → Preview → 核对变更/目标数量 → 勾选明确确认 → Execute → 进度与结果。匹配使用相对 Host + Type，可附加严格 Current Content。`@` 对应各 Zone apex，`www` 对应 `www.<zone>`。
 
 单/多 Zone 共用 `DnsRecordFields.vue` 与 `shared/dnsRecord.ts`：A/AAAA/CNAME/TXT/MX/CAA/SRV/NS/PTR；MX priority、SRV priority/weight/port/target、CAA flags/tag/value 均有定义。修改只发送勾选字段，SRV/CAA data 会合并未修改部分。Proxy 只发送 proxied，TTL 只发送 ttl。Cloudflare 的 proxied DNS 使用 Auto TTL，这是上游规则；不能对已代理记录写入非 Auto TTL。
 

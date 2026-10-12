@@ -12,7 +12,7 @@ import { streamSSE } from 'hono/streaming';
 import { previewBatch, verifyPreview, executeBatch, type BatchPreview } from '../services/dnsBatch';
 import { dnsBatchRuntime, consumeDnsPreview } from '../services/dnsBatchRuntime';
 import { errorDetails } from '../services/cfErrors';
-import { createZonesWithPlan, getZonePlanOptions, parseCreateZonesInput } from '../services/zonePlans';
+import { changeZonePlan, createZonesWithPlan, getExistingZonePlanOptions, getZonePlanOptions, parseCreateZonesInput, parseZonePlan } from '../services/zonePlans';
 
 const app = new Hono<{ Bindings: Env }>();
 function zoneContext(c: { req: { query(name: string): string | undefined } }) {
@@ -161,7 +161,7 @@ async function batchProcess<T, R>(
     results.push(...settled.map((s, j) => ({
       item: batch[j],
       result: s.status === 'fulfilled' ? (s as PromiseFulfilledResult<R>).value : undefined,
-      error: s.status === 'rejected' ? String((s as PromiseRejectedResult).reason) : undefined,
+      error: s.status === 'rejected' ? errorDetails((s as PromiseRejectedResult).reason).message : undefined,
     })));
   }
   return results;
@@ -181,7 +181,7 @@ app.post('/domains', async (c) => {
   const result = await createZonesWithPlan(await accountRequest(account, c.env.ENCRYPTION_KEY), account.account_id || '', input);
 
   await invalidateZonesCache(c.env.KV);
-  await addAuditLog(c.env.DB, { account_id: account.id, action: 'batch_create_zone', target: `accounts/${input.account_id}`, detail: `plan=${input.plan}; succeeded ${result.succeeded}/${result.total}; Free fallback ${result.fallback_count}; ${result.results.map(row => `${row.name}: ${row.plan?.name || 'unknown'}${row.error ? ' (failed)' : ''}`).join(', ')}`, status: result.failed ? 'error' : 'success' });
+  await addAuditLog(c.env.DB, { account_id: account.id, action: 'batch_create_zone', target: `accounts/${input.account_id}`, detail: `plan=${input.plan}; succeeded ${result.succeeded}/${result.total}; Free fallback ${result.fallback_count}; pending ${result.pending_count}; ${result.results.map(row => `${row.name}: ${row.plan?.name || 'unknown'}${row.activation_pending ? ' (pending)' : row.error ? ' (failed)' : ''}`).join(', ')}`, status: result.failed ? 'error' : 'success' });
   return c.json(result, 201);
 });
 
@@ -189,6 +189,22 @@ app.get('/accounts/:accountId/plans', async (c) => {
   const account = await getAccountById(c.env.DB, Number(c.req.param('accountId')));
   if (!account?.account_id) return c.json({ error: { code: 'NOT_FOUND', message: 'Account with Cloudflare Account ID not found' } }, 404);
   return c.json(await getZonePlanOptions(await accountRequest(account, c.env.ENCRYPTION_KEY), account.account_id));
+});
+
+app.get('/domains/:domain/plans', async c => {
+  const { account, zoneId } = await findAccountByDomain(c.env.DB, c.req.param('domain'), c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
+  return c.json(await getExistingZonePlanOptions(await accountRequest(account, c.env.ENCRYPTION_KEY), account.account_id || '', zoneId));
+});
+
+app.patch('/domains/:domain/plan', async c => {
+  const plan = parseZonePlan(await c.req.json());
+  const domain = c.req.param('domain');
+  const { account, zoneId } = await findAccountByDomain(c.env.DB, domain, c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
+  if (isDemoAccount(account.id, c.env.DEMO_ACCOUNT_IDS)) return c.json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可修改 Zone 套餐' } }, 403);
+  const result = await changeZonePlan(await accountRequest(account, c.env.ENCRYPTION_KEY), account.account_id || '', zoneId, plan);
+  await invalidateZonesCache(c.env.KV);
+  await addAuditLog(c.env.DB, { account_id: account.id, action: 'change_zone_plan', target: domain, detail: `zone=${zoneId}; requested=${plan}; actual=${result.plan?.id || 'unknown'}; pending=${!!result.activation_pending}; uncertain=${!!result.outcome_uncertain}`, status: result.success ? 'success' : 'error' });
+  return c.json({ success: true, data: result });
 });
 
 // 批量删除 Zone

@@ -352,13 +352,58 @@
       "label": "域名套餐",
       "credential": "凭证",
       "unknown": "套餐待确认",
-      "unavailable": "当前不可订阅，添加时复核",
-      "loadFailed": "无法读取套餐；仍可选择 Free。选择其他套餐需要 Billing Read / Billing Write 权限。",
-      "allocationHint": "按域名输入顺序使用所选套餐，套餐不可用或名额不足时，余下域名使用 Free。付费套餐按 Cloudflare 价格和合约计费。",
+      "unavailable": "可用性待订阅确认",
+      "loadFailed": "套餐读取失败，仍可选择目标套餐并由 Cloudflare 订阅接口确认权限及名额；不会因读取失败改用 Free。",
+      "allocationHint": "按输入顺序逐个创建并提交所选套餐，单项失败或结果未确认不阻止后续域名。仅当 Cloudflare 明确拒绝容量时，余下域名使用 Free；付费套餐按上游价格和合约计费。",
       "newAccountHint": "此账户暂无域名，套餐可用性将在首个域名创建后确认。",
       "createdButFailed": "域名已创建，套餐处理未完成。请先刷新确认，避免重复添加。",
       "creationUncertain": "创建结果尚未确认；请先刷新域名列表并到 Cloudflare 核实，再决定是否重试。",
-      "fallbackCount": "{count} 个域名已使用 Free 兜底"
+      "fallbackCount": "{count} 个域名已使用 Free 兜底",
+      "change": "修改套餐",
+      "batchChange": "批量修改套餐",
+      "changeTitle": "修改域名套餐",
+      "domain": "域名 / 账户",
+      "current": "修改前套餐",
+      "actual": "实际套餐",
+      "status": "状态",
+      "targetPlan": "目标套餐",
+      "changeHint": "按列表顺序逐个修改套餐。某个域名失败或结果未确认时继续处理后续域名，每个 Zone 在本批次最多提交一次。降级可能在计费周期结束后生效；付费套餐受 Cloudflare 价格、名额和合约限制。",
+      "optionsFailed": "部分域名的可用套餐读取失败，原因见下表；仍可尝试切换为 Free，最终以 Cloudflare 返回为准。",
+      "confirmBilling": "我已确认所选域名和目标套餐，了解套餐及计费会改变。",
+      "confirmChange": "确认修改套餐",
+      "changeUncertain": "修改结果未确认，请先刷新并到 Cloudflare 核实后再重试。",
+      "deleteHint": "非 Free 套餐若无法删除，请先通过“批量修改套餐”切换为 Free，确认生效后再删除；Enterprise 合约限制以 Cloudflare 返回为准。",
+      "refreshFailed": "套餐操作结果已保留，域名列表刷新失败，请手动刷新。",
+      "states": {
+        "ready": "待处理",
+        "running": "修改中",
+        "success": "成功",
+        "failed": "失败",
+        "skipped": "未处理",
+        "pending": "已提交，待生效",
+        "uncertain": "结果未确认"
+      },
+      "changeSummary": "共 {total} 个：已生效 {active}，已提交待生效 {pending}，失败 {failed}，结果未确认 {uncertain}，跳过 {skipped}",
+      "duplicateSkipped": "本批次已处理该 Zone，未重复提交。",
+      "pendingCount": "{count} 个域名已提交套餐，待生效",
+      "tiers": {
+        "free": "Free（免费版）",
+        "lite": "Lite（轻量版）",
+        "pro": "Pro（专业版）",
+        "pro_plus": "Pro Plus（专业增强版）",
+        "business": "Business（商业版）",
+        "enterprise": "Enterprise（企业版）",
+        "partners_free": "Partners Free",
+        "partners_pro": "Partners Pro",
+        "partners_business": "Partners Business",
+        "partners_enterprise": "Partners Enterprise"
+      },
+      "periods": {
+        "weekly": "周",
+        "monthly": "月",
+        "quarterly": "季度",
+        "yearly": "年"
+      }
     },
     "noDomain": "暂无域名",
     "addDomainBtn": "添加域名",
@@ -511,6 +556,15 @@
       "searchRecords": "搜索 DNS 名称或内容",
       "progressDone": "已完成 {done} / {total}",
       "previewCount": "预览 {total} 项"
+    },
+    "zoneBatch": {
+      "deleteTitle": "批量删除域名",
+      "currentPlan": "当前套餐",
+      "confirmDelete": "我已确认删除所选 {count} 个域名配置，此操作不可恢复。",
+      "deleteUncertain": "删除结果未确认，请先刷新核实，勿重复提交。",
+      "summary": "共 {total} 个：成功 {success}，失败 {failed}，结果未确认 {uncertain}",
+      "refreshFailed": "删除结果已保留，域名列表刷新失败，请手动刷新。",
+      "processing": "处理中"
     }
   },
   "workers": {

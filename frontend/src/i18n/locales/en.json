@@ -352,13 +352,58 @@
       "label": "Zone plan",
       "credential": "Credential",
       "unknown": "Plan unconfirmed",
-      "unavailable": "Currently unavailable; checked again when adding",
-      "loadFailed": "Could not read plans; Free is still available. Other plans require Billing Read / Billing Write permissions.",
-      "allocationHint": "Plans are assigned in input order. Remaining domains use Free when the selected plan is unavailable or its capacity is exhausted. Paid plans are billed according to Cloudflare prices and your contract.",
+      "unavailable": "Availability will be checked when subscribing",
+      "loadFailed": "Plan lookup failed. You can still select a tier; Cloudflare will check permissions and capacity when subscribing. A read failure never enables Free fallback.",
+      "allocationHint": "Create each domain in input order and request the selected tier. A failed or unconfirmed domain does not stop later domains. Only an explicit Cloudflare capacity rejection enables Free fallback. Paid plans follow Cloudflare pricing and contracts.",
       "newAccountHint": "This account has no domains yet. Plan availability will be checked after the first domain is created.",
       "createdButFailed": "The domain was created, but plan processing is incomplete. Refresh and verify before adding it again.",
       "creationUncertain": "The creation result is unconfirmed. Refresh the domain list and verify in Cloudflare before retrying.",
-      "fallbackCount": "{count} domains used the Free fallback"
+      "fallbackCount": "{count} domains used the Free fallback",
+      "change": "Change plan",
+      "batchChange": "Bulk change plans",
+      "changeTitle": "Change domain plans",
+      "domain": "Domain / account",
+      "current": "Previous plan",
+      "actual": "Actual plan",
+      "status": "Status",
+      "targetPlan": "Target plan",
+      "changeHint": "Change plans in list order. Failed or unconfirmed domains do not stop later domains. Each Zone is submitted at most once per batch. Downgrades may take effect at the end of the billing period. Paid plans depend on Cloudflare pricing, capacity and contracts.",
+      "optionsFailed": "Available plans could not be read for some domains; see the reasons below. You can still try switching to Free, subject to Cloudflare approval.",
+      "confirmBilling": "I have checked the domains and target plan and understand that the plan and billing will change.",
+      "confirmChange": "Confirm plan change",
+      "changeUncertain": "The change is unconfirmed. Refresh and check in Cloudflare before retrying.",
+      "deleteHint": "If a paid domain cannot be deleted, use Bulk change plans to switch it to Free, verify activation, then delete it. Enterprise contract restrictions are determined by Cloudflare.",
+      "refreshFailed": "Plan results were preserved, but the domain list could not be refreshed. Refresh manually.",
+      "states": {
+        "ready": "Ready",
+        "running": "Changing",
+        "success": "Success",
+        "failed": "Failed",
+        "skipped": "Not processed",
+        "pending": "Submitted, pending",
+        "uncertain": "Unconfirmed"
+      },
+      "changeSummary": "Total {total}: active {active}, submitted / pending {pending}, failed {failed}, unconfirmed {uncertain}, skipped {skipped}",
+      "duplicateSkipped": "This Zone was already processed in this batch and was not submitted again.",
+      "pendingCount": "{count} domain plan changes were submitted and await activation",
+      "tiers": {
+        "free": "Free",
+        "lite": "Lite",
+        "pro": "Pro",
+        "pro_plus": "Pro Plus",
+        "business": "Business",
+        "enterprise": "Enterprise",
+        "partners_free": "Partners Free",
+        "partners_pro": "Partners Pro",
+        "partners_business": "Partners Business",
+        "partners_enterprise": "Partners Enterprise"
+      },
+      "periods": {
+        "weekly": "week",
+        "monthly": "month",
+        "quarterly": "quarter",
+        "yearly": "year"
+      }
     },
     "noDomain": "No domains",
     "addDomainBtn": "Add Domain",
@@ -511,6 +556,15 @@
       "searchRecords": "Search DNS name or content",
       "progressDone": "Completed {done} / {total}",
       "previewCount": "{total} preview items"
+    },
+    "zoneBatch": {
+      "deleteTitle": "Delete domains",
+      "currentPlan": "Current plan",
+      "confirmDelete": "I confirm deleting the {count} selected domains. This cannot be undone.",
+      "deleteUncertain": "Deletion is unconfirmed. Refresh and verify before retrying.",
+      "summary": "Total {total}: succeeded {success}, failed {failed}, unconfirmed {uncertain}",
+      "refreshFailed": "Deletion results were preserved, but the domain list refresh failed. Refresh manually.",
+      "processing": "Processing"
     }
   },
   "workers": {

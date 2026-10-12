@@ -5,7 +5,7 @@
       <n-h2 style="margin: 0">{{ t('dns.title') }}</n-h2>
       <n-space>
         <n-button size="small" @click="dnsStore.fetchDomains(true)" :loading="dnsStore.domainsLoading">{{ t('common.refresh') }}</n-button>
-        <n-button size="small" type="primary" @click="showAddDomainModal = true">{{ t('dns.addDomain') }}</n-button>
+        <n-button size="small" type="primary" @click="openAddDomains">{{ t('dns.addDomain') }}</n-button>
       </n-space>
     </n-space>
 
@@ -129,7 +129,7 @@
 
               <n-empty v-if="!dnsStore.domainsLoading && filteredDomains.length === 0" :description="t('dns.noDomain')" style="margin: 20px 0">
                 <template #extra>
-                  <n-button size="small" type="primary" @click="showAddDomainModal = true">{{ t('dns.addDomainBtn') }}</n-button>
+                  <n-button size="small" type="primary" @click="openAddDomains">{{ t('dns.addDomainBtn') }}</n-button>
                 </template>
               </n-empty>
             </n-spin>
@@ -144,6 +144,7 @@
             <n-space align="center">
               <span>{{ dnsStore.currentDomain }}</span>
               <n-tag v-if="currentDomainInfo" size="small" :bordered="false">{{ domainPlanName(currentDomainInfo) }}</n-tag>
+              <n-button size="tiny" :disabled="currentDomainIsDemo" @click="openPlanChange([currentDomainInfo])">{{ t('dns.plans.change') }}</n-button>
               <n-text v-if="currentDomainInfo" depth="3" style="font-size: 12px; overflow-wrap: anywhere">{{ domainAccountLabel(currentDomainInfo) }}</n-text>
             </n-space>
           </template>
@@ -374,74 +375,36 @@
       </template>
     </n-modal>
 
-    <!-- 批量添加域名 Modal -->
-    <n-modal v-model:show="showAddDomainModal" preset="dialog" :title="t('dns.addDomainModalTitle')" :mask-closable="!creatingDomains" :close-on-esc="!creatingDomains" :closable="!creatingDomains" style="width: 640px; max-width: 95vw">
-      <n-form :model="newDomain" :disabled="creatingDomains" label-placement="left" label-width="80">
+    <!-- 域名操作共用同一面板，结果留在原弹窗 -->
+    <DnsOperationModal v-model:show="showAddDomainModal" :title="t('dns.addDomainModalTitle')" :running="creatingDomains">
+      <n-form v-if="!creatingDomains && !createResult" :model="newDomain" label-placement="top">
         <n-form-item :label="t('dns.targetAccount')">
-          <n-select
-            v-model:value="newDomain.account_id"
-            :options="availableAccounts"
-            :placeholder="t('dns.selectAccount')"
-            :render-label="renderAccountLabel"
-            :node-props="accountCreateNodeProps"
-            filterable
-            @search="accountCreateSearch = $event"
-            @update:show="(show: boolean) => { if (!show) accountCreateSearch = ''; }"
-          />
+          <n-select v-model:value="newDomain.account_id" :options="availableAccounts" :placeholder="t('dns.selectAccount')"
+            :render-label="renderAccountLabel" :node-props="accountCreateNodeProps" filterable
+            @search="accountCreateSearch = $event" @update:show="(show: boolean) => { if (!show) accountCreateSearch = ''; }" />
         </n-form-item>
         <n-form-item :label="t('dns.plans.label')">
-          <n-select v-model:value="newDomain.plan" :options="planOptions" :loading="plansLoading" :disabled="!newDomain.account_id || plansLoading || creatingDomains" />
+          <n-select v-model:value="newDomain.plan" :options="planOptions" :loading="plansLoading" :disabled="!newDomain.account_id || plansLoading" />
         </n-form-item>
         <n-alert v-if="plansError" type="warning" :bordered="false" style="margin-bottom: 12px">{{ t('dns.plans.loadFailed') }} {{ plansError }}</n-alert>
         <n-alert v-if="newDomain.plan !== 'free'" type="info" :bordered="false" style="margin-bottom: 12px">{{ t('dns.plans.allocationHint') }}</n-alert>
         <n-text v-if="plansSource === 'new_zone'" depth="3">{{ t('dns.plans.newAccountHint') }}</n-text>
-        <n-form-item :label="t('dns.zoneType')">
-          <n-select v-model:value="newDomain.type" :options="zoneTypeOptions" />
-        </n-form-item>
+        <n-form-item :label="t('dns.zoneType')"><n-select v-model:value="newDomain.type" :options="zoneTypeOptions" /></n-form-item>
         <n-form-item :label="t('dns.domainListLabel')">
-          <n-input
-            v-model:value="newDomain.names"
-            type="textarea"
-            :placeholder="t('dns.domainListPlaceholder')"
-            :rows="6"
-          />
+          <n-input v-model:value="newDomain.names" type="textarea" :placeholder="t('dns.domainListPlaceholder')" :rows="3" />
         </n-form-item>
       </n-form>
+      <n-data-table :columns="createColumns" :data="createTableRows" :row-key="createRowKey" :max-height="320" :scroll-x="780" size="small" />
+      <n-progress v-if="creatingDomains" style="margin-top: 12px" type="line" :percentage="Math.round(createRows.filter(row => !['ready', 'running'].includes(row.status)).length / Math.max(createRows.length, 1) * 100)" />
+      <n-text v-if="createResult" style="display: block; margin-top: 12px">{{ t('dns.resultSummary', { total: createResult.total, succeeded: createResult.succeeded, failed: createResult.failed }) }}</n-text>
+      <n-text v-if="createResult?.fallback_count" depth="3">{{ t('dns.plans.fallbackCount', { count: createResult.fallback_count }) }}</n-text>
+      <n-text v-if="createResult?.pending_count" depth="3"> · {{ t('dns.plans.pendingCount', { count: createResult.pending_count }) }}</n-text>
       <template #action>
-        <n-button :disabled="creatingDomains" @click="showAddDomainModal = false">{{ t('common.cancel') }}</n-button>
-        <n-button type="primary" :loading="creatingDomains" :disabled="plansLoading || creatingDomains" @click="handleCreateDomains">{{ t('common.create') }}</n-button>
+        <n-button v-if="!createResult" type="primary" :loading="creatingDomains" :disabled="plansLoading || creatingDomains" @click="handleCreateDomains">{{ t('common.create') }}</n-button>
       </template>
-    </n-modal>
-
-    <!-- 创建结果 Modal -->
-    <n-modal v-model:show="showResultModal" preset="dialog" :title="t('dns.resultModalTitle')" style="width: 520px; max-width: 95vw">
-      <div v-if="createResult">
-        <div v-for="r in createResult.results" :key="r.name" style="margin-bottom: 12px; padding: 8px; border-radius: 4px; background: var(--n-color-modal);">
-          <n-space align="center" :size="8">
-            <span>{{ r.success ? '✅' : '❌' }}</span>
-            <span style="font-weight: 500">{{ r.name }}</span>
-            <n-tag v-if="r.zone_created" size="small">{{ r.plan?.name || t('dns.plans.unknown') }}</n-tag>
-          </n-space>
-          <div v-if="r.zone_created && !r.success" style="margin-top: 4px; padding-left: 24px"><n-text type="warning">{{ t('dns.plans.createdButFailed') }}</n-text></div>
-          <div v-if="r.outcome_uncertain" style="margin-top: 4px; padding-left: 24px"><n-text type="warning">{{ t('dns.plans.creationUncertain') }}</n-text></div>
-          <div v-if="r.warning" style="margin-top: 4px; padding-left: 24px"><n-text type="warning" style="font-size: 12px">{{ r.warning }}</n-text></div>
-          <div v-if="r.zone_created && r.name_servers?.length" style="margin-top: 4px; padding-left: 24px">
-            <n-text depth="3" style="font-size: 12px">NS:</n-text>
-            <div v-for="ns in r.name_servers" :key="ns" style="font-size: 12px; font-family: monospace">{{ ns }}</div>
-            <n-button size="tiny" @click="copyNS(r.name_servers)">{{ t('dns.copyNs') }}</n-button>
-          </div>
-          <div v-if="!r.success && r.error" style="margin-top: 4px; padding-left: 24px">
-            <n-text type="error" style="font-size: 12px">{{ t('dns.reason') }} {{ r.error }}</n-text>
-          </div>
-        </div>
-        <n-divider style="margin: 8px 0" />
-        <n-text depth="3">{{ t('dns.resultSummary', { total: createResult.total, succeeded: createResult.succeeded, failed: createResult.failed }) }}</n-text>
-        <n-text v-if="createResult.fallback_count" depth="3"> · {{ t('dns.plans.fallbackCount', { count: createResult.fallback_count }) }}</n-text>
-      </div>
-      <template #action>
-        <n-button @click="showResultModal = false">{{ t('common.close') }}</n-button>
-      </template>
-    </n-modal>
+    </DnsOperationModal>
+    <ZonePlanDialog v-model:show="showPlanChange" :targets="planChangeTargets" @completed="onPlanChanged" />
+    <ZoneDeleteDialog v-model:show="showZoneDelete" :targets="zoneDeleteTargets" @completed="onZonesDeleted" />
     <n-modal v-model:show="showBatchRecordEdit" preset="dialog" :title="t('dns.batch.edit')" style="width: 480px; max-width: 95vw">
       <n-text>{{ t('dns.batch.selected', { count: selectedRecordIds.length }) }}</n-text>
       <n-form label-placement="left" label-width="100" style="margin-top: 12px">
@@ -467,16 +430,20 @@ import { useDnsStore } from '../stores/dnsStore';
 import AutoFitTable from '../components/AutoFitTable.vue';
 import DnsBatchDialog from '../components/DnsBatchDialog.vue';
 import DnsRecordFields from '../components/DnsRecordFields.vue';
+import ZonePlanDialog from '../components/ZonePlanDialog.vue';
+import ZoneDeleteDialog from '../components/ZoneDeleteDialog.vue';
+import DnsOperationModal from '../components/DnsOperationModal.vue';
+import { dnsPlanOptionLabel, dnsPlanTierLabel } from '../utils/dnsPlanLabel';
 import type { BatchAction, BatchZone } from '../shared/dnsBatch';
 import { dnsApi } from '../api/dns';
 import { accountsApi } from '../api/accounts';
 import { credentialsApi } from '../api/credentials';
 import { buildDnsRecord, DNS_TYPES } from '../utils/dnsRecord';
 import { runBatch, type BatchResult } from '../utils/batchOperation';
-import type { ZoneContext } from '../api/dns';
+import type { DeleteZonesResult, PlanChangeTarget, ZoneContext } from '../api/dns';
 import { loadDemoAccounts, isDemoAccount } from '../utils/demoAccounts';
 import { dnsAccountLabel, type DnsAccountIdentity } from '../utils/dnsAccountLabel';
-import { zonePlan, type ZonePlanId, type ZonePlanOption } from '../shared/zonePlans';
+import { zonePlan, type CreateZoneResult, type ZonePlanId, type ZonePlanOption } from '../shared/zonePlans';
 
 const { t } = useI18n();
 const dnsStore = useDnsStore();
@@ -621,12 +588,25 @@ function onAccountChange(val: string) {
 const showMultiDns = ref(false);
 const multiAction = ref<BatchAction>('create');
 const multiTargets = ref<BatchZone[]>([]);
-const multiDnsOptions = computed(() => ['create', 'update', 'delete', 'proxy', 'ttl'].map(key => ({key, label:t(`dns.multi.${key}`)})));
+const multiDnsOptions = computed(() => [
+  ...['create', 'update', 'delete', 'proxy', 'ttl'].map(key => ({key, label:t(`dns.multi.${key}`)})),
+  { key: 'plan', label: t('dns.plans.batchChange') },
+]);
+const showPlanChange = ref(false);
+const planChangeTargets = ref<PlanChangeTarget[]>([]);
+function openPlanChange(domains: any[]) {
+  planChangeTargets.value = domains.filter(domain => domain && !isDemoDomain(domain)).map(domain => ({ name: domain.name, accountId: domain.cfAccountId, zoneId: domain.id, accountLabel: domainAccountLabel(domain), plan: zonePlan(domain.plan) }));
+  if (planChangeTargets.value.length) showPlanChange.value = true;
+}
+async function onPlanChanged() {
+  try { await dnsStore.fetchDomains(true); } catch { message.warning(t('dns.plans.refreshFailed')); }
+}
 function selectMatchingDomains() {
   for(const domain of filteredDomains.value) if(!isDemoDomain(domain)) selectedDomains.value.add(zoneKey(domain));
   selectedDomains.value = new Set(selectedDomains.value);
 }
 function openMultiDns(key: string) {
+  if (key === 'plan') { openPlanChange(allDomains.value.filter(domain => selectedDomains.value.has(zoneKey(domain)))); return; }
   multiTargets.value = allDomains.value.filter(d => selectedDomains.value.has(zoneKey(d))).map(d => ({accountId:d.cfAccountId, credentialId:d.credentialId, zoneId:d.id, zoneName:d.name}));
   multiAction.value = key as BatchAction; showMultiDns.value = true;
 }
@@ -975,8 +955,11 @@ const plansError = ref('');
 const plansSource = ref('');
 let planRequest = 0;
 const planOptions = computed(() => {
-  const options = plans.value.map(plan => ({ value: plan.id, label: `${plan.name}${plan.price !== undefined ? ` · ${plan.price} ${plan.currency || ''}${plan.frequency ? ` / ${plan.frequency}` : ''}` : ''}${plan.can_subscribe === false && plan.id !== 'free' ? ` · ${t('dns.plans.unavailable')}` : ''}` }));
-  if (!options.some(option => option.value === 'free')) options.unshift({ value: 'free', label: 'Free' });
+  const options = plans.value.map(plan => ({ value: plan.id, label: `${dnsPlanOptionLabel(plan, t)}${plan.can_subscribe === false && plan.id !== 'free' ? ` · ${t('dns.plans.unavailable')}` : ''}` }));
+  // Unknown/partial billing reads must not hide a tier the user knows their Account can use.
+  for (const [value, label] of [['free', 'Free'], ['pro', 'Pro'], ['business', 'Business'], ['enterprise', 'Enterprise']]) {
+    if (!options.some(option => option.value === value)) options.push({ value: value!, label: dnsPlanTierLabel({ id: value!, name: label! }, t) });
+  }
   return options;
 });
 watch([showAddDomainModal, () => newDomain.value.account_id], async ([show, accountId]) => {
@@ -993,8 +976,24 @@ watch([showAddDomainModal, () => newDomain.value.account_id], async ([show, acco
     if (identity === planRequest) plansError.value = error.errorMessage || error.message;
   } finally { if (identity === planRequest) plansLoading.value = false; }
 });
-const showResultModal = ref(false);
-const createResult = ref<any>(null);
+const createResult = ref<Awaited<ReturnType<typeof dnsStore.createDomains>> | null>(null);
+type CreateStatus = 'ready' | 'running' | 'success' | 'pending' | 'failed' | 'uncertain';
+interface CreateRow { name: string; accountLabel: string; requestedPlan: ZonePlanId; status: CreateStatus; result?: CreateZoneResult }
+const createRows = ref<CreateRow[]>([]);
+const inputDomainNames = computed(() => [...new Set(newDomain.value.names.split('\n').map(name => name.trim().toLowerCase()).filter(Boolean))]);
+const createTableRows = computed<CreateRow[]>(() => creatingDomains.value || createResult.value ? createRows.value : inputDomainNames.value.map(name => ({ name, accountLabel: availableAccounts.value.find(account => account.value === newDomain.value.account_id)?.label || '—', requestedPlan: newDomain.value.plan, status: 'ready' })));
+const createRowKey = (row: CreateRow) => row.name;
+const createColumns = computed<DataTableColumns<CreateRow>>(() => [
+  { title: t('dns.plans.domain'), key: 'name', width: 220, render: row => h('div', [h('div', row.name), h(NText, { depth: 3, style: 'font-size: 11px; overflow-wrap: anywhere' }, () => row.accountLabel), ...(row.result?.name_servers?.length ? [h('div', { style: 'font-family: monospace; font-size: 11px; overflow-wrap: anywhere; white-space: pre-line' }, row.result.name_servers.join('\n')), h(NButton, { size: 'tiny', onClick: () => copyNS(row.result!.name_servers!) }, () => t('dns.copyNs'))] : [])]) },
+  { title: t('dns.plans.targetPlan'), key: 'target', width: 110, render: row => zonePlan({ id: row.requestedPlan })?.name || row.requestedPlan },
+  { title: t('dns.plans.actual'), key: 'actual', width: 130, render: row => row.result?.zone_created ? h(NText, { style: 'overflow-wrap: anywhere' }, () => row.result?.plan?.name || t('dns.plans.unknown')) : '—' },
+  { title: t('dns.plans.status'), key: 'status', width: 130, render: row => h(NTag, { size: 'small', type: row.status === 'failed' ? 'error' : ['pending', 'uncertain'].includes(row.status) ? 'warning' : 'default' }, () => t(row.status === 'running' ? 'dns.zoneBatch.processing' : `dns.plans.states.${row.status}`)) },
+  { title: t('dns.reason'), key: 'reason', render: row => h(NText, { type: row.status === 'failed' ? 'error' : 'warning', style: 'overflow-wrap: anywhere' }, () => [row.result?.zone_created && !row.result.success ? t('dns.plans.createdButFailed') : '', row.result?.outcome_uncertain ? t(row.result.zone_created ? 'dns.plans.changeUncertain' : 'dns.plans.creationUncertain') : '', row.result?.error || row.result?.warning || ''].filter(Boolean).join(' ')) },
+]);
+function openAddDomains() {
+  if (creatingDomains.value) return;
+  createResult.value = null; createRows.value = []; showAddDomainModal.value = true;
+}
 const zoneTypeOptions = computed(() => [
   { label: t('dns.zoneTypeFull'), value: 'full' },
   { label: t('dns.zoneTypePartial'), value: 'partial' },
@@ -1011,7 +1010,8 @@ async function handleCreateDomains() {
     message.warning(t('dns.msg.domainRequired'));
     return;
   }
-  const uniqueNames = [...new Set(names)];
+  const uniqueNames = inputDomainNames.value;
+  createRows.value = createTableRows.value.map(row => ({ ...row }));
   creatingDomains.value = true;
   try {
     const result = await dnsStore.createDomains({
@@ -1019,10 +1019,13 @@ async function handleCreateDomains() {
       account_id: newDomain.value.account_id,
       type: newDomain.value.type,
       plan: newDomain.value.plan,
+    }, (name, receipt) => {
+      const row = createRows.value.find(item => item.name === name);
+      if (!row) return;
+      row.result = receipt;
+      row.status = !receipt ? 'running' : receipt.outcome_uncertain ? 'uncertain' : receipt.activation_pending ? 'pending' : receipt.success ? 'success' : 'failed';
     });
     createResult.value = result;
-    showResultModal.value = true;
-    showAddDomainModal.value = false;
     newDomain.value = { account_id: null, type: 'full', names: '', plan: 'free' };
   } catch (err: any) {
     message.error(err?.response?.data?.error?.message || t('dns.msg.createFailed'));
@@ -1040,24 +1043,16 @@ function copyNS(ns: string[]) {
 }
 
 // ===== 批量删除域名 =====
+const showZoneDelete = ref(false);
+const zoneDeleteTargets = ref<PlanChangeTarget[]>([]);
 function handleBatchDelete() {
-  const domains = allDomains.value.filter(d => selectedDomains.value.has(zoneKey(d))).map(d => ({ name: d.name, accountId: d.cfAccountId, zoneId: d.id }));
-  if (!domains.length) return;
-  dialog.warning({
-    title: t('dns.msg.batchDeleteTitle'),
-    content: `${t('dns.msg.batchDeleteConfirm', { count: domains.length })} ${domains.map(d => `${d.name} (Account ${d.accountId})`).join(', ')}`,
-    positiveText: t('common.delete'),
-    negativeText: t('common.cancel'),
-    onPositiveClick: async () => {
-      try {
-        const result = await dnsStore.deleteDomains(domains);
-        message.success(t('dns.msg.batchDeleteComplete', { succeeded: result.succeeded, failed: result.failed }));
-        selectedDomains.value = new Set();
-      } catch (err: any) {
-        message.error(err?.response?.data?.error?.message || t('dns.msg.deleteFailed'));
-      }
-    },
-  });
+  zoneDeleteTargets.value = allDomains.value.filter(domain => selectedDomains.value.has(zoneKey(domain)) && !isDemoDomain(domain)).map(domain => ({ name: domain.name, accountId: domain.cfAccountId, zoneId: domain.id, accountLabel: domainAccountLabel(domain), plan: zonePlan(domain.plan) }));
+  if (zoneDeleteTargets.value.length) showZoneDelete.value = true;
+}
+async function onZonesDeleted(result: DeleteZonesResult) {
+  const deleted = new Set(result.results.filter(row => row.success).map(row => `${row.accountId}:${row.zoneId}`));
+  selectedDomains.value = new Set([...selectedDomains.value].filter(key => !deleted.has(key)));
+  try { await dnsStore.fetchDomains(true); } catch { message.warning(t('dns.zoneBatch.refreshFailed')); }
 }
 
 // ===== 加载账户列表 =====
