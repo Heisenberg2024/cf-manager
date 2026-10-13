@@ -39,7 +39,8 @@ export class WorkerResources {
     const key = `${signature}:${kind}:${date}`;
     this.metric({ event: 'resource_lookup', accountId: account.id });
     const cached = this.entries.get(key);
-    if (cached && Date.now() < cached.expires && (!options.refresh || cached.error)) {
+    // Explicit refresh retries ordinary failures; an active 429 cooldown still applies.
+    if (cached && Date.now() < cached.expires && (!options.refresh || (cached.error && errorDetails(cached.error).statusCode === 429))) {
       this.entries.delete(key); this.entries.set(key, cached);
       if (cached.error) throw cached.error;
       this.metric({ event: 'resource_hit', accountId: account.id }); return cached.value as T;
@@ -87,12 +88,33 @@ async function readList(account: DnsBinding, request: CfRequest, kind: 'workers'
   // /workers/scripts is a SinglePage endpoint; page/per_page are not supported.
   if (kind === 'workers') { const data = await request(path, { signal }); if (!Array.isArray(data.result)) throw Object.assign(new Error('Unexpected Worker list'), { statusCode: 502 }); return data.result; }
   const rows: unknown[] = [];
+  const ids = new Set<string>(), names = new Set<string>();
+  let pagination: { total_pages: number; total_count: number; per_page: number } | undefined;
+  const invalid = () => Object.assign(new Error('Incomplete or inconsistent Pages pagination'), { statusCode: 502 });
   for (let page = 1; page <= 1000; page++) {
-    const data = await request(`${path}?page=${page}&per_page=100`, { signal });
-    if (!Array.isArray(data.result)) throw Object.assign(new Error('Unexpected resource list'), { statusCode: 502 });
-    rows.push(...data.result);
+    // Let Cloudflare choose its supported page size (production defaults to 10).
+    const data = await request(`${path}?page=${page}`, { signal });
     const info = data.result_info;
-    if (!data.result.length || (info?.total_pages !== undefined && page >= info.total_pages) || (info?.total_count !== undefined && rows.length >= info.total_count) || (info?.total_pages === undefined && info?.total_count === undefined && data.result.length < (info?.per_page || 100))) return rows;
+    if (data.success === false || data.errors?.length || !Array.isArray(data.result) || !info ||
+      ![info.page, info.per_page, info.count, info.total_pages, info.total_count].every(Number.isSafeInteger)) throw invalid();
+    const { page: reportedPage, per_page: perPage, count, total_pages: totalPages, total_count: totalCount } = info as { page: number; per_page: number; count: number; total_pages: number; total_count: number };
+    if (reportedPage !== page || perPage <= 0 || count !== data.result.length || totalCount < 0 || totalPages < 0 || totalPages > 1000 ||
+      (totalCount === 0 ? page !== 1 || count !== 0 || totalPages > 1 : totalPages !== Math.ceil(totalCount / perPage) || page > totalPages) ||
+      count !== Math.min(perPage, Math.max(0, totalCount - (page - 1) * perPage))) throw invalid();
+    if (pagination && (pagination.total_pages !== totalPages || pagination.total_count !== totalCount || pagination.per_page !== perPage)) throw invalid();
+    pagination = { total_pages: totalPages, total_count: totalCount, per_page: perPage };
+    for (const row of data.result) {
+      const project = row as { id?: unknown; name?: unknown } | null;
+      if (!project || typeof project.name !== 'string' || !project.name.trim() || names.has(project.name) ||
+        (project.id !== undefined && (typeof project.id !== 'string' || !project.id.trim() || ids.has(project.id)))) throw invalid();
+      names.add(project.name);
+      if (typeof project.id === 'string') ids.add(project.id);
+      rows.push(row);
+    }
+    if (page >= totalPages) {
+      if (rows.length !== totalCount) throw invalid();
+      return rows;
+    }
   }
   throw Object.assign(new Error('Resource pagination limit exceeded'), { statusCode: 502 });
 }

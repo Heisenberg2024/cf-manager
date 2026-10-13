@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.8.2] - 2026-10-14
+
+### Pages 分页热修复
+- Pages Projects 读取仅传 `page=N`，由 Cloudflare 决定默认分页大小，修复固定 `per_page=100` 导致 HTTP 400 / Code 8000024 的问题；Workers Scripts 保持 SinglePage 请求。
+- 严格校验每页 page/per_page/count/total_pages/total_count、跨页一致性、项目重复和最终总数；分页缺失、异常或不完整不能作为完整成功缓存。
+- 手动刷新绕过普通读取错误缓存并发起真实重读，保留 429 冷却；Workers 与 Pages 独立状态和已确认数量、缓存、Singleflight、调度及身份隔离保持不变。
+- 增加双后端请求路径与真实响应格式回归，覆盖 21 Workers + 两页共 20 Pages = 41 资源、旧参数拒绝、异常分页、零资源、失败恢复和多账户/凭证隔离；不修改 Global Key 认证或账户配置，无新依赖或数据库迁移。
+
 ## [2.8.1] - 2026-10-14
 
 ### DNS 批量操作与账户标签

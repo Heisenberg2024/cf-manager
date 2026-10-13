@@ -7,11 +7,29 @@ vi.mock('../services/demo',()=>({demoDestructiveGuard:()=>async(_c:any,next:any)
 import routes from '../routes/workers';
 import { getWorkerResources } from '../services/workerResourcesRuntime';
 import { getDnsDirectory } from '../services/dnsDirectory';
+import { cloudflareWorkerFixture, pagesEnvelope } from '../../../shared/tests/cloudflareWorkerResources.fixture';
 const app=new Hono().route('/workers',routes);app.onError((e:any,c)=>c.json({error:e.message},e.statusCode || 500));
 const env={DB:{},ENCRYPTION_KEY:'synthetic'} as any;const calls:string[]=[];
 const accounts=[1,2].map(id=>({id,name:`A${id}`,credential_id:id,account_id:`cf-${id}`,api_token:'synthetic',is_active:1,is_enabled:1,enabled_features:'dns,workers'}));
-beforeEach(()=>{vi.clearAllMocks();calls.length=0;getWorkerResources(env.DB).invalidate();getDnsDirectory(env.DB).invalidate();mocks.get.mockImplementation(async(_db,id)=>accounts.find(a=>a.id===id));mocks.active.mockResolvedValue(accounts);mocks.request.mockImplementation(async a=>async(path:string)=>{calls.push(`${a.id}:${path}`);if(path==='/graphql')return {data:{viewer:{accounts:[{workers:[],pages:[]}]}}};if(path==='/zones/foreign')return {result:{id:'foreign',account:{id:'cf-2'}}};if(path.startsWith('/zones?'))return {result:[{id:'zone-a',name:'a.test',account:{id:a.account_id}}]};return {result:[{id:'w',name:'p'}],result_info:{total_pages:1}};});});
+beforeEach(()=>{vi.clearAllMocks();calls.length=0;getWorkerResources(env.DB).invalidate();getDnsDirectory(env.DB).invalidate();mocks.get.mockImplementation(async(_db,id)=>accounts.find(a=>a.id===id));mocks.active.mockResolvedValue(accounts);mocks.request.mockImplementation(async a=>async(path:string)=>{calls.push(`${a.id}:${path}`);if(path==='/graphql')return {data:{viewer:{accounts:[{workers:[],pages:[]}]}}};if(path==='/zones/foreign')return {result:{id:'foreign',account:{id:'cf-2'}}};if(path.startsWith('/zones?'))return {result:[{id:'zone-a',name:'a.test',account:{id:a.account_id}}]};if(path.includes('/pages/projects'))return pagesEnvelope(1,1);return {result:[{id:'w'}]};});});
 describe('Worker Workers read HTTP parity',()=>{
+ it('reads the confirmed 21 Workers and 20 Pages through real generated request paths',async()=>{
+  const f=cloudflareWorkerFixture('cf-1');mocks.request.mockResolvedValue(f.request);
+  expect(await (await app.request('/workers/summary?accountId=1&usage=false',{},env)).json()).toMatchObject([{workerCount:21,pagesCount:20,states:{workers:'ready',pages:'ready'}}]);
+  const list=await (await app.request('/workers?accountId=1&details=true',{},env)).json() as any;expect(list.items).toHaveLength(41);expect(list.states).toMatchObject([{accountId:1,workers:'ready',pages:'ready'}]);
+  expect([...f.calls].sort()).toEqual(['/accounts/cf-1/pages/projects?page=1','/accounts/cf-1/pages/projects?page=2','/accounts/cf-1/workers/scripts']);
+ });
+ it('preserves Workers after a Pages error and forwards manual refresh to the upstream',async()=>{
+  const f=cloudflareWorkerFixture('cf-1');mocks.request.mockResolvedValue((path:string,init:RequestInit)=>f.request(path.includes('/pages/projects')?`${path}&per_page=100`:path,init));
+  expect(await (await app.request('/workers/summary?accountId=1&usage=false',{},env)).json()).toMatchObject([{workerCount:21,pagesCount:null,states:{workers:'ready',pages:'error'}}]);
+  mocks.request.mockResolvedValue(f.request);
+  const partial=await (await app.request('/workers?accountId=1&details=true',{},env)).json() as any;expect(partial.items).toHaveLength(21);expect(partial.states).toMatchObject([{workers:'ready',pages:'error'}]);expect(f.calls).toHaveLength(2);
+  const fresh=await (await app.request('/workers?accountId=1&details=true&refresh=true',{},env)).json() as any;expect(fresh.items).toHaveLength(41);expect(fresh.states).toMatchObject([{workers:'ready',pages:'ready'}]);
+  expect(f.calls.slice(2).sort()).toEqual(['/accounts/cf-1/pages/projects?page=1','/accounts/cf-1/pages/projects?page=2','/accounts/cf-1/workers/scripts']);
+ });
+ it('returns empty arrays without upstream calls when no accounts are configured',async()=>{
+  mocks.active.mockResolvedValue([]);expect(await (await app.request('/workers/summary',{},env)).json()).toEqual([]);expect(await (await app.request('/workers',{},env)).json()).toEqual([]);expect(mocks.request).not.toHaveBeenCalled();
+ });
  it('keeps legacy arrays and shares counts with the current account list',async()=>{
   const result=await app.request('/workers/summary?accountId=1',{},env);expect(result.headers.get('cache-control')).toBe('no-store');expect(await result.json()).toMatchObject([{accountId:1,workerCount:1,pagesCount:1}]);
   const list=await app.request('/workers?accountId=1',{},env);expect(await list.json()).toHaveLength(2);expect(calls).toHaveLength(3);
@@ -37,7 +55,7 @@ describe('Worker Workers read HTTP parity',()=>{
   expect(result.status).toBe(200);expect(await result.json()).toMatchObject([{accountId:1,workerCount:1},{accountId:2,workerCount:null,pagesCount:null}]);
  });
  it('returns unknown on read failure while preserving successful peer resources',async()=>{
-  mocks.request.mockImplementation(async()=>async(path:string)=>{if(path.includes('workers/scripts') || path==='/graphql')throw Object.assign(Error('permission'),{statusCode:403});return {result:[{name:'p'}]};});
+  mocks.request.mockImplementation(async()=>async(path:string)=>{if(path.includes('workers/scripts') || path==='/graphql')throw Object.assign(Error('permission'),{statusCode:403});return pagesEnvelope(1,1);});
   const result=await app.request('/workers/summary?accountId=1',{},env);expect(await result.json()).toMatchObject([{workerCount:null,pagesCount:1,requests:null,states:{workers:'permission'}}]);
  });
 });

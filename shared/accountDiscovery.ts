@@ -3,7 +3,7 @@ import {normalizeAccountName} from './accountName';
 
 export interface AuthInput { auth_type: 'token' | 'global_key'; api_token?: string; api_key?: string; email?: string }
 export interface DiscoveredAccount { id: string; name: string }
-export interface CfEnvelope { success?: boolean; result?: unknown; errors?: Array<{ code: number; message: string }>; result_info?: { total_pages?: number; total_count?: number; per_page?: number;cursor?:string;is_truncated?:boolean;delimited?:string[] } }
+export interface CfEnvelope { success?: boolean; result?: unknown; errors?: Array<{ code: number; message: string }>; result_info?: { page?: number; count?: number; total_pages?: number; total_count?: number; per_page?: number;cursor?:string;is_truncated?:boolean;delimited?:string[] } }
 export interface HttpResponse { ok: boolean; status: number; headers: { get(name: string): string | null }; json(): Promise<unknown>;body?:Uint8Array|ReadableStream<Uint8Array>|(AsyncIterable<Uint8Array>&{destroy?():void})|null }
 export type Transport = (path: string, init: RequestInit) => Promise<HttpResponse>;
 export type CfRequestInit=RequestInit & {retry?:boolean;maxResponseBytes?:number};

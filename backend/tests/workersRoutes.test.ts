@@ -12,12 +12,30 @@ import { workerResources } from '../src/services/workerResourcesRuntime';
 import { dnsDirectory } from '../src/services/dnsDirectory';
 import { editPagesProject } from '../src/services/pagesService';
 import { appLogger } from '../src/services/logger';
+import { cloudflareWorkerFixture, pagesEnvelope } from '../../shared/tests/cloudflareWorkerResources.fixture';
 let server:Server,base:string;const calls:string[]=[];
 const accounts=[1,2].map(id=>({id,name:`A${id}`,credential_id:id,account_id:`cf-${id}`,api_token:'synthetic',is_active:1,is_enabled:1,enabled_features:'dns,workers'}));
 beforeAll(async()=>{const app=express();app.use(express.json());app.use('/workers',routes);app.use((e:any,_req:any,res:any,_next:any)=>res.status(e.statusCode || 500).json({error:e.message}));server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.on('listening',r));base=`http://127.0.0.1:${(server.address() as any).port}`;});
 afterAll(()=>new Promise<void>(r=>server.close(()=>r())));
-beforeEach(()=>{vi.clearAllMocks();calls.length=0;workerResources.invalidate();dnsDirectory.invalidate();mocks.get.mockImplementation(id=>accounts.find(a=>a.id===id));mocks.active.mockReturnValue(accounts);mocks.request.mockImplementation(a=>async(path:string)=>{calls.push(`${a.id}:${path}`);if(path==='/graphql')return {data:{viewer:{accounts:[{workers:[],pages:[]}]}}};if(path==='/zones/foreign')return {result:{id:'foreign',account:{id:'cf-2'}}};if(path.startsWith('/zones?'))return {result:[{id:'zone-a',name:'a.test',account:{id:a.account_id}}]};return {result:[{id:'w',name:'p'}],result_info:{total_pages:1}};});});
+beforeEach(()=>{vi.clearAllMocks();calls.length=0;workerResources.invalidate();dnsDirectory.invalidate();mocks.get.mockImplementation(id=>accounts.find(a=>a.id===id));mocks.active.mockReturnValue(accounts);mocks.request.mockImplementation(a=>async(path:string)=>{calls.push(`${a.id}:${path}`);if(path==='/graphql')return {data:{viewer:{accounts:[{workers:[],pages:[]}]}}};if(path==='/zones/foreign')return {result:{id:'foreign',account:{id:'cf-2'}}};if(path.startsWith('/zones?'))return {result:[{id:'zone-a',name:'a.test',account:{id:a.account_id}}]};if(path.includes('/pages/projects'))return pagesEnvelope(1,1);return {result:[{id:'w'}]};});});
 describe('Docker Workers read routes and redacted Pages edits',()=>{
+ it('reads the confirmed 21 Workers and 20 Pages through real generated request paths',async()=>{
+  const f=cloudflareWorkerFixture('cf-1');mocks.request.mockReturnValue(f.request);
+  expect(await (await fetch(`${base}/workers/summary?accountId=1&usage=false`)).json()).toMatchObject([{workerCount:21,pagesCount:20,states:{workers:'ready',pages:'ready'}}]);
+  const list=await (await fetch(`${base}/workers?accountId=1&details=true`)).json();expect(list.items).toHaveLength(41);expect(list.states).toMatchObject([{accountId:1,workers:'ready',pages:'ready'}]);
+  expect([...f.calls].sort()).toEqual(['/accounts/cf-1/pages/projects?page=1','/accounts/cf-1/pages/projects?page=2','/accounts/cf-1/workers/scripts']);
+ });
+ it('preserves Workers after a Pages error and forwards manual refresh to the upstream',async()=>{
+  const f=cloudflareWorkerFixture('cf-1');mocks.request.mockReturnValue((path:string,init:RequestInit)=>f.request(path.includes('/pages/projects')?`${path}&per_page=100`:path,init));
+  expect(await (await fetch(`${base}/workers/summary?accountId=1&usage=false`)).json()).toMatchObject([{workerCount:21,pagesCount:null,states:{workers:'ready',pages:'error'}}]);
+  mocks.request.mockReturnValue(f.request);
+  const partial=await (await fetch(`${base}/workers?accountId=1&details=true`)).json();expect(partial.items).toHaveLength(21);expect(partial.states).toMatchObject([{workers:'ready',pages:'error'}]);expect(f.calls).toHaveLength(2);
+  const fresh=await (await fetch(`${base}/workers?accountId=1&details=true&refresh=true`)).json();expect(fresh.items).toHaveLength(41);expect(fresh.states).toMatchObject([{workers:'ready',pages:'ready'}]);
+  expect(f.calls.slice(2).sort()).toEqual(['/accounts/cf-1/pages/projects?page=1','/accounts/cf-1/pages/projects?page=2','/accounts/cf-1/workers/scripts']);
+ });
+ it('returns empty arrays without upstream calls when no accounts are configured',async()=>{
+  mocks.active.mockReturnValue([]);expect(await (await fetch(`${base}/workers/summary`)).json()).toEqual([]);expect(await (await fetch(`${base}/workers`)).json()).toEqual([]);expect(mocks.request).not.toHaveBeenCalled();
+ });
  it('keeps legacy arrays and shares counts with the current account list',async()=>{
   const result=await fetch(`${base}/workers/summary?accountId=1`);expect(result.headers.get('cache-control')).toBe('no-store');expect(await result.json()).toMatchObject([{accountId:1,workerCount:1,pagesCount:1}]);
   const list=await fetch(`${base}/workers?accountId=1`);expect(await list.json()).toHaveLength(2);expect(calls).toHaveLength(3);
@@ -43,7 +61,7 @@ describe('Docker Workers read routes and redacted Pages edits',()=>{
   expect(result.status).toBe(200);expect(await result.json()).toMatchObject([{accountId:1,workerCount:1},{accountId:2,workerCount:null,pagesCount:null}]);
  });
  it('returns unknown on read failure while preserving successful peer resources',async()=>{
-  mocks.request.mockImplementation(()=>async(path:string)=>{if(path.includes('workers/scripts') || path==='/graphql')throw Object.assign(Error('permission'),{statusCode:403});return {result:[{name:'p'}]};});
+  mocks.request.mockImplementation(()=>async(path:string)=>{if(path.includes('workers/scripts') || path==='/graphql')throw Object.assign(Error('permission'),{statusCode:403});return pagesEnvelope(1,1);});
   const result=await fetch(`${base}/workers/summary?accountId=1`);expect(await result.json()).toMatchObject([{workerCount:null,pagesCount:1,requests:null,states:{workers:'permission'}}]);
  });
  it('keeps Pages edit bound to the selected Account even if the body contains another account_id',async()=>{

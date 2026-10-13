@@ -32,6 +32,25 @@ describe('Workers progressive account reads',()=>{
   api.getAll.mockResolvedValue({data:{items:[],states:[{accountId:1,workers:'permission',pages:'timeout'}]}});await store.fetchWorkers(1);
   expect(store.resourceError).not.toBe('');expect(store.summary[0].workerCount).toBe(null);expect(store.summary[0].pagesCount).toBe(null);
  });
+ it('keeps 21 confirmed Workers after a Pages failure and forces a complete manual refresh',async()=>{
+  const store=useWorkerStore();store.configureAccounts(accounts);store.selectedAccountId=1;
+  const workers=Array.from({length:21},(_,i)=>({id:`worker-${i}`,type:'worker'}));
+  api.getAll.mockResolvedValueOnce({data:{items:workers,states:[{accountId:1,workers:'ready',pages:'error'}]}});
+  await store.fetchWorkers(1);expect(store.workers).toHaveLength(21);expect(store.summary[0]).toMatchObject({workerCount:21,pagesCount:null,states:{workers:'ready',pages:'error'}});expect(store.resourceError).toBe('RESOURCE_READ_FAILED');
+  const pages=Array.from({length:20},(_,i)=>({id:`project-${i}`,type:'pages'}));
+  api.getAll.mockResolvedValue({data:{items:[...workers,...pages],states:[{accountId:1,workers:'ready',pages:'ready'}]}});
+  await store.fetchWorkers(1,true);expect(api.getAll.mock.calls[1][1].refresh).toBe(true);expect(store.workers).toHaveLength(41);expect(store.summary[0]).toMatchObject({workerCount:21,pagesCount:20});expect(store.resourceError).toBe('');
+  await store.fetchWorkers(1);expect(api.getAll).toHaveBeenCalledTimes(2);
+ });
+ it('does not cache a partial Pages failure as a complete successful list',async()=>{
+  const store=useWorkerStore();store.configureAccounts(accounts);
+  api.getAll.mockResolvedValue({data:{items:[{id:'w',type:'worker'}],states:[{accountId:1,workers:'ready',pages:'error'}]}});
+  await store.fetchWorkers(1);await store.fetchWorkers(1);expect(api.getAll).toHaveBeenCalledTimes(2);expect(store.summary[0].pagesCount).toBe(null);
+ });
+ it('accepts verified zero resources and makes no resource calls without eligible accounts',async()=>{
+  const store=useWorkerStore();metadata.getAll.mockResolvedValue({data:{accounts:[]}});await store.fetchSummary();expect(store.summary).toEqual([]);expect(api.getSummary).not.toHaveBeenCalled();
+  store.configureAccounts(accounts);api.getAll.mockResolvedValue({data:{items:[],states:[{accountId:1,workers:'ready',pages:'ready'}]}});await store.fetchWorkers(1);expect(store.summary[0]).toMatchObject({workerCount:0,pagesCount:0});expect(store.resourceError).toBe('');
+ });
  it('ignores late account metadata after logout',async()=>{
   const old=deferred<any>();metadata.getAll.mockReturnValue(old.promise);const store=useWorkerStore();const pending=store.fetchSummary();store.resetSensitiveState();old.resolve({data:{accounts}});await pending;expect(store.summary).toEqual([]);expect(api.getSummary).not.toHaveBeenCalled();
  });

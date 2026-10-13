@@ -4,6 +4,7 @@ import express from 'express';
 import type { Server } from 'node:http';
 import { existsSync, writeFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
+import { pagesEnvelope } from '../../shared/tests/cloudflareWorkerResources.fixture';
 const mocks=vi.hoisted(()=>({accounts:[] as any[],calls:[] as string[],request:vi.fn(),sdk:vi.fn(),proxy:vi.fn()}));
 vi.mock('../src/models/account',()=>({getActiveAccountsByFeature:()=>mocks.accounts,getAccountById:(id:number)=>mocks.accounts.find(a=>a.id===id)}));
 vi.mock('../src/models/auditLog',()=>({createAuditLog:vi.fn()}));
@@ -14,7 +15,7 @@ vi.mock('../src/services/proxyService',()=>({proxyFetch:mocks.proxy,buildCurlCom
 vi.mock('../src/routes/routeUtils',()=>({getAccountOr404:(req:any)=>mocks.accounts.find(a=>a.id===Number(req.params.accountId)),demoDestructiveGuard:(_req:any,_res:any,next:any)=>next()}));
 import routes from '../src/routes/workers';
 let server:Server,base:string;const delay=(ms:number)=>new Promise(r=>setTimeout(r,ms));
-const data=(kind:string)=>kind==='usage'?{data:{viewer:{accounts:[{workers:[{sum:{requests:10}}],pages:[]}]}}}: {result:Array.from({length:kind==='workers'?5:3},(_,i)=>({id:`w${i}`,name:`p${i}`})),result_info:{total_pages:1}};
+const data=(kind:string)=>kind==='usage'?{data:{viewer:{accounts:[{workers:[{sum:{requests:10}}],pages:[]}]}}}: kind==='pages'?pagesEnvelope(1,3):{result:Array.from({length:5},(_,i)=>({id:`w${i}`}))};
 beforeAll(async()=>{const app=express();app.use(express.json());app.use('/workers',routes);app.use((e:any,_req:any,res:any,_next:any)=>res.status(e.statusCode||500).json({error:e.message}));server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.on('listening',r));base=`http://127.0.0.1:${(server.address() as any).port}`;});
 afterAll(()=>new Promise<void>(r=>server.close(()=>r())));
 it('measures cold/warm/concurrent reads with 20 and 60 synthetic Accounts',async()=>{
