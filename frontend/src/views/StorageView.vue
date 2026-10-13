@@ -5,7 +5,7 @@
       <n-h2 style="margin: 0;">{{ t('storage.title') }}</n-h2>
       <div class="storage-account-selector">
         <span class="account-selector-label">{{ t('storage.accountLabel') }}</span>
-        <n-select v-model:value="selectedAccount" :options="accountOptions" :render-label="renderAccountLabel" filterable :placeholder="t('storage.searchAccount')" style="width: 200px; max-width: 60vw" size="small" @update:value="onAccountChange" />
+        <n-select v-model:value="selectedAccount" :options="accountOptions" :render-label="renderAccountLabel" filterable :placeholder="t('storage.searchAccount')" style="width: 480px; max-width: 100%" size="small" @update:value="onAccountChange" />
       </div>
     </n-space>
 
@@ -314,6 +314,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAccountLabels } from '../utils/useAccountLabels';
 import { ref, computed, h, onMounted, onBeforeUnmount, watch } from 'vue';
 import { NButton, NSpace, NInput, NSelect, NCheckbox, NTag, useMessage, useDialog } from 'naive-ui';
 import AutoFitTable from '../components/AutoFitTable.vue';
@@ -328,6 +329,7 @@ import { loadDemoAccounts, isDemoAccount } from '../utils/demoAccounts';
 import {classifySql,quoteIdentifier} from '../shared/d1SqlPolicy';
 import {StorageReadCache,CursorWindow} from '../utils/storageReads';
 const { t } = useI18n();
+const { accountLabel, renderAccountOption } = useAccountLabels();
 const message = useMessage();
 const dialog = useDialog();
 
@@ -363,20 +365,20 @@ const allAccounts = ref<any[]>([]);
 const accountOptions = computed(() =>
   allAccounts.value
     .filter((a: any) => a.is_active && a.is_enabled !== 0 && (a.enabled_features ?? 'ai,workers,browser_render,dns,storage').includes('storage'))
-    .map((a: any) => ({ label: `${a.name} (${a.account_id || a.id})`, value: a.id }))
+    .map((a: any) => ({ label: accountLabel(a), value: a.id }))
 );
 
-function renderAccountLabel(option: { label: string; value: number }) {
+function renderAccountLabel(option: { label: string; value: number }, selected: boolean) {
   const account = allAccounts.value.find((a: any) => a.id === option.value);
-  if (!account) return option.label;
+  if (!account) return renderAccountOption(option, selected);
   const af = (account.available_features || '').split(',').filter(Boolean);
   if (af.includes('r2')) {
     return h('span', { style: 'display: inline-flex; align-items: center; gap: 4px' }, [
-      option.label,
+      renderAccountOption(option, selected),
       h(NTag, { size: 'tiny', type: 'success', bordered: false }, { default: () => 'R2' }),
     ]);
   }
-  return option.label;
+  return renderAccountOption(option, selected);
 }
 
 // 当前选中的账户是否为演示（Demo）保护账户：演示账户禁用所有删除/写操作按钮

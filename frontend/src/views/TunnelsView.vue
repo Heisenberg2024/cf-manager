@@ -8,8 +8,10 @@
             <n-select
               v-model:value="selectedAccountId"
               :options="accountOptions"
+              :render-label="renderAccountOption"
               :placeholder="t('tunnels.selectAccount')"
-              style="width: 260px"
+              filterable
+              style="width: 480px; max-width: 100%"
               @update:value="onAccountChange"
             />
             <n-button type="primary" size="small" :disabled="!selectedAccountId" @click="showCreateModal = true">{{ t('tunnels.createTunnel') }}</n-button>
@@ -346,6 +348,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAccountLabels } from '../utils/useAccountLabels';
 import { ref, reactive, computed, h, onMounted, watch, onBeforeUnmount } from 'vue';
 import AutoFitTable from '../components/AutoFitTable.vue';
 import { useI18n } from 'vue-i18n';
@@ -358,17 +361,18 @@ import { dnsApi } from '../api/dns';
 import { message } from '../utils/discreteApi';
 
 const { t } = useI18n();
+const { accountLabel, renderAccountOption } = useAccountLabels();
 
 // ============ 隧道管理 ============
 const selectedAccountId = ref<number | null>(null);
 const requests = createRequestScope(() => String(selectedAccountId.value));
-const accounts = ref<Array<{ id: number; name: string; account_id: string }>>([]);
+const accounts = ref<Array<{ id: number; name: string; account_id: string; credential_id?: number }>>([]);
 const tunnels = ref<any[]>([]);
 const loadingAccounts = ref(false);
 const loadingTunnels = ref(false);
 
 const accountOptions = computed(() =>
-  accounts.value.map((a) => ({ label: `${a.name} (${a.account_id})`, value: a.id }))
+  accounts.value.map((a) => ({ label: accountLabel(a), value: a.id }))
 );
 
 async function loadAccounts() {

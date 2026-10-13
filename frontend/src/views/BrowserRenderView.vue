@@ -53,8 +53,10 @@
           <n-select
             v-model:value="selectedAccount"
             :options="accountOptions"
+            :render-label="renderAccountOption"
+            filterable
             placeholder=""
-            style="width: 180px; max-width: 45vw;"
+            style="width: 480px; max-width: 100%;"
             size="small"
           />
           <n-input
@@ -155,8 +157,10 @@ import { createRequestScope } from '../utils/requestScope';
 import { useI18n } from 'vue-i18n';
 import { browserRenderApi, type RenderMode, type BrowserEngine } from '../api/browserRender';
 import { accountsApi } from '../api/accounts';
+import { useAccountLabels } from '../utils/useAccountLabels';
 
 const { t } = useI18n();
+const { accountLabel, renderAccountOption, loadCredentialNames } = useAccountLabels();
 const requests = createRequestScope();
 const message = useMessage();
 const url = ref('');
@@ -176,9 +180,9 @@ const result = ref<any>(null);
 
 async function fetchAccounts() {
   try {
-    const { data } = await accountsApi.getAll();
+    const [{ data }] = await Promise.all([accountsApi.getAll(), loadCredentialNames()]);
     const accounts = (data.accounts || []).filter((a: any) => a.is_active && (a.enabled_features || '').includes('browser_render')).map((a: any) => ({
-      label: a.name,
+      label: accountLabel(a),
       value: String(a.id),
     }));
     accountOptions.value = [{ label: t('browserRender.autoAssign'), value: 'auto' }, ...accounts];

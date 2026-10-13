@@ -204,6 +204,15 @@ describe('Zone settings cache, drafts and operation identity',()=>{
  const a={accountId:1,zoneId:'a'},b={accountId:2,zoneId:'b'};
  const settings=(ssl='full')=>({data:{ssl,http2:'on',__meta:{ssl:{editable:true},http2:{editable:true}}}});
  async function select(){mock.getRecords.mockResolvedValue({data:[]});const store=useDnsStore();await store.fetchRecords('same.test',a);return store;}
+ it('invalidates every Credential alias after batch writes without losing dirty drafts or accepting stale reads',async()=>{
+  const store=await select();mock.getSettings.mockResolvedValue(settings());await store.fetchZoneSettings('same.test');store.settingForm.http2='off';
+  const alias={accountId:3,zoneId:'a'};await store.fetchRecords('same.test',alias);await store.fetchZoneSettings('same.test');
+  const slow=deferred<any>();mock.getSettings.mockReturnValueOnce(slow.promise);const oldRead=store.fetchZoneSettings('same.test',alias,true);
+  mock.getSettings.mockResolvedValue(settings('strict'));await store.invalidateZoneSettings(['a']);slow.resolve(settings('off'));await oldRead;
+  expect(store.zoneSettings.ssl).toBe('strict');expect(store.settingForm.ssl).toBe('strict');
+  await store.fetchRecords('same.test',a);await store.fetchZoneSettings('same.test');expect(store.zoneSettings.ssl).toBe('strict');expect(store.settingForm.http2).toBe('off');expect(store.settingsDirty).toEqual(['http2']);
+  const reads=mock.getSettings.mock.calls.length;await store.invalidateZoneSettings(['b']);expect(mock.getSettings).toHaveBeenCalledTimes(reads);
+ });
  it('invalidates dirty computed dependencies after the UI first rendered an empty form',async()=>{
   const store=await select();expect(store.settingsDirty).toEqual([]);mock.getSettings.mockResolvedValue(settings());await store.fetchZoneSettings('same.test');store.settingForm.ssl='strict';expect(store.settingsDirty).toEqual(['ssl']);await store.fetchZoneSettings('same.test');expect(store.settingsDirty).toEqual(['ssl']);
  });

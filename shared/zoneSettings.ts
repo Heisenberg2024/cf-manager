@@ -3,7 +3,8 @@ import { errorDetails } from './cfErrors';
 import { BoundReadCache, type CacheState } from './resourceCache';
 import {bindingSignature,type DnsBinding} from './zoneDirectory';
 import type { ReadMetric, ReadScheduler } from './readScheduler';
-import type {ZoneSaveProgress} from './zoneSettingsEvents';
+import type {ZoneSaveProgress, FieldStatus, ZoneSettingsResult} from './zoneSettingsEvents';
+export type {FieldStatus} from './zoneSettingsEvents';
 
 export const SETTING_PATHS: Record<string, string> = {
   ssl: 'ssl', always_use_https: 'always_use_https', security_level: 'security_level',
@@ -14,8 +15,7 @@ export const SETTING_PATHS: Record<string, string> = {
 };
 export interface SettingMeta { editable: boolean; state?: 'available' | 'readonly' | 'unavailable' | 'error'; reason?: string; modifiedOn?: string }
 export type Settings = Record<string, unknown> & { __meta: Record<string, SettingMeta>; __cache?: CacheState; __source?: 'bulk' | 'individual' };
-export type FieldStatus = 'updated' | 'unchanged' | 'unavailable' | 'failed' | 'uncertain' | 'conflict';
-export interface SettingsResult { updated: string[]; failed: string[]; errors: Record<string,string>; fields: Record<string,{status:FieldStatus; reason?:string; actual?:unknown}>; settings: Settings; patchCount: number; conflictDetection: 'non-atomic' }
+export interface SettingsResult extends ZoneSettingsResult { settings: Settings }
 const invalid = (message: string) => Object.assign(new Error(message), {statusCode:502,code:'CF_INVALID_RESPONSE'});
 const deprecated = (key: string) => key === 'minify' || key === 'brotli';
 const same = (a: unknown,b: unknown) => JSON.stringify(a) === JSON.stringify(b);

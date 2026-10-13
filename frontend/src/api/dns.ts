@@ -43,14 +43,14 @@ export const dnsApi = {
   async updateSettings(domain:string,settings:Record<string,unknown>,context:ZoneContext={},progress?:(event:ZoneSaveProgress)=>void){
     const query=new URLSearchParams(Object.entries(context).filter(([,value])=>value!==undefined).map(([key,value])=>[key,String(value)]));
     const response=await fetch(`${API_BASE_URL.replace(/\/$/,'')}${domainPath(domain)}/settings?${query}`,{method:'PATCH',headers:{'Content-Type':'application/json',Accept:'text/event-stream',Authorization:`Bearer ${localStorage.getItem('api_token') || ''}`},body:JSON.stringify(settings)});
-    if(!response.ok||!response.headers.get('Content-Type')?.includes('text/event-stream')){const body=await response.json();if(!response.ok||body.success===false){if(response.status===401&&body.error?.code==='UNAUTHORIZED'){localStorage.removeItem('api_token');window.dispatchEvent(new Event('auth-expired'));}throw Error(body.error?.message || `HTTP ${response.status}`);}return {data:body.data ?? body};}
+    if(!response.ok||!response.headers.get('Content-Type')?.includes('text/event-stream')){const body=await response.json();if(!response.ok||body.success===false){if(response.status===401&&body.error?.code==='UNAUTHORIZED'){localStorage.removeItem('api_token');window.dispatchEvent(new Event('auth-expired'));}const message=body.error?.message || `HTTP ${response.status}`;throw Object.assign(Error(message),{errorMessage:message,response:{status:response.status,data:body}});}return {data:body.data ?? body};}
     let result:any;
     try{await readBatchStream(response,event=>{const packet=event as unknown as {type:'done';result:unknown}|ZoneSaveProgress;if(packet.type==='progress')progress?.(packet);if(packet.type==='done')result=packet.result;});}
     catch(error){if(result===undefined&&/connection interrupted|No batch response stream/.test(String(error)))throw Error('配置保存连接中断，结果未确认。刷新后核实，不要重复提交。',{cause:error});throw error;}
     if(result===undefined)throw Error('Zone save result unconfirmed');return {data:result};
   },
   purgeCache: (domain: string, data: { purge_everything?: boolean; files?: string[] }, context: ZoneContext = {}) =>
-    apiClient.post(`${domainPath(domain)}/purge-cache`, data, { params: context }),
+    apiClient.post(`${domainPath(domain)}/purge-cache`, data, { params: context, _silent: true }),
   updateStatus: (domain: string, paused: boolean, context: ZoneContext = {}) =>
     apiClient.patch(`${domainPath(domain)}/status`, { paused }, { params: context }),
 };

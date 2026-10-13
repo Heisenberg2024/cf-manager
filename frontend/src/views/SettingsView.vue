@@ -123,7 +123,7 @@
 
         <!-- 动态配置: 账号选择 -->
         <n-form-item v-if="taskNeedsAccount" :label="t('settings.account')">
-          <n-select v-model:value="taskConfig.accountId" :options="accountOptions" :placeholder="t('settings.selectAccount')" />
+          <n-select v-model:value="taskConfig.accountId" :options="accountOptions" :render-label="renderAccountOption" filterable :placeholder="t('settings.selectAccount')" />
         </n-form-item>
 
         <!-- KV 清理配置 -->
@@ -268,6 +268,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAccountLabels } from '../utils/useAccountLabels';
 import { ref, computed, h, onMounted } from 'vue';
 import { createRequestScope } from '../utils/requestScope';
 import { useI18n } from 'vue-i18n';
@@ -282,6 +283,7 @@ import { confirmOperation } from '../utils/confirmOperation';
 import { storeApi } from '../api/store';
 
 const { t } = useI18n();
+const { accountLabel, renderAccountOption } = useAccountLabels();
 const requests = createRequestScope();
 const message = useMessage();
 
@@ -481,7 +483,7 @@ const currentTypeDesc = computed(() => taskTypeDescMap.value[taskForm.value.type
 const taskNeedsAccount = computed(() => ['kv_cleanup', 'd1_backup', 'r2_cleanup'].includes(taskForm.value.type));
 
 const accountOptions = computed(() =>
-  taskAllAccounts.value.filter((a: any) => a.is_active).map((a: any) => ({ label: a.name, value: a.id }))
+  taskAllAccounts.value.filter((a: any) => a.is_active).map((a: any) => ({ label: accountLabel(a), value: a.id }))
 );
 
 function onTaskTypeChange() {

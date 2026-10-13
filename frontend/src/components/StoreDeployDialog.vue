@@ -202,6 +202,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAccountLabels } from '../utils/useAccountLabels';
 import { ref, computed, watch, h } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { storeApi } from '../api/store';
@@ -211,6 +212,7 @@ import { NTag } from 'naive-ui';
 import { message } from '../utils/discreteApi';
 
 const { t } = useI18n();
+const { accountLabel, renderAccountOption } = useAccountLabels();
 
 const props = defineProps<{ show: boolean; template: any }>();
 const emit = defineEmits<{ 'update:show': [boolean]; deployed: [any] }>();
@@ -266,20 +268,20 @@ const accountOptions = computed(() => {
   const list = accounts.value
     // 需要 R2 时只保留已开通 R2 的账户，其余不可选
     .filter((a) => !needsR2.value || hasR2Feature(a))
-    .map((a) => ({ label: a.name, value: a.id }));
+    .map((a) => ({ label: accountLabel(a), value: a.id }));
   return list;
 });
 
-function renderAccountLabel(option: { label: string; value: number }) {
+function renderAccountLabel(option: { label: string; value: number }, selected: boolean) {
   const account = accounts.value.find((a: any) => a.id === option.value);
-  if (!account) return option.label;
+  if (!account) return renderAccountOption(option, selected);
   if (hasR2Feature(account)) {
     return h('span', { style: 'display: inline-flex; align-items: center; gap: 4px' }, [
-      option.label,
+      renderAccountOption(option, selected),
       h(NTag, { size: 'tiny', type: 'success', bordered: false }, { default: () => 'R2' }),
     ]);
   }
-  return option.label;
+  return renderAccountOption(option, selected);
 }
 
 const resourceBindings = computed(() =>

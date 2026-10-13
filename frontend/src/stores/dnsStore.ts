@@ -315,6 +315,14 @@ export const useDnsStore = defineStore('dns', () => {
       finally{if(identity===settingsIdentity){settingsLoading.value=false;settingsFlight=undefined;}}
     })();settingsFlight={key:cacheKey,promise};return promise;
   }
+  async function invalidateZoneSettings(zoneIds: string[]) {
+    for (const zoneId of new Set(zoneIds)) settingsState.invalidate(undefined, zoneId);
+    if (!currentDomain.value || !zoneIds.includes(currentContext.value.zoneId || '')) return;
+    // Batch writes may use another Credential alias. Discard late reads but retain every dirty draft.
+    settingsController?.abort(); ++settingsIdentity; settingsFlight = undefined;
+    settingsResults.value = {};
+    await fetchZoneSettings(currentDomain.value, { ...currentContext.value }, true);
+  }
   async function createDomains(data: { names: string[]; account_id: number; type: 'full' | 'partial'; plan?: ZonePlanId }, onProgress?: (name: string, result?: CreateZoneResult) => void) {
     const input = { ...data };
     const requested = input.plan || 'free';
@@ -405,5 +413,5 @@ export const useDnsStore = defineStore('dns', () => {
   }
   return { settingsDraftLocked, settingsProgress, settingsKey, settingForm, settingBaseline, settingsDirty, settingsConflicts, settingsPending, settingsResults, cancelSettings, zoneRecordTotal, recordMode, recordTotal, recordWindow, recordFilter, fetchRecordWindow, forgetDeletedZones, resetSensitiveState, setDomainScope, configureAccounts, domainErrors, domainStates, saveRecord, removeRecord, toggleProxy, proxyPending, invalidateRecords, domains, records, currentDomain, currentContext, loading, domainsLoading, recordsError,
     zoneSettings, settingsLoading, settingsError, fetchDomains, fetchRecords, clearSelection, isCurrent,
-    createDomains, deleteDomains, fetchZoneSettings, updateZoneSettings, purgeZoneCache, updateZoneStatus };
+    createDomains, deleteDomains, fetchZoneSettings, invalidateZoneSettings, updateZoneSettings, purgeZoneCache, updateZoneStatus };
 });

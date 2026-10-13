@@ -7,12 +7,13 @@ export interface TunnelAccountItem {
   id: number;
   name: string;
   account_id: string;
+  credential_id?: number;
 }
 
 export function listTunnelAccounts(): TunnelAccountItem[] {
   return getAllAccounts()
     .filter((a) => !!a.account_id)
-    .map((a) => ({ id: a.id, name: a.name, account_id: a.account_id! }));
+    .map((a) => ({ id: a.id, name: a.name, account_id: a.account_id!, credential_id: a.credential_id }));
 }
 
 export function getTunnelAccount(id: number): Account {

@@ -86,6 +86,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAccountLabels } from '../utils/useAccountLabels';
 import { ref, computed, watch, h } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useMessage, NTag } from 'naive-ui';
@@ -98,6 +99,7 @@ import DeployResourceTab from './DeployResourceTab.vue';
 import DeployAdvancedTab from './DeployAdvancedTab.vue';
 
 const { t } = useI18n();
+const { accountLabel, renderAccountOption } = useAccountLabels();
 const props = defineProps<{ show: boolean; redeploy?: { type: 'worker' | 'pages'; name: string; accountId: number } | null; allAccounts: any[] }>();
 const emit = defineEmits<{ 'update:show': [boolean]; deployed: [any] }>();
 const message = useMessage();
@@ -122,17 +124,17 @@ const aiEnabled = ref(false);
 const results = ref<Array<{ accountId: number; accountName?: string; success: boolean; error?: string; retrying?: boolean }>>([]);
 
 const accountOptions = computed(() =>
-  props.allAccounts.filter(a => a.is_active && (a.enabled_features || '').includes('workers')).map(a => ({ label: a.name, value: a.id }))
+  props.allAccounts.filter(a => a.is_active && (a.enabled_features || '').includes('workers')).map(a => ({ label: accountLabel(a), value: a.id }))
 );
 const selectedAccounts = computed(() => props.allAccounts.filter(a => targetAccountIds.value.includes(a.id)));
 // 未开通 R2 的选中账户数（>0 时隐藏 R2 tab 并提示）
 const r2MixedCount = computed(() => selectedAccounts.value.filter(a => !hasR2Feature(a)).length);
 const showR2Tab = computed(() => selectedAccounts.value.length > 0 && r2MixedCount.value === 0);
 
-function renderAccountLabel(option: any) {
+function renderAccountLabel(option: any, selected: boolean) {
   const acc = props.allAccounts.find((a: any) => a.id === option.value);
   return h('span', { style: 'display: inline-flex; align-items: center; gap: 4px' }, [
-    option.label,
+    renderAccountOption(option, selected),
     acc && hasR2Feature(acc) ? h(NTag, { size: 'tiny', type: 'success', bordered: false }, { default: () => 'R2' }) : null,
   ]);
 }

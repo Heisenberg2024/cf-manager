@@ -5,6 +5,8 @@
       <n-select
         v-model:value="selectedAccountId"
         :options="accountOptions"
+        :render-label="renderAccountOption"
+        filterable
         :placeholder="t('aiTranslate.selectAccount')"
         clearable
         class="account-select"
@@ -113,8 +115,10 @@ import {
 } from '@vicons/ionicons5';
 import apiClient from '../api/client';
 import { accountsApi } from '../api/accounts';
+import { useAccountLabels } from '../utils/useAccountLabels';
 
 const { t } = useI18n();
+const { accountLabel, renderAccountOption, loadCredentialNames } = useAccountLabels();
 const message = useMessage();
 
 const selectedAccountId = ref<string>('auto');
@@ -130,12 +134,12 @@ const accountOptions = ref<{ label: string; value: string }[]>([]);
 
 async function fetchAccounts() {
   try {
-    const { data } = await accountsApi.getAll();
+    const [{ data }] = await Promise.all([accountsApi.getAll(), loadCredentialNames()]);
     const seen = new Set<string>();
     const accounts = (data.accounts || [])
       .filter((a: any) => a.is_active && (a.enabled_features || '').includes('ai'))
       .map((a: any) => ({
-        label: a.name,
+        label: accountLabel(a),
         value: a.account_id || String(a.id),
       }))
       .filter((opt: { value: string }) => {

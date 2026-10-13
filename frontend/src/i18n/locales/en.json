@@ -601,6 +601,30 @@
       "uncertain": "Unconfirmed",
       "conflictField": "Conflict",
       "draftLimit": "30 unsaved drafts are retained. Save or discard one before editing another Zone."
+    },
+    "zoneOperations": {
+      "sslTitle": "Batch edit SSL/TLS",
+      "purgeTitle": "Batch purge cache",
+      "sslHint": "Only explicitly selected fields will change. Permissions and current values are checked before writing. Failures and unconfirmed outcomes do not stop other domains; each Zone is submitted once.",
+      "purgeHint": "Purge all Cloudflare cache for the selected domains. Subsequent requests reach the origin. Success means the purge request was accepted. Continue after failures or unconfirmed outcomes. Never automatically retry an unconfirmed purge.",
+      "keep": "Keep unchanged",
+      "current": "Previous settings",
+      "actual": "Actual settings",
+      "confirm": "Confirm this operation on the {count} domains listed above",
+      "execute": "Confirm and execute",
+      "summary": "{total} items: {success} succeeded/unchanged, {partial} partial, {failed} failed, {uncertain} unconfirmed, {skipped} skipped.",
+      "receipt": "Request receipt: {id}",
+      "missingReceipt": "Cache purge receipt missing. Outcome unconfirmed; verify before trying again.",
+      "states": {
+        "ready": "Ready",
+        "running": "Running",
+        "success": "Success",
+        "unchanged": "Unchanged",
+        "partial": "Partial success",
+        "failed": "Failed",
+        "uncertain": "Unconfirmed",
+        "skipped": "Skipped"
+      }
     }
   },
   "workers": {

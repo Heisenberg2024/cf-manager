@@ -366,6 +366,7 @@
     </DnsOperationModal>
     <ZonePlanDialog v-model:show="showPlanChange" :targets="planChangeTargets" @completed="onPlanChanged" />
     <ZoneDeleteDialog v-model:show="showZoneDelete" :targets="zoneDeleteTargets" @completed="onZonesDeleted" />
+    <ZoneBatchSettingsDialog v-model:show="showZoneOperations" :mode="zoneOperationMode" :targets="zoneOperationTargets" @completed="dnsStore.invalidateZoneSettings" />
     <n-modal v-model:show="showBatchRecordEdit" preset="dialog" :title="t('dns.batch.edit')" style="width: 480px; max-width: 95vw">
       <n-text>{{ t('dns.batch.selected', { count: recordSelectionCount }) }}</n-text>
       <n-form label-placement="left" label-width="100" style="margin-top: 12px">
@@ -390,16 +391,18 @@ import DnsBatchDialog from '../components/DnsBatchDialog.vue';
 import DnsRecordFields from '../components/DnsRecordFields.vue';
 import ZonePlanDialog from '../components/ZonePlanDialog.vue';
 import ZoneDeleteDialog from '../components/ZoneDeleteDialog.vue';
+import ZoneBatchSettingsDialog from '../components/ZoneBatchSettingsDialog.vue';
+import type { ZoneOperationTarget } from '../utils/zoneOperations';
+import { useAccountLabels } from '../utils/useAccountLabels';
 import DnsOperationModal from '../components/DnsOperationModal.vue';
 import { dnsPlanOptionLabel, dnsPlanTierLabel } from '../utils/dnsPlanLabel';
 import type { BatchAction, BatchZone, BatchSelection } from '../shared/dnsBatch';
 import { dnsApi } from '../api/dns';
 import { accountsApi } from '../api/accounts';
-import { credentialsApi } from '../api/credentials';
 import { buildDnsRecord, DNS_TYPES } from '../utils/dnsRecord';
 import type { DeleteZonesResult, PlanChangeTarget, ZoneContext } from '../api/dns';
 import { setDemoAccounts, isDemoAccount } from '../utils/demoAccounts';
-import { dnsAccountLabel, type DnsAccountIdentity } from '../utils/dnsAccountLabel';
+import type { DnsAccountIdentity } from '../utils/dnsAccountLabel';
 import ZoneSettingsFeedback from '../components/ZoneSettingsFeedback.vue';
 import { zonePlan, type CreateZoneResult, type ZonePlanId, type ZonePlanOption } from '../shared/zonePlans';
 
@@ -421,10 +424,9 @@ const domainSearchTerms = computed(() => [...new Set(debouncedSearch.value.split
 const accounts = ref<Array<DnsAccountIdentity & { is_enabled?: number; is_active?: number; enabled_features?: string }>>([]);
 const isDnsBindingAvailable = (account: typeof accounts.value[number]) => account.is_enabled !== 0 && account.is_active !== 0 && !!account.account_id && (account.enabled_features ?? 'dns').split(',').includes('dns');
 const dnsAccounts = computed(() => accounts.value.filter(isDnsBindingAvailable));
-const credentialNames = ref(new Map<number, string>());
 const accountFilterSearch = ref('');
 const accountCreateSearch = ref('');
-const accountLabel = (account: DnsAccountIdentity) => dnsAccountLabel(account, credentialNames.value, t('dns.plans.credential'));
+const { accountLabel, loadCredentialNames } = useAccountLabels();
 const accountOptions = computed(() => [
   { label: t('dns.allAccounts'), value: '__all__' },
   ...accounts.value.map(account => ({ label: accountLabel(account), value: String(account.id), disabled: !isDnsBindingAvailable(account) })),
@@ -561,7 +563,12 @@ const multiTargets = ref<BatchZone[]>([]);
 const multiDnsOptions = computed(() => [
   ...['create', 'update', 'delete', 'proxy', 'ttl'].map(key => ({key, label:t(`dns.multi.${key}`)})),
   { key: 'plan', label: t('dns.plans.batchChange') },
+  { key: 'ssl', label: t('dns.zoneOperations.sslTitle') },
+  { key: 'purge', label: t('dns.zoneOperations.purgeTitle') },
 ]);
+const showZoneOperations = ref(false);
+const zoneOperationMode = ref<'ssl' | 'purge'>('ssl');
+const zoneOperationTargets = ref<ZoneOperationTarget[]>([]);
 const showPlanChange = ref(false);
 const planChangeTargets = ref<PlanChangeTarget[]>([]);
 function openPlanChange(domains: any[]) {
@@ -578,6 +585,12 @@ function selectMatchingDomains() {
 }
 function openMultiDns(key: string) {
   multiSelection.value = undefined; multiChanges.value = undefined;
+  if (key === 'ssl' || key === 'purge') {
+    zoneOperationTargets.value = allDomains.value.filter(domain => selectedDomains.value.has(zoneKey(domain)) && !isDemoDomain(domain)).map(domain => ({ name: domain.name, accountId: domain.cfAccountId, zoneId: domain.id, accountLabel: domainAccountLabel(domain) }));
+    zoneOperationMode.value = key;
+    if (zoneOperationTargets.value.length) showZoneOperations.value = true;
+    return;
+  }
   if (key === 'plan') { openPlanChange(allDomains.value.filter(domain => selectedDomains.value.has(zoneKey(domain)))); return; }
   multiTargets.value = allDomains.value.filter(d => selectedDomains.value.has(zoneKey(d))).map(d => ({accountId:d.cfAccountId, credentialId:d.credentialId, zoneId:d.id, zoneName:d.name}));
   multiAction.value = key as BatchAction; showMultiDns.value = true;
@@ -1014,7 +1027,7 @@ async function onZonesDeleted(result: DeleteZonesResult) {
 // ===== 加载账户列表 =====
 async function loadAccounts() {
   // Credential labels enrich the UI independently; a slow credential response does not delay Zones.
-  void credentialsApi.list().then(({ data }) => { if (viewActive) credentialNames.value = new Map(data.map(credential => [credential.id, credential.name])); }).catch(() => { if (viewActive) credentialNames.value = new Map(); });
+  void loadCredentialNames();
   try { const { data } = await accountsApi.getAll(); if (!viewActive) return; accounts.value = data?.accounts || []; setDemoAccounts(data?.accounts || []); }
   catch { if (!viewActive) return; accounts.value = []; }
   dnsStore.configureAccounts(dnsAccounts.value.map(account => ({ ...account })));

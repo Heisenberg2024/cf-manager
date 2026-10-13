@@ -10,4 +10,9 @@ describe('DNS credential and Account identities', () => {
   it('uses a neutral credential placeholder if the authoritative name is unavailable', () => {
     expect(dnsAccountLabel({ id: 1, name: 'Production', credential_id: 10, credential_name: "abc@mail.com's Account" }, new Map(), 'Credential')).toBe('Production｜Credential #10');
   });
+  it('uses the same visible format for repeated accounts while preserving the exact Credential name', () => {
+    const names = new Map([[10, "Primary's Account"], [20, 'Backup']]);
+    expect(dnsAccountLabel({ id: 1, name: "Production's Account", credential_id: 10 }, names, 'Credential')).toBe("Production｜Primary's Account");
+    expect(dnsAccountLabel({ id: 2, name: "Production's Account", credential_id: 20 }, names, 'Credential')).toBe('Production｜Backup');
+  });
 });

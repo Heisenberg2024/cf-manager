@@ -601,6 +601,30 @@
       "uncertain": "结果未确认",
       "conflictField": "冲突",
       "draftLimit": "已保留 30 个未保存草稿，请先保存或取消其中一个，再编辑其他域名。"
+    },
+    "zoneOperations": {
+      "sslTitle": "批量修改 SSL/TLS",
+      "purgeTitle": "批量清除缓存",
+      "sslHint": "仅修改明确选择的字段，其他设置保持不变。执行前核实权限和当前值；失败或结果未知时继续后续域名，同一 Zone 不重复提交。",
+      "purgeHint": "清除所选域名的全部 Cloudflare 缓存，下次请求将回源。成功表示清除请求已被接受；失败或结果未知时继续后续域名；结果未知时不自动重试。",
+      "keep": "保持不变",
+      "current": "修改前设置",
+      "actual": "实际设置",
+      "confirm": "确认对列表中的 {count} 个域名执行以上操作",
+      "execute": "确认执行",
+      "summary": "共 {total} 项：成功/无需修改 {success}，部分成功 {partial}，失败 {failed}，结果未知 {uncertain}，跳过 {skipped}。",
+      "receipt": "请求回执：{id}",
+      "missingReceipt": "未收到清除缓存回执，结果未知，请核实后再操作。",
+      "states": {
+        "ready": "待执行",
+        "running": "执行中",
+        "success": "成功",
+        "unchanged": "无需修改",
+        "partial": "部分成功",
+        "failed": "失败",
+        "uncertain": "结果未知",
+        "skipped": "跳过"
+      }
     }
   },
   "workers": {

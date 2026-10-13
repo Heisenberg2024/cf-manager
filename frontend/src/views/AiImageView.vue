@@ -7,6 +7,8 @@
         <n-select
           v-model:value="selectedAccount"
           :options="accountOptions"
+          :render-label="renderAccountOption"
+          filterable
           placeholder=""
           size="small"
           class="sidebar-select"
@@ -197,8 +199,10 @@ import { renderPaidModelLabel } from '../utils/paidLabel';
 import { useMessage } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 import { accountsApi } from '../api/accounts';
+import { useAccountLabels } from '../utils/useAccountLabels';
 
 const { t } = useI18n();
+const { accountLabel, renderAccountOption, loadCredentialNames } = useAccountLabels();
 const message = useMessage();
 
 type Mode = 'text-to-image' | 'image-to-image';
@@ -328,12 +332,12 @@ function switchMode(m: Mode) {
 
 async function fetchAccounts() {
   try {
-    const { data } = await accountsApi.getAll();
+    const [{ data }] = await Promise.all([accountsApi.getAll(), loadCredentialNames()]);
     const seen = new Set<string>();
     const accounts = (data.accounts || [])
       .filter((a: any) => a.is_active && (a.enabled_features || '').includes('ai'))
       .map((a: any) => ({
-        label: a.name,
+        label: accountLabel(a),
         value: a.account_id || String(a.id),
       }))
       .filter((opt: { value: string }) => {

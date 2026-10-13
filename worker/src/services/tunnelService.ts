@@ -3,10 +3,10 @@ import { getDnsDirectory } from './dnsDirectory';
 import type { Account } from '../db/models';
 import { cfFetch, cfFetchAll, accountRequest } from './cfApi';
 
-export interface TunnelAccountItem { id: number; name: string; account_id: string; }
+export interface TunnelAccountItem { id: number; name: string; account_id: string; credential_id?: number; }
 
 export function listTunnelAccounts(accounts: Account[]): TunnelAccountItem[] {
-  return accounts.filter((a) => !!a.account_id).map((a) => ({ id: a.id, name: a.name, account_id: a.account_id! }));
+  return accounts.filter((a) => !!a.account_id).map((a) => ({ id: a.id, name: a.name, account_id: a.account_id!, credential_id: a.credential_id }));
 }
 
 export async function listTunnels(account: Account, key: string): Promise<any[]> {
