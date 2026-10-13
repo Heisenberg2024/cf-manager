@@ -1,7 +1,8 @@
 <template>
   <n-drawer v-model:show="visible" :width="drawerWidth(860)" placement="right">
     <n-drawer-content :title="t('workerSettings.drawerTitle', { name: workerName })" closable>
-      <n-tabs type="line" animated @update:value="loadTabResources">
+      <n-alert v-if="loadError" type="error" :bordered="false">{{ loadError }} <n-button size="tiny" @click="loadTabResources(activeTab, true)">{{ t('common.refresh') }}</n-button></n-alert>
+      <n-tabs type="line" :value="activeTab" @update:value="loadTabResources">
         <!-- Secrets -->
         <n-tab-pane name="secrets" :tab="t('workerSettings.tabs.secrets')">
           <n-space vertical>
@@ -158,7 +159,7 @@
                 size="small"
                 style="width: 280px"
               />
-              <n-button size="small" type="primary" @click="loadRoutes">{{ t('workerSettings.loadRoutes') }}</n-button>
+              <n-button size="small" type="primary" @click="loadRoutes()">{{ t('workerSettings.loadRoutes') }}</n-button>
               <n-button size="small" @click="openRouteModal">{{ t('workerSettings.addRoute') }}</n-button>
             </n-space>
             <n-spin :show="routesLoading">
@@ -174,7 +175,7 @@
               <n-text depth="3">{{ t('workerSettings.sourceHint') }}</n-text>
               <n-space>
                 <n-button size="small" :disabled="!scriptContent" @click="copyScript">{{ t('workerSettings.copy') }}</n-button>
-                <n-button size="small" @click="loadScriptContent">{{ t('common.refresh') }}</n-button>
+                <n-button size="small" @click="loadScriptContent()">{{ t('common.refresh') }}</n-button>
               </n-space>
             </n-space>
             <n-spin :show="contentLoading">
@@ -189,7 +190,7 @@
           <n-space vertical>
             <n-space justify="space-between">
               <n-text depth="3">{{ t('workerSettings.deploymentsHint') }}</n-text>
-              <n-button size="small" @click="loadDeployments">{{ t('common.refresh') }}</n-button>
+              <n-button size="small" @click="loadDeployments()">{{ t('common.refresh') }}</n-button>
             </n-space>
             <n-spin :show="deploymentsLoading">
               <n-data-table :columns="deploymentColumns" :data="deployments" :bordered="false" size="small" :scroll-x="600" :pagination="{ pageSize: 10 }" />
@@ -312,8 +313,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, h } from 'vue';
+import { ref, computed, watch, h, onUnmounted } from 'vue';
 import { confirmOperation } from '../utils/confirmOperation';
+import { createDrawerReads } from '../utils/drawerReads';
 import { createRequestScope } from '../utils/requestScope';
 import { useI18n } from 'vue-i18n';
 import { NTag, NSpace, NButton, NA, useMessage } from 'naive-ui';
@@ -346,6 +348,9 @@ const visible = computed({
 });
 const workerName = computed(() => props.worker?.name || '');
 const accountId = computed(() => props.worker?.cfAccountId || 0);
+const activeTab = ref('secrets');
+const loadError = ref('');
+const reads = createDrawerReads(() => `${accountId.value}:${workerName.value}`, error => { loadError.value = error; });
 const requests = createRequestScope(() => `${props.show}:${accountId.value}:${workerName.value}`);
 
 function drawerWidth(desktopWidth: number): number {
@@ -455,14 +460,12 @@ const zoneIdOptions = computed(() =>
   zones.value.map((z: any) => ({ label: `${z.name} (${z.status})`, value: z.id }))
 );
 
-function loadTabResources(tab: string | number) { if (tab === 'routes') void loadZones(); }
 
-async function loadZones() {
-  if (zones.value.length) return; // 已加载过则跳过
+async function loadZones(force = true) {
   zonesLoading.value = true;
   const request = requests.begin('loadZones');
   try {
-    const { data } = await workersApi.getZones(accountId.value);
+    const { data } = await reads.read('zones', signal => workersApi.getZones(accountId.value, {signal, _silent: true}), force);
     if (!request.current()) return;
     zones.value = Array.isArray(data) ? data : [];
   } catch { if (!request.current()) return; zones.value = []; }
@@ -507,17 +510,17 @@ const syncSecretValues = ref<Record<string, string>>({});
 const syncing = ref(false);
 const syncResults = ref<any[]>([]);
 
-async function loadSecrets() {
+async function loadSecrets(force = true) {
   secretsLoading.value = true;
   const request = requests.begin('loadSecrets');
   try {
-    // 合并显示所有环境变量：明文（getWorkerConfig）+ 机密（config vars + secrets API 补充）
+    // Settings exposes variable bindings without fetching script/assets or resolving storage resources.
     const [cfg, sec] = await Promise.all([
-      workersApi.getWorkerConfig(accountId.value, workerName.value),
-      workersApi.getSecrets(accountId.value, workerName.value),
+      reads.read('settings', signal => workersApi.getSettings(accountId.value, workerName.value, { signal, _silent: true }), force),
+      reads.read('secrets', signal => workersApi.getSecrets(accountId.value, workerName.value, { signal, _silent: true }), force),
     ]);
     if (!request.current()) return;
-    const cfgVars = (cfg?.data?.vars || []) as any[];
+    const cfgVars = (cfg?.data?.bindings || []).filter((b: any) => ['plain_text', 'json', 'secret_text'].includes(b.type)).map((b: any) => ({name: b.name, secret: b.type === 'secret_text', value: b.type === 'json' ? JSON.stringify(b.json) : b.text ?? b.value ?? ''})) as any[];
     const secList = (Array.isArray(sec?.data) ? sec.data : []) as any[];
     const merged: any[] = [
       ...cfgVars.map((v: any) => ({ name: v.name, type: v.secret ? 'secret_text' : 'plain_text', value: v.value ?? '' })),
@@ -599,11 +602,11 @@ async function handleDeleteVar(row: any) {
   } finally { secretSaving.value = false; }
 }
 
-async function loadSchedules() {
+async function loadSchedules(force = true) {
   schedulesLoading.value = true;
   const request = requests.begin('loadSchedules');
   try {
-    const { data } = await workersApi.getSchedules(accountId.value, workerName.value);
+    const { data } = await reads.read('schedules', signal => workersApi.getSchedules(accountId.value, workerName.value, {signal, _silent: true}), force);
     if (!request.current()) return;
     const result = data as any;
     schedules.value = result?.schedules || [];
@@ -629,11 +632,11 @@ async function saveSchedules() {
   } finally { schedulesSaving.value = false; }
 }
 
-async function loadDomains() {
+async function loadDomains(force = true) {
   domainsLoading.value = true;
   const request = requests.begin('loadDomains');
   try {
-    const { data } = await workersApi.getDomains(accountId.value, workerName.value);
+    const { data } = await reads.read('domains', signal => workersApi.getDomains(accountId.value, workerName.value, {signal, _silent: true}), force);
     if (!request.current()) return;
     domains.value = Array.isArray(data) ? data : [];
   } catch { if (!request.current()) return; domains.value = []; }
@@ -661,11 +664,11 @@ async function handleDeleteDomain(row: any) {
   loadDomains();
 }
 
-async function loadSubdomain() {
+async function loadSubdomain(force = true) {
   subdomainLoading.value = true;
   const request = requests.begin('loadSubdomain');
   try {
-    const { data } = await workersApi.getSubdomain(accountId.value, workerName.value);
+    const { data } = await reads.read('subdomain', signal => workersApi.getSubdomain(accountId.value, workerName.value, {signal, _silent: true}), force);
     if (!request.current()) return;
     subdomainInfo.value = data;
   } catch { if (!request.current()) return; subdomainInfo.value = null; }
@@ -681,11 +684,11 @@ async function toggleSubdomain(val: boolean) {
   } finally { subdomainSaving.value = false; }
 }
 
-async function loadScriptSettings() {
+async function loadScriptSettings(force = true) {
   scriptSettingsLoading.value = true;
   const request = requests.begin('loadScriptSettings');
   try {
-    const { data } = await workersApi.getSettings(accountId.value, workerName.value);
+    const { data } = await reads.read('settings', signal => workersApi.getSettings(accountId.value, workerName.value, {signal, _silent: true}), force);
     if (!request.current()) return;
     scriptSettings.value = data;
   } catch { if (!request.current()) return; scriptSettings.value = null; }
@@ -701,12 +704,12 @@ async function updateScriptSetting(key: string, value: any) {
   loadScriptSettings();
 }
 
-async function loadRoutes() {
+async function loadRoutes(force = true) {
   if (!routeZoneId.value) { message.warning(t('workerSettings.msg.zoneRequired')); return; }
   routesLoading.value = true;
   const request = requests.begin('loadRoutes', () => `${props.show}:${accountId.value}:${workerName.value}:${routeZoneId.value}`);
   try {
-    const { data } = await workersApi.getRoutes(accountId.value, workerName.value, routeZoneId.value);
+    const { data } = await reads.read(`routes:${routeZoneId.value}`, signal => workersApi.getRoutes(accountId.value, workerName.value, routeZoneId.value, {signal, _silent: true}), force);
     if (!request.current()) return;
     routes.value = Array.isArray(data) ? data : [];
   } catch { if (!request.current()) return; routes.value = []; }
@@ -750,14 +753,14 @@ async function handleDeleteRoute(row: any) {
   loadRoutes();
 }
 
-async function loadScriptContent() {
+async function loadScriptContent(force = true) {
   contentLoading.value = true;
   const request = requests.begin('loadScriptContent');
   try {
-    const { data } = await workersApi.getContent(accountId.value, workerName.value);
+    const { data } = await reads.read('source', signal => workersApi.getContent(accountId.value, workerName.value, {signal, _silent: true}), force);
     if (!request.current()) return;
     scriptContent.value = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-  } catch (e: any) { scriptContent.value = t('workerSettings.msg.loadFailed', { error: e?.errorMessage || e?.message || '' }); }
+  } catch (e: any) { if (!request.current()) return; scriptContent.value = t('workerSettings.msg.loadFailed', { error: e?.errorMessage || e?.message || '' }); }
   finally { if (request.current()) contentLoading.value = false; }
 }
 
@@ -771,11 +774,11 @@ async function copyScript() {
   }
 }
 
-async function loadDeployments() {
+async function loadDeployments(force = true) {
   deploymentsLoading.value = true;
   const request = requests.begin('loadDeployments');
   try {
-    const { data } = await workersApi.getDeployments(accountId.value, workerName.value);
+    const { data } = await reads.read('deployments', signal => workersApi.getDeployments(accountId.value, workerName.value, {signal, _silent: true}), force);
     if (!request.current()) return;
     const result = data as any;
     deployments.value = result?.items || result?.deployments || (Array.isArray(data) ? data : []);
@@ -875,22 +878,22 @@ const deploymentColumns = computed<DataTableColumns<any>>(() => [
   { title: t('workerSettings.sourceLabel'), key: 'source', width: 100, render: (row) => row.source || '-' },
 ]);
 
-// 打开抽屉时加载数据
-watch(
-  () => [props.show, props.worker?.name, props.worker?.cfAccountId] as const,
-  () => {
-    requests.invalidate();
-  if (props.show && props.worker) {
-    zones.value = []; // 重置 zones，新 worker 重新加载
-    loadSecrets();
-    loadSchedules();
-    loadDomains();
-    loadSubdomain();
-    loadScriptSettings();
-    loadScriptContent();
-    loadDeployments();
+function loadTabResources(tab: string | number, force = false) {
+  activeTab.value = String(tab); loadError.value = '';
+  const loaders: Record<string, (force?: boolean) => Promise<void>> = {secrets: loadSecrets, schedules: loadSchedules, domains: loadDomains, subdomain: loadSubdomain, settings: loadScriptSettings, routes: loadZones, source: loadScriptContent, deployments: loadDeployments};
+  if (props.show) void loaders[String(tab)]?.(force);
+}
+let previousIdentity = '';
+watch(() => [props.show, props.worker?.name, props.worker?.cfAccountId] as const, () => {
+  requests.invalidate(); reads.cancel();
+  const next = `${accountId.value}:${workerName.value}`;
+  if (next !== previousIdentity || !props.show) {
+    secrets.value = []; schedules.value = []; cronExpressions.value = []; cronPreset.value = '';  domains.value = []; subdomainInfo.value = null; scriptSettings.value = null; scriptContent.value = ''; deployments.value = []; zones.value = []; routes.value = []; routeZoneId.value = ''; secretForm.value.value = ''; syncSecretValues.value = {}; showSecretModal.value = false; showDomainModal.value = false; showRouteModal.value = false;
+    secretsLoading.value = false; schedulesLoading.value = false; domainsLoading.value = false; subdomainLoading.value = false; scriptSettingsLoading.value = false; contentLoading.value = false; deploymentsLoading.value = false; zonesLoading.value = false; routesLoading.value = false;
+    loadError.value = '';
   }
-  },
-  { immediate: true },
-);
+  if (next !== previousIdentity) { reads.cancel(true); activeTab.value = 'secrets'; previousIdentity = next; }
+  if (props.show && props.worker) loadTabResources(activeTab.value);
+}, { immediate: true });
+onUnmounted(() => { requests.invalidate(); reads.cancel(true); });
 </script>

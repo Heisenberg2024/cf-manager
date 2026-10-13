@@ -571,6 +571,16 @@
       "stale": "显示上次成功快照，正在后台更新",
       "accountFailed": "获取失败；已有列表可能过期",
       "retry": "重试"
+    },
+    "paging": {
+      "selectZone": "选择整个 Zone",
+      "total": "筛选结果 {count} 条",
+      "search": "按所选字段搜索",
+      "scope": {
+        "ids": "仅明确选中的记录",
+        "filter": "全部筛选结果（服务端预览）",
+        "zone": "整个 Zone（服务端预览）"
+      }
     }
   },
   "workers": {
@@ -714,7 +724,8 @@
       "errors": "错误",
       "cpuTime": "CPU 耗时",
       "subrequests": "子请求"
-    }
+    },
+    "resourceReadFailed": "Cloudflare 资源读取失败，数量暂未知；请刷新重试。"
   },
   "ai": {
     "title": "AI 工作台",

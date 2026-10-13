@@ -1,7 +1,8 @@
 import { Account } from '../models/account';
-import { getCfClient } from './cfFactory';
+import { getCfClient, accountRequest } from './cfFactory';
 import { appLogger } from './logger';
-import { getAllZones } from './accountRouter';
+import { accountZones, liveAccountZone } from './accountZones';
+import { dnsDirectory } from './dnsDirectory';
 
 export interface PagesProject {
   id: string;
@@ -56,12 +57,7 @@ export async function getPagesProject(account: Account, projectName: string): Pr
 export async function editPagesProject(account: Account, projectName: string, params: any): Promise<any> {
   const accountId = account.account_id;
   const cf = getCfClient(account);
-  const envVarsDebug = JSON.stringify(params?.deployment_configs?.production?.env_vars || params?.deployment_configs?.production?.env_vars);
-  console.log(`[DBG] editPagesProject ${projectName} productionEnvVars=${envVarsDebug}`);
-  console.log(`[DBG] editPagesProject ${projectName} fullParams=${JSON.stringify(params)}`);
-  const res = await cf.pages.projects.edit(projectName, { account_id: accountId!, ...params });
-  console.log(`[DBG] editPagesProject resultEnvVars=${JSON.stringify((res as any)?.deployment_configs?.production?.env_vars)}`);
-  return res;
+  return await cf.pages.projects.edit(projectName, { ...params, account_id: accountId! });
 }
 
 export async function listPagesDomains(account: Account, projectName: string): Promise<any[]> {
@@ -96,18 +92,18 @@ export async function addPagesDomain(account: Account, projectName: string, host
 
   // 3. Automatically create CNAME DNS record if zone is in the same account
   try {
-    const allZones = await getAllZones();
-    const accountZones = allZones.filter(z => z.cfAccountId === account.id);
-    const matchingZone = accountZones.find((z: any) => hostname.endsWith('.' + z.name) || hostname === z.name);
+    const zones = await accountZones(dnsDirectory, account, accountRequest(account));
+    const matchingZone = zones.filter(z => hostname.endsWith('.' + z.name) || hostname === z.name).sort((a,b) => b.name.length - a.name.length)[0];
 
     if (matchingZone) {
+      await liveAccountZone(dnsDirectory, account, accountRequest(account), matchingZone.id);
       const existing: any[] = [];
       for await (const r of cf.dns.records.list({ zone_id: matchingZone.id, type: 'CNAME', name: { exact: hostname } })) {
         existing.push(r);
       }
 
       if (existing.length === 0) {
-        await cf.dns.records.create({
+        await getCfClient(account, 0).dns.records.create({
           zone_id: matchingZone.id,
           type: 'CNAME',
           name: hostname,
@@ -138,17 +134,17 @@ export async function removePagesDomain(account: Account, projectName: string, h
 
   // 2. Clean up CNAME DNS record
   try {
-    const allZones = await getAllZones();
-    const accountZones = allZones.filter(z => z.cfAccountId === account.id);
-    const matchingZone = accountZones.find((z: any) => hostname.endsWith('.' + z.name) || hostname === z.name);
+    const zones = await accountZones(dnsDirectory, account, accountRequest(account));
+    const matchingZone = zones.filter(z => hostname.endsWith('.' + z.name) || hostname === z.name).sort((a,b) => b.name.length - a.name.length)[0];
     if (matchingZone) {
+      await liveAccountZone(dnsDirectory, account, accountRequest(account), matchingZone.id);
       const records: any[] = [];
       for await (const r of cf.dns.records.list({ zone_id: matchingZone.id, type: 'CNAME', name: { exact: hostname } })) {
         records.push(r);
       }
       for (const r of records) {
         if (r.content?.endsWith('.pages.dev')) {
-          await cf.dns.records.delete(r.id, { zone_id: matchingZone.id });
+          await getCfClient(account, 0).dns.records.delete(r.id, { zone_id: matchingZone.id });
           appLogger.info(`[Pages Domain] Deleted CNAME: ${hostname} → ${r.content}`);
         }
       }

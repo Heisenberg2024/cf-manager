@@ -1,3 +1,5 @@
+import { getWorkerResources } from './workerResourcesRuntime';
+import { accountRequest } from './cfApi';
 import { getActiveAccounts, getActiveAccountsByFeature, hasFeature, isPaidPlan, getAllQuotaToday, setQuota, incrementQuota, getQuotaByAccount, getQuotaTodayByResource, addOptimisticD1, clearOptimisticD1, getOptimisticMapD1, getSetting, setSetting, type Account, type AccountFeature } from '../db/models';
 import type { Env } from '../types';
 import { cfGraphQL } from './cfApi';
@@ -72,7 +74,7 @@ export async function syncUsageFromCloudflare(db: D1Database, encryptionKey: str
     }
     if (hasFeature(account, 'workers')) {
       try {
-        const usage = await getWorkersUsageToday(account, encryptionKey);
+        const usage = await getWorkersUsageToday(account, encryptionKey, db);
         await setQuota(db, account.id, 'workers_requests', usage.requests);
       } catch (e) {
         logger.error('sync', `Workers usage failed for ${account.name}: ${e}`);
@@ -329,28 +331,8 @@ export async function getAiUsageToday(account: Account, encryptionKey: string): 
 
 interface WorkersUsage { requests: number; errors: number; subrequests: number; cpuTimeMs: number }
 
-async function getWorkersUsageToday(account: Account, encryptionKey: string): Promise<WorkersUsage> {
-  if (!account.account_id) return { requests: 0, errors: 0, subrequests: 0, cpuTimeMs: 0 };
-  const now = new Date();
-  const todayDate = now.toISOString().substring(0, 10);
-  const datetimeStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
-  const datetimeEnd = now.toISOString();
-
-  const query = `query($accountTag:string!,$datetimeStart:Time!,$datetimeEnd:Time!,$todayDate:Date!){viewer{accounts(filter:{accountTag:$accountTag}){workers:workersInvocationsAdaptive(filter:{datetime_geq:$datetimeStart,datetime_leq:$datetimeEnd},limit:10000){sum{requests,errors,subrequests,cpuTimeUs}}pages:pagesFunctionsInvocationsAdaptiveGroups(filter:{date:$todayDate},limit:1){sum{requests,errors}}}}}`;
-
-  try {
-    const json = await cfGraphQL(account, query, { accountTag: account.account_id, datetimeStart, datetimeEnd, todayDate }, encryptionKey);
-    const acct = json?.data?.viewer?.accounts?.[0];
-    const workerRecs = acct?.workers || [];
-    const pagesRecs = acct?.pages || [];
-    let requests = 0, errors = 0, subrequests = 0, cpuTimeUs = 0;
-    for (const r of workerRecs) { requests += r.sum?.requests || 0; errors += r.sum?.errors || 0; subrequests += r.sum?.subrequests || 0; cpuTimeUs += r.sum?.cpuTimeUs || 0; }
-    for (const r of pagesRecs) { requests += r.sum?.requests || 0; errors += r.sum?.errors || 0; }
-    return { requests, errors, subrequests, cpuTimeMs: Math.round(cpuTimeUs / 1000) };
-  } catch (e) {
-    console.error(`[Workers Usage] Failed for ${account.name}: ${e}`);
-    return { requests: 0, errors: 0, subrequests: 0, cpuTimeMs: 0 };
-  }
+async function getWorkersUsageToday(account: Account, encryptionKey: string, db: D1Database): Promise<WorkersUsage> {
+  return getWorkerResources(db).read<WorkersUsage>(account, await accountRequest(account, encryptionKey), 'usage', { refresh: true });
 }
 
 export { getWorkersUsageToday };

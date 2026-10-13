@@ -1,6 +1,10 @@
+import { workerResources } from './workerResourcesRuntime';
+import { liveAccountZone } from './accountZones';
+import { dnsDirectory } from './dnsDirectory';
+import { accountRequest } from './cfFactory';
 import { Account } from '../models/account';
 import { getCfClient, getAuthHeaders } from './cfFactory';
-import { proxyFetch, buildCurlCommand } from './proxyService';
+import { proxyFetch } from './proxyService';
 import { fetchScriptSafely } from './ssrfGuard';
 import { appLogger } from './logger';
 import { computeStaticAssetHash, getContentType, extractZipFiles } from './staticAssets';
@@ -563,6 +567,7 @@ export async function updateScriptSettings(account: Account, scriptName: string,
 
 // --- Routes ---
 export async function listRoutes(account: Account, zoneId: string): Promise<any[]> {
+  await liveAccountZone(dnsDirectory, account, accountRequest(account), zoneId);
   const cf = getCfClient(account);
   const routes: any[] = [];
   for await (const r of cf.workers.routes.list({ zone_id: zoneId })) {
@@ -572,11 +577,13 @@ export async function listRoutes(account: Account, zoneId: string): Promise<any[
 }
 
 export async function createRoute(account: Account, zoneId: string, pattern: string, script?: string): Promise<any> {
+  await liveAccountZone(dnsDirectory, account, accountRequest(account), zoneId);
   const cf = getCfClient(account);
   return await cf.workers.routes.create({ zone_id: zoneId, pattern, script });
 }
 
 export async function deleteRoute(account: Account, zoneId: string, routeId: string): Promise<any> {
+  await liveAccountZone(dnsDirectory, account, accountRequest(account), zoneId);
   const cf = getCfClient(account);
   return await cf.workers.routes.delete(routeId, { zone_id: zoneId });
 }
@@ -670,106 +677,6 @@ export interface WorkersUsage {
   cpuTimeMs: number;
 }
 
-function getTodayMidnightUTC(): string {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
-}
-
-export async function getWorkersUsageToday(account: Account): Promise<WorkersUsage> {
-  const accountId = account.account_id;
-  if (!accountId) return { requests: 0, errors: 0, subrequests: 0, cpuTimeMs: 0 };
-
-  const now = new Date();
-  const todayDate = now.toISOString().substring(0, 10);
-  const datetimeStart = getTodayMidnightUTC();
-  const datetimeEnd = now.toISOString();
-
-  const query = `
-    query CfWorkersUsage($accountTag: string!, $datetimeStart: Time!, $datetimeEnd: Time!, $todayDate: Date!) {
-      viewer {
-        accounts(filter: {accountTag: $accountTag}) {
-          workers: workersInvocationsAdaptive(
-            filter: {
-              datetime_geq: $datetimeStart,
-              datetime_leq: $datetimeEnd
-            }
-            limit: 10000
-          ) {
-            sum {
-              requests
-              errors
-              subrequests
-              cpuTimeUs
-            }
-          }
-          pages: pagesFunctionsInvocationsAdaptiveGroups(
-            filter: {
-              date: $todayDate
-            }
-            limit: 1
-          ) {
-            sum {
-              requests
-              errors
-            }
-          }
-        }
-      }
-    }
-  `;
-
-  const headers = getAuthHeaders(account);
-  const fetchUrl = 'https://api.cloudflare.com/client/v4/graphql';
-  const fetchInit = {
-    method: 'POST',
-    headers: { ...headers, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      query,
-      variables: { accountTag: accountId, datetimeStart, datetimeEnd, todayDate },
-    }),
-  };
-  let resp;
-  try {
-    resp = await proxyFetch(fetchUrl, fetchInit, 12000, undefined, account);
-  } catch (e) {
-    appLogger.error(`[Workers Usage] Fetch failed for ${account.name}: ${e}\n[DEBUG curl] ${buildCurlCommand(fetchUrl, fetchInit)}`);
-    return { requests: 0, errors: 0, subrequests: 0, cpuTimeMs: 0 };
-  }
-
-  if (!resp.ok) {
-    const text = await resp.text();
-    appLogger.error(`[GraphQL] Workers usage query failed: ${resp.status} ${text}\n[DEBUG curl] ${buildCurlCommand(fetchUrl, fetchInit)}`);
-    return { requests: 0, errors: 0, subrequests: 0, cpuTimeMs: 0 };
-  }
-
-  const json = await resp.json() as any;
-  if (json.errors) {
-    appLogger.error(`[GraphQL] Errors: ${JSON.stringify(json.errors)}`);
-    return { requests: 0, errors: 0, subrequests: 0, cpuTimeMs: 0 };
-  }
-
-  const acct = json?.data?.viewer?.accounts?.[0];
-  const workerRecords = acct?.workers || [];
-  const pagesRecords = acct?.pages || [];
-
-  let totalRequests = 0, totalErrors = 0, totalSubrequests = 0, totalCpuUs = 0;
-  for (const rec of workerRecords) {
-    const s = rec.sum || {};
-    totalRequests += s.requests || 0;
-    totalErrors += s.errors || 0;
-    totalSubrequests += s.subrequests || 0;
-    totalCpuUs += s.cpuTimeUs || 0;
-  }
-  for (const rec of pagesRecords) {
-    const s = rec.sum || {};
-    totalRequests += s.requests || 0;
-    totalErrors += s.errors || 0;
-  }
-
-  return {
-    requests: totalRequests,
-    errors: totalErrors,
-    subrequests: totalSubrequests,
-    cpuTimeMs: Math.round(totalCpuUs / 1000),
-  };
+export async function getWorkersUsageToday(account: Account, refresh = false): Promise<WorkersUsage> {
+  return workerResources.read<WorkersUsage>(account, accountRequest(account), 'usage', { refresh });
 }

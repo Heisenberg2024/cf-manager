@@ -73,7 +73,7 @@ async function wheel(locator,label){
  const moved=await locator.evaluate(e=>e.scrollTop);assert(moved>0,`${label}: wheel did not scroll`);console.log(`PASS scroll: ${label}`);
 }
 async function tableWheel(label){
- const candidates=page.locator('.n-data-table .n-scrollbar-container');
+ const candidates=page.locator('.n-data-table .n-scrollbar-container, .n-data-table .v-vl');
  await candidates.first().waitFor();
  for(let i=0;i<await candidates.count();i++) {
   if(await candidates.nth(i).evaluate(e=>e.clientHeight>30&&e.scrollHeight>e.clientHeight+30)) {await wheel(candidates.nth(i),label);return;}
@@ -105,7 +105,8 @@ try {
   if(viewport.width>768){
    await page.goto(origin+base+'/ai');await page.getByText('AI Account-059',{exact:true}).waitFor();await wheel(page.locator('.ai-stats-cards'),'AI stats');
    await page.goto(origin+base+'/settings');await wheel(page.locator('.page-view'),'Settings');
-   await page.goto(origin+base+'/workers');await page.getByText('worker-099',{exact:true}).waitFor();await tableWheel('Worker table');
+   await page.goto(origin+base+'/workers');await page.getByText('worker-000',{exact:true}).waitFor();await tableWheel('Worker table');
+   const workerScroller=page.locator('.n-data-table .v-vl').first();await workerScroller.evaluate(e=>{e.scrollTop=e.scrollHeight;});await page.getByText('worker-099',{exact:true}).waitFor();assert(await page.locator('.n-data-table-tr').count()<50,'Worker rows must be virtualized');
    await page.goto(origin+base+'/tunnels');await page.getByText('tunnel-099',{exact:true}).first().waitFor();await tableWheel('Tunnel table');
   }
   await context.close();

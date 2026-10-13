@@ -1,7 +1,8 @@
 <template>
   <n-drawer v-model:show="visible" :width="drawerWidth(860)" placement="right">
     <n-drawer-content :title="t('pagesSettings.drawerTitle', { name: workerName })" closable>
-      <n-tabs type="line" animated>
+      <n-alert v-if="loadError" type="error" :bordered="false">{{ loadError }} <n-button size="tiny" @click="loadTabResources(activeTab, true)">{{ t('common.refresh') }}</n-button></n-alert>
+      <n-tabs type="line" :value="activeTab" @update:value="loadTabResources">
         <!-- Pages 项目信息 -->
         <n-tab-pane name="pagesInfo" :tab="t('pagesSettings.tabs.info')">
           <n-space vertical>
@@ -78,7 +79,7 @@
                 >
                   {{ t('pagesSettings.deleteSelected', { count: checkedDeploymentIds.length }) }}
                 </n-button>
-                <n-button size="small" @click="loadPagesDeployments" :loading="pagesDeploymentsLoading">{{ t('common.refresh') }}</n-button>
+                <n-button size="small" @click="loadPagesDeployments()" :loading="pagesDeploymentsLoading">{{ t('common.refresh') }}</n-button>
               </n-space>
             </n-space>
             <n-spin :show="pagesDeploymentsLoading">
@@ -188,8 +189,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, h } from 'vue';
+import { ref, computed, watch, h, onUnmounted } from 'vue';
 import { confirmOperation } from '../utils/confirmOperation';
+import { createDrawerReads } from '../utils/drawerReads';
 import { createRequestScope } from '../utils/requestScope';
 import { useI18n } from 'vue-i18n';
 import { NTag, NSpace, NButton, NA, useMessage } from 'naive-ui';
@@ -217,6 +219,9 @@ const visible = computed({
 });
 const workerName = computed(() => props.worker?.name || '');
 const accountId = computed(() => props.worker?.cfAccountId || 0);
+const activeTab = ref('pagesInfo');
+const loadError = ref('');
+const reads = createDrawerReads(() => `${accountId.value}:${workerName.value}`, error => { loadError.value = error; });
 const requests = createRequestScope(() => `${props.show}:${accountId.value}:${workerName.value}`);
 
 function drawerWidth(desktopWidth: number): number {
@@ -316,11 +321,12 @@ async function buildResourceNameMap() {
   const request = requests.begin('buildResourceNameMap');
   try {
     const promises = [
-      workersApi.getKvNamespaces(accountId.value).catch(() => null),
-      workersApi.getD1Databases(accountId.value).catch(() => null),
+      reads.read('kv', signal => workersApi.getKvNamespaces(accountId.value, {signal, _silent: true})).catch(() => null),
+      reads.read('d1', signal => workersApi.getD1Databases(accountId.value, {signal, _silent: true})).catch(() => null),
     ];
     if (r2Available.value) {
-      promises.push(workersApi.getR2Buckets(accountId.value, { _silent: true } as any).catch((err: any) => {
+      promises.push(reads.read('r2', signal => workersApi.getR2Buckets(accountId.value, { _silent: true, signal })).catch((err: any) => {
+        if (!request.current()) return null;
         const msg = err?.response?.data?.error?.message || err?.message || '';
         if (msg.includes('10042') || msg.includes('Please enable R2')) {
           r2Available.value = false;
@@ -348,13 +354,14 @@ function resolveResourceName(id: string): { id: string; name: string } {
   return { id, name: resourceNameMap.value[id] || '' };
 }
 
-async function loadBindings() {
+async function loadBindings(force = true) {
   bindingsLoading.value = true;
   const request = requests.begin('loadBindings');
   try {
     const [{ data }, _] = await Promise.all([
-      workersApi.getPagesProject(accountId.value, workerName.value),
+      reads.read('project', signal => workersApi.getPagesProject(accountId.value, workerName.value, {signal, _silent: true}), force),
       buildResourceNameMap(),
+      checkR2Availability(),
     ]);
     if (!request.current()) return;
     bindingsList.value = parseBindings(data?.deployment_configs);
@@ -472,8 +479,10 @@ const checkedProductionCount = computed(() => {
 });
 
 async function checkR2Availability() {
+  const request = requests.begin('checkR2Availability');
   try {
-    const { data } = await workersApi.getR2Buckets(accountId.value, { _silent: true });
+    const { data } = await reads.read('r2', signal => workersApi.getR2Buckets(accountId.value, { _silent: true, signal }));
+    if (!request.current()) return;
     if (data?.r2_not_enabled) {
       r2Available.value = false;
     } else {
@@ -489,11 +498,11 @@ async function checkR2Availability() {
   }
 }
 
-async function loadPagesProject() {
+async function loadPagesProject(force = true) {
   pagesProjectLoading.value = true;
   const request = requests.begin('loadPagesProject');
   try {
-    const { data } = await workersApi.getPagesProject(accountId.value, workerName.value);
+    const { data } = await reads.read('project', signal => workersApi.getPagesProject(accountId.value, workerName.value, {signal, _silent: true}), force);
     if (!request.current()) return;
     pagesProject.value = data;
     const envVars = data?.deployment_configs?.production?.env_vars || {};
@@ -506,11 +515,11 @@ async function loadPagesProject() {
   finally { if (request.current()) pagesProjectLoading.value = false; }
 }
 
-async function loadPagesDomains() {
+async function loadPagesDomains(force = true) {
   pagesDomainsLoading.value = true;
   const request = requests.begin('loadPagesDomains');
   try {
-    const { data } = await workersApi.getPagesDomains(accountId.value, workerName.value);
+    const { data } = await reads.read('domains', signal => workersApi.getPagesDomains(accountId.value, workerName.value, {signal, _silent: true}), force);
     if (!request.current()) return;
     pagesDomains.value = Array.isArray(data) ? data : [];
   } catch { if (!request.current()) return; pagesDomains.value = []; }
@@ -557,8 +566,9 @@ async function handleAddPagesEnv() {
   if (!pagesEnvForm.value.name) { message.warning(t('pagesSettings.msg.nameRequired')); return; }
   pagesEnvSaving.value = true;
   try {
-    const existingProd = pagesProject.value?.deployment_configs?.production || {};
-    const existingPreview = pagesProject.value?.deployment_configs?.preview || {};
+    const { data: current } = await workersApi.getPagesProject(accountId.value, workerName.value);
+    const existingProd = current?.deployment_configs?.production || {};
+    const existingPreview = current?.deployment_configs?.preview || {};
     const envVars = { ...(existingProd.env_vars || {}) };
     envVars[pagesEnvForm.value.name] = { type: pagesEnvForm.value.type, value: pagesEnvForm.value.value };
     await workersApi.editPagesProject(accountId.value, workerName.value, {
@@ -599,11 +609,11 @@ async function handleDeletePagesEnv(row: any) {
   } catch (e: any) { message.error(e?.errorMessage || e?.message || t('pagesSettings.msg.deleteFailed')); }
 }
 
-async function loadPagesDeployments() {
+async function loadPagesDeployments(force = true) {
   pagesDeploymentsLoading.value = true;
   const request = requests.begin('loadPagesDeployments');
   try {
-    const { data } = await workersApi.getPagesDeployments(accountId.value, workerName.value);
+    const { data } = await reads.read('deployments', signal => workersApi.getPagesDeployments(accountId.value, workerName.value, {signal, _silent: true}), force);
     if (!request.current()) return;
     pagesDeployments.value = Array.isArray(data) ? data : [];
   } catch { if (!request.current()) return; pagesDeployments.value = []; }
@@ -711,19 +721,22 @@ const pagesDeploymentColumns = computed<DataTableColumns<any>>(() => [
   { title: t('pagesSettings.createdTime'), key: 'created_on', width: 200, render: (row) => row.created_on ? formatCN(row.created_on) : '-' },
 ]);
 
-// 打开抽屉时加载数据
-watch(
-  () => [props.show, props.worker?.name, props.worker?.cfAccountId] as const,
-  () => {
-    requests.invalidate();
-    if (props.show && props.worker) {
-      loadPagesProject();
-      loadPagesDomains();
-      loadPagesDeployments();
-      checkR2Availability();
-      loadBindings();
-    }
-  },
-  { immediate: true },
-);
+function loadTabResources(tab: string | number, force = false) {
+  activeTab.value = String(tab); loadError.value = '';
+  const loaders: Record<string, (force?: boolean) => Promise<void>> = {pagesInfo: loadPagesProject, pagesDomains: loadPagesDomains, pagesEnvVars: loadPagesProject, pagesBindings: loadBindings, pagesDeployments: loadPagesDeployments};
+  if (props.show) void loaders[String(tab)]?.(force);
+}
+let previousIdentity = '';
+watch(() => [props.show, props.worker?.name, props.worker?.cfAccountId] as const, () => {
+  requests.invalidate(); reads.cancel();
+  const next = `${accountId.value}:${workerName.value}`;
+  if (next !== previousIdentity || !props.show) {
+    pagesProject.value = null; pagesEnvVars.value = []; pagesDomains.value = []; pagesDeployments.value = []; bindingsList.value = []; managedDomains.value = []; resourceNameMap.value = {}; pagesEnvForm.value.value = ''; checkedDeploymentIds.value = []; showPagesEnvModal.value = false; showPagesDomainModal.value = false; showBindingModal.value = false;
+    pagesProjectLoading.value = false; pagesDomainsLoading.value = false; pagesDeploymentsLoading.value = false; bindingsLoading.value = false; managedDomainsLoading.value = false;
+    loadError.value = '';
+  }
+  if (next !== previousIdentity) { reads.cancel(true); activeTab.value = 'pagesInfo'; previousIdentity = next; }
+  if (props.show && props.worker) loadTabResources(activeTab.value);
+}, { immediate: true });
+onUnmounted(() => { requests.invalidate(); reads.cancel(true); });
 </script>

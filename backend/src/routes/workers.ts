@@ -2,12 +2,15 @@ import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { getActiveAccountsByFeature, getAccountById } from '../models/account';
 import { createAuditLog } from '../models/auditLog';
-import { appLogger } from '../services/logger';
+import { workerResources } from '../services/workerResourcesRuntime';
+import { requireWorkerBinding, unavailableWorkerSummary } from '../services/workerResources';
+import { accountRequest } from '../services/cfFactory';
+import { parseZoneContext } from '../services/zoneDirectory';
 import { mapConcurrent } from '../utils/concurrent';
 import { normalizeCronExpressions } from '../utils/cronValidation';
 import { getAccountOr404, demoDestructiveGuard } from './routeUtils';
 import {
-  listWorkers, listPages, deployWorker, deployWorkerFromUrl, deleteWorker, deletePagesProject, getWorkerLogs, WorkerAssetsInput,
+  deployWorker, deployWorkerFromUrl, deleteWorker, deletePagesProject, getWorkerLogs, WorkerAssetsInput,
   extractZipFiles, validatePagesProjectName,
   // Secrets
   listSecrets, updateSecret, deleteSecret,
@@ -30,12 +33,12 @@ import {
   // Resources for bindings
   listKvNamespaces, listD1Databases, listR2Buckets, updatePagesBindings,
   // Usage
-  getWorkersUsageToday,
 } from '../services/workerService';
 import { varsToBindings, resolveManualBindings, buildPagesConfigsFromInput, ManualVarInput, ManualBindingInput } from '../services/bindings';
 import { getWorkerConfig, getPagesConfig, applyWorkerConfigDiff } from '../services/workerService';
 import { deployPages as deployPagesService } from '../services/deploy/pagesDeploy';
-import { getAllZones } from '../services/accountRouter';
+import { accountZones } from '../services/accountZones';
+import { dnsDirectory } from '../services/dnsDirectory';
 
 // 手动/批量 Worker 部署：script 可为单个 .js（单模块）或 .zip（多模块包）+ 可选 assets（zip 较大放宽到 50MB，与 Pages 一致）
 const uploadWorkerAssets = multer({
@@ -48,6 +51,23 @@ const uploadPages = multer({
   limits: { fileSize: 50 * 1024 * 1024, files: 100, fields: 10, fieldSize: 1024 * 1024 },
 });
 const router = Router();
+router.use((req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const controller = new AbortController(); res.locals.readSignal = controller.signal;
+  res.on('close', () => { if (!res.writableFinished) controller.abort(); });
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    const direct = req.path.match(/^\/(\d+)\//)?.[1];
+    const invalidate = () => {
+      let targets = req.body?.targets;
+      try { if (typeof targets === 'string') targets = JSON.parse(targets); } catch { targets = undefined; }
+      const ids = new Set<number>([...(direct ? [Number(direct)] : []), ...(Array.isArray(targets) ? targets.map((t: any) => Number(t.accountId ?? t.account_id)) : [])]);
+      for (const id of ids) if (Number.isSafeInteger(id) && id > 0) workerResources.invalidate(id, getAccountById(id)?.account_id);
+    };
+    res.on('finish', invalidate);
+    res.on('close', () => { if (!res.writableFinished) invalidate(); });
+  }
+  next();
+});
 
 // 由上传的 assets 文件构造 deployWorker 的 assets 选项（默认 ASSETS 绑定、无 config）。
 // 单文件当 raw 处理，.zip 当压缩包解包处理。
@@ -75,33 +95,14 @@ router.use(demoDestructiveGuard);
 // 支持 ?accountId= 仅返回该账户的 Worker/Pages（按需加载）；不带参数返回全部（批量部署/环境同步用）
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const accountIdFilter = req.query.accountId ? Number(req.query.accountId) : null;
-    let accounts;
-    if (accountIdFilter) {
-      const acc = getAccountById(accountIdFilter);
-      accounts = acc ? [acc] : [];
-    } else {
-      accounts = getActiveAccountsByFeature('workers');
-    }
-    const results = await mapConcurrent(accounts, 3, async (account) => {
-      const items: Array<any> = [];
-      const [workers, pages] = await Promise.allSettled([
-        listWorkers(account),
-        listPages(account),
-      ]);
-      if (workers.status === 'fulfilled') {
-        items.push(...workers.value.map(w => ({ ...w, name: w.id, status: 'deployed', type: 'worker', cfAccountId: account.id, accountName: account.name })));
-      } else {
-        appLogger.error(`[Workers] Failed to list workers for ${account.name}: ${workers.reason}`);
-      }
-      if (pages.status === 'fulfilled') {
-        items.push(...pages.value.map(p => ({ ...p, name: p.name ?? p.id, type: 'pages', cfAccountId: account.id, accountName: account.name })));
-      } else {
-        appLogger.error(`[Pages] Failed to list pages for ${account.name}: ${pages.reason}`);
-      }
-      return items;
+    const id = parseZoneContext(req.query).accountId;
+    const accounts = id ? [requireWorkerBinding(getAccountById(id))] : getActiveAccountsByFeature('workers');
+    const results = await mapConcurrent(accounts, 3, async account => {
+      try { return await workerResources.list(account, accountRequest(account), { refresh: req.query.refresh === 'true', signal: res.locals.readSignal }); }
+      catch { return {items: [], states: {workers: 'error', pages: 'error'}}; }
     });
-    res.json(results.flat());
+    if (req.query.details === 'true') { res.json({ items: results.flatMap(result => result.items), states: accounts.map((account, i) => ({ accountId: account.id, ...results[i]!.states })) }); return; }
+    res.json(results.flatMap(result => result.items));
   } catch (err) { next(err); }
 });
 
@@ -450,8 +451,7 @@ router.get('/:accountId/resources/zones', async (req: Request, res: Response, ne
   try {
     const account = getAccountOr404(req, res);
     if (!account) return;
-    const allZones = await getAllZones();
-    res.json(allZones.filter(z => z.cfAccountId === account.id));
+    res.json(await accountZones(dnsDirectory, account, accountRequest(account)));
   } catch (err) { next(err); }
 });
 
@@ -465,28 +465,14 @@ router.put('/:accountId/pages/:name/bindings', async (req: Request, res: Respons
 });
 
 // ============ Summary (用量 + 已部署数量) ============
-router.get('/summary', async (_req: Request, res: Response, next: NextFunction) => {
+router.get('/summary', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const accounts = getActiveAccountsByFeature('workers');
-    const results = await mapConcurrent(accounts, 6, async (account) => {
-      try {
-        const [usageRes, workersRes, pagesRes] = await Promise.allSettled([
-          getWorkersUsageToday(account),
-          listWorkers(account),
-          listPages(account),
-        ]);
-        const usage = usageRes.status === 'fulfilled'
-          ? usageRes.value
-          : { requests: 0, errors: 0, subrequests: 0, cpuTimeMs: 0 };
-        const workerCount = workersRes.status === 'fulfilled' ? workersRes.value.length : 0;
-        const pagesCount = pagesRes.status === 'fulfilled' ? pagesRes.value.length : 0;
-        return { accountId: account.id, accountName: account.name, ...usage, workerCount, pagesCount };
-      } catch (err) {
-        appLogger.error(`[Summary] Failed for ${account.name}: ${err}`);
-        return { accountId: account.id, accountName: account.name, requests: 0, errors: 0, subrequests: 0, cpuTimeMs: 0, workerCount: 0, pagesCount: 0 };
-      }
-    });
-    res.json(results);
+    const id = parseZoneContext(req.query).accountId;
+    const accounts = id ? [requireWorkerBinding(getAccountById(id))] : getActiveAccountsByFeature('workers');
+    res.json(await mapConcurrent(accounts, 3, async account => {
+      try { return await workerResources.summary(account, accountRequest(account), { refresh: req.query.refresh === 'true', usage: req.query.usage !== 'false', background: req.query.background === 'true', signal: res.locals.readSignal }); }
+      catch (error) { return unavailableWorkerSummary(account, error); }
+    }));
   } catch (err) { next(err); }
 });
 
@@ -502,19 +488,14 @@ router.get('/:accountId/pages/:name/config', async (req: Request, res: Response,
 });
 
 // ============ Workers Usage (GraphQL) ============
-router.get('/usage', async (_req: Request, res: Response, next: NextFunction) => {
+router.get('/usage', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const accounts = getActiveAccountsByFeature('workers');
-    const results = await mapConcurrent(accounts, 3, async (account) => {
-      try {
-        const usage = await getWorkersUsageToday(account);
-        return { accountId: account.id, accountName: account.name, ...usage };
-      } catch (err) {
-        appLogger.error(`[Usage] Failed for account ${account.name}: ${err}`);
-        return { accountId: account.id, accountName: account.name, requests: 0, errors: 0, subrequests: 0, cpuTimeMs: 0 };
-      }
-    });
-    res.json(results);
+    const id = parseZoneContext(req.query).accountId;
+    const accounts = id ? [requireWorkerBinding(getAccountById(id))] : getActiveAccountsByFeature('workers');
+    res.json(await mapConcurrent(accounts, 3, async account => {
+      try { return { accountId: account.id, accountName: account.name, ...await workerResources.read(account, accountRequest(account), 'usage', { refresh: req.query.refresh === 'true' }) as object }; }
+      catch { return { accountId: account.id, accountName: account.name, requests: null, errors: null, subrequests: null, cpuTimeMs: null, state: 'error' }; }
+    }));
   } catch (err) { next(err); }
 });
 

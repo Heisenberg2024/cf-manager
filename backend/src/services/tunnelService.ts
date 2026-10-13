@@ -1,5 +1,7 @@
+import { accountZones } from './accountZones';
+import { dnsDirectory } from './dnsDirectory';
 import { Account, getAllAccounts, getAccountById } from '../models/account';
-import { getCfClient } from './cfFactory';
+import { getCfClient, accountRequest } from './cfFactory';
 
 export interface TunnelAccountItem {
   id: number;
@@ -79,12 +81,7 @@ export async function updateTunnelConfig(
 }
 
 export async function listZonesForAccount(account: Account): Promise<Array<{ id: string; name: string }>> {
-  const cf = getCfClient(account);
-  const zones: Array<{ id: string; name: string }> = [];
-  for await (const z of cf.zones.list({ per_page: 100 })) {
-    zones.push({ id: (z as any).id, name: (z as any).name });
-  }
-  return zones;
+  return (await accountZones(dnsDirectory, account, accountRequest(account))).map(zone => ({id: zone.id, name: zone.name}));
 }
 
 /**
@@ -98,7 +95,7 @@ export async function listTunnelHostnames(account: Account, tunnelId: string): P
   const hostnames: string[] = [];
   for (const zone of zones) {
     try {
-      for await (const record of cf.dns.records.list({ zone_id: zone.id, type: 'CNAME' as any, per_page: 100 })) {
+      for await (const record of cf.dns.records.list({ zone_id: zone.id, type: 'CNAME' as any, content: { exact: target }, per_page: 100 })) {
         if ((record as any).content === target) {
           hostnames.push((record as any).name);
         }

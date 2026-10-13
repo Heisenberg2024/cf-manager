@@ -29,6 +29,15 @@ export const useDnsStore = defineStore('dns', () => {
   let domainController: AbortController | undefined;
   let recordController: AbortController | undefined;
   let settingsController: AbortController | undefined;
+  const recordMode = ref<'all' | 'page'>('all');
+  const recordTotal = ref(0);
+  const zoneRecordTotal = ref(0);
+  const recordWindow = ref(1);
+  const recordFilter = ref<{ type?: string; nameContains?: string; contentContains?: string }>({});
+  const pageCache = new Map<string, { rows: any[]; total: number; fetchedAt: number }>();
+  function clearPageCache(zoneId?: string) {
+    for (const cacheKey of pageCache.keys()) if (!zoneId || cacheKey.split(':')[1] === zoneId) pageCache.delete(cacheKey);
+  }
   const recordCache = new Map<string, { rows: any[]; fetchedAt: number }>();
   const revisions = new Map<string, number>();
   let recordFlight: { key: string; promise: Promise<void> } | undefined;
@@ -43,6 +52,7 @@ export const useDnsStore = defineStore('dns', () => {
     const next = new Map(bindings.map(account => [account.id, JSON.stringify(account)]));
     for (const [id, version] of accountVersions) if (next.get(id) !== version) {
       for (const cacheKey of recordCache.keys()) if (cacheKey.startsWith(`${id}:`)) { recordCache.delete(cacheKey); revisions.set(cacheKey, (revisions.get(cacheKey) || 0) + 1); }
+      for (const cacheKey of pageCache.keys()) if (cacheKey.startsWith(`${id}:`)) pageCache.delete(cacheKey);
       domains.value = domains.value.filter(zone => zone.cfAccountId !== id);
       if (currentContext.value.accountId === id) clearSelection();
     }
@@ -53,7 +63,7 @@ export const useDnsStore = defineStore('dns', () => {
     ++recordIdentity; ++settingsIdentity;
     currentDomain.value = ''; currentContext.value = {};
     records.value = []; zoneSettings.value = {};
-    activeRecordsComplete = false;
+    activeRecordsComplete = false; recordMode.value = 'all'; recordTotal.value = 0; zoneRecordTotal.value = 0; recordWindow.value = 1; recordFilter.value = {};
     loading.value = false; settingsLoading.value = false;
     recordsError.value = ''; settingsError.value = '';
   }
@@ -61,7 +71,7 @@ export const useDnsStore = defineStore('dns', () => {
     sessionRevision++;
     clearSelection(); domainController?.abort(); ++domainIdentity;
     domains.value = []; domainErrors.value = {}; domainStates.value = {}; domainsLoading.value = false;
-    recordCache.clear(); revisions.clear(); accountVersions.clear(); accountIds = undefined; domainScope = undefined;
+    recordCache.clear(); clearPageCache(); revisions.clear(); accountVersions.clear(); accountIds = undefined; domainScope = undefined;
   }
   function setDomainScope(scope: number[]) { domainScope = scope; }
   async function fetchDomains(refresh = false, scope: number[] | undefined = domainScope ?? accountIds) {
@@ -120,9 +130,10 @@ export const useDnsStore = defineStore('dns', () => {
     const cacheKey = key(domain, context);
     if (!refresh && recordFlight?.key === cacheKey && isCurrent(domain, context)) return recordFlight.promise;
     const changed = !isCurrent(domain, context);
+    if (!changed && recordMode.value === 'page') return fetchRecordWindow(recordWindow.value, recordFilter.value, refresh);
     recordController?.abort();
     recordFlight = undefined;
-    if (changed) { records.value = []; activeRecordsComplete = false; zoneSettings.value = {}; ++settingsIdentity; settingsController?.abort(); settingsLoading.value = false; settingsError.value = ''; }
+    if (changed) { recordMode.value = 'all'; recordTotal.value = 0; zoneRecordTotal.value = 0; recordWindow.value = 1; recordFilter.value = {}; records.value = []; activeRecordsComplete = false; zoneSettings.value = {}; ++settingsIdentity; settingsController?.abort(); settingsLoading.value = false; settingsError.value = ''; }
     currentDomain.value = domain; currentContext.value = context;
     const identity = ++recordIdentity;
     const revision = revisions.get(cacheKey) || 0;
@@ -130,27 +141,86 @@ export const useDnsStore = defineStore('dns', () => {
     const cached = cacheable ? recordCache.get(cacheKey) : undefined;
     if (cached && Date.now() - cached.fetchedAt < 120000) {
       records.value = cached.rows; cacheRecords(cacheKey, cached.rows, cached.fetchedAt);
-      activeRecordsComplete = true;
+      activeRecordsComplete = true; recordMode.value = 'all'; recordTotal.value = cached.rows.length; zoneRecordTotal.value = cached.rows.length;
       if (!refresh && Date.now() - cached.fetchedAt < 30000) { recordsError.value = ''; loading.value = false; return Promise.resolve(); }
     } else if (changed) records.value = [];
+    const initialPage = pageCache.get(`${cacheKey}:${JSON.stringify([1, '', '', ''])}`);
+    if (!refresh && initialPage && Date.now() - initialPage.fetchedAt < 30000) {
+      recordMode.value = 'page'; records.value = initialPage.rows; recordTotal.value = initialPage.total; zoneRecordTotal.value = initialPage.total;
+      activeRecordsComplete = false; loading.value = false; recordsError.value = ''; return Promise.resolve();
+    }
     const controller = recordController = new AbortController();
     loading.value = true; recordsError.value = '';
     const promise: Promise<void> = (async () => {
       try {
-        const { data } = await dnsApi.getRecords(domain, context, controller.signal);
+        const { data } = await dnsApi.getRecords(domain, context, controller.signal, { page: 1, perPage: 500 });
         if (controller.signal.aborted || revision !== (revisions.get(cacheKey) || 0)) return;
-        if (cacheable) cacheRecords(cacheKey, data);
-        if (identity === recordIdentity && isCurrent(domain, context)) { records.value = data; activeRecordsComplete = true; }
+        const rows = Array.isArray(data) ? data : data.records;
+        const total = Array.isArray(data) ? rows.length : data.meta?.total_count ?? (rows.length < 500 ? rows.length : undefined);
+        if (!Array.isArray(rows) || !Number.isSafeInteger(total) || total < rows.length) throw new Error('DNS pagination total unavailable; refresh before selecting a scope');
+        const complete = total === rows.length;
+        if (cacheable && complete) cacheRecords(cacheKey, rows);
+        if (!complete) { recordCache.delete(cacheKey); if (cacheable) cachePage(cacheKey, 1, {}, rows, total); }
+        if (identity === recordIdentity && isCurrent(domain, context)) { records.value = rows; activeRecordsComplete = complete; recordMode.value = complete ? 'all' : 'page'; recordTotal.value = total; zoneRecordTotal.value = total; }
       } catch (error: any) {
         if (identity === recordIdentity && !controller.signal.aborted) { recordsError.value = error.errorMessage || error.message; recordCache.delete(cacheKey); }
       } finally { if (identity === recordIdentity) { loading.value = false; recordFlight = undefined; } }
     })();
     recordFlight = { key: cacheKey, promise }; return promise;
   }
+  function cachePage(base: string, page: number, filter: typeof recordFilter.value, rows: any[], total: number) {
+    if (!base.split(':')[0] || !base.split(':')[1]) return;
+    const cacheKey = `${base}:${JSON.stringify([page, filter.type || '', filter.nameContains || '', filter.contentContains || ''])}`;
+    pageCache.delete(cacheKey); pageCache.set(cacheKey, { rows, total, fetchedAt: Date.now() });
+    while (pageCache.size > 60) pageCache.delete(pageCache.keys().next().value!);
+  }
+  async function fetchRecordWindow(page: number, filter: typeof recordFilter.value = {}, refresh = false) {
+    const domain = currentDomain.value, context = { ...currentContext.value }, base = key(domain, context);
+    if (!domain || recordMode.value !== 'page') return;
+    const normalized = { ...filter };
+    const cacheKey = `${base}:${JSON.stringify([page, normalized.type || '', normalized.nameContains || '', normalized.contentContains || ''])}`;
+    if (!refresh && recordWindow.value === page && JSON.stringify(recordFilter.value) === JSON.stringify(normalized) && recordFlight?.key === cacheKey) return recordFlight.promise;
+    recordController?.abort(); const identity = ++recordIdentity;
+    const revision = revisions.get(base) || 0;
+    const controller = recordController = new AbortController();
+    const changed = page !== recordWindow.value || JSON.stringify(normalized) !== JSON.stringify(recordFilter.value);
+    recordWindow.value = page; recordFilter.value = normalized;
+    if (changed) records.value = [];
+    const cached = pageCache.get(cacheKey);
+    if (!refresh && cached && Date.now() - cached.fetchedAt < 30000) {
+      pageCache.delete(cacheKey); pageCache.set(cacheKey, cached);
+      records.value = cached.rows; recordTotal.value = cached.total; if (!Object.values(normalized).some(Boolean)) zoneRecordTotal.value = cached.total; loading.value = false; recordsError.value = ''; return;
+    }
+    loading.value = true; recordsError.value = '';
+    const promise = (async () => {
+      try {
+        const { data } = await dnsApi.getRecords(domain, context, controller.signal, { page, perPage: 500, ...normalized });
+        if (controller.signal.aborted || identity !== recordIdentity || revision !== (revisions.get(base) || 0) || !isCurrent(domain, context)) return;
+        if (!Array.isArray(data.records) || !Number.isSafeInteger(data.meta?.total_count)) throw new Error('DNS pagination total unavailable');
+        cachePage(base, page, normalized, data.records, data.meta.total_count);
+        records.value = data.records; recordTotal.value = data.meta.total_count; if (!Object.values(normalized).some(Boolean)) zoneRecordTotal.value = data.meta.total_count;
+      } catch (error: any) { if (identity === recordIdentity && !controller.signal.aborted) recordsError.value = error.errorMessage || error.message; }
+      finally { if (identity === recordIdentity) { loading.value = false; recordFlight = undefined; } }
+    })();
+    recordFlight = { key: cacheKey, promise }; return promise;
+  }
   function applyRecord(domain: string, context: ZoneContext, recordId: string, row?: any) {
     const cacheKey = key(domain, context);
-    revisions.set(cacheKey, (revisions.get(cacheKey) || 0) + 1);
+    clearPageCache(context.zoneId);
+    if (currentContext.value.zoneId === context.zoneId && recordMode.value === 'page') recordCache.delete(cacheKey);
     for (const alias of recordCache.keys()) if (alias !== cacheKey && alias.split(':')[1] === context.zoneId) { recordCache.delete(alias); revisions.set(alias, (revisions.get(alias) || 0) + 1); }
+    if (isCurrent(domain, context) && recordMode.value === 'page') {
+      revisions.set(cacheKey, (revisions.get(cacheKey) || 0) + 1);
+      const before = records.value.find(record => record.id === recordId);
+      const filter = recordFilter.value;
+      if (row && before && row.name === before.name && row.type === before.type && (!filter.contentContains || String(row.content || '').toLowerCase().includes(filter.contentContains.toLowerCase()))) {
+        ++recordIdentity; recordController?.abort(); loading.value = false;
+        records.value = records.value.map(record => record.id === recordId ? row : record);
+        cachePage(cacheKey, recordWindow.value, filter, records.value, recordTotal.value);
+      } else void fetchRecordWindow(recordWindow.value, filter, true);
+      return;
+    }
+    revisions.set(cacheKey, (revisions.get(cacheKey) || 0) + 1);
     if (!isCurrent(domain, context) && currentContext.value.zoneId === context.zoneId) void fetchRecords(currentDomain.value, { ...currentContext.value }, true);
     const cached = recordCache.get(cacheKey);
     const current = isCurrent(domain, context);
@@ -160,7 +230,7 @@ export const useDnsStore = defineStore('dns', () => {
     const exists = rows.some(record => record.id === recordId);
     const next = row ? (exists ? rows.map(record => record.id === recordId ? row : record) : [...rows, row]) : rows.filter(record => record.id !== recordId);
     if (context.accountId && context.zoneId) cacheRecords(cacheKey, next, cached?.fetchedAt ?? 0);
-    if (current) { ++recordIdentity; recordController?.abort(); loading.value = false; records.value = next; }
+    if (current) { ++recordIdentity; recordController?.abort(); loading.value = false; records.value = next; recordTotal.value = next.length; }
   }
   async function saveRecord(domain: string, context: ZoneContext, body: any, recordId?: string) {
     const session = sessionRevision, version = accountVersions.get(context.accountId!);
@@ -171,13 +241,13 @@ export const useDnsStore = defineStore('dns', () => {
       if (data?.id) applyRecord(domain, context, data.id, data);
       else await invalidateRecords([{ accountId: context.accountId!, zoneId: context.zoneId!, zoneName: domain, credentialId: 0 }]);
       return data;
-    } catch (error) { if (valid()) recordCache.delete(key(domain, context)); throw error; }
+    } catch (error) { if (valid()) { recordCache.delete(key(domain, context)); clearPageCache(context.zoneId); } throw error; }
   }
   async function removeRecord(domain: string, context: ZoneContext, recordId: string) {
     const session = sessionRevision, version = accountVersions.get(context.accountId!);
     const valid = () => session === sessionRevision && version === accountVersions.get(context.accountId!);
     try { await dnsApi.deleteRecord(domain, recordId, context); if (valid()) applyRecord(domain, context, recordId); }
-    catch (error) { if (valid()) recordCache.delete(key(domain, context)); throw error; }
+    catch (error) { if (valid()) { recordCache.delete(key(domain, context)); clearPageCache(context.zoneId); } throw error; }
   }
   const proxyPending = ref<Set<string>>(new Set());
   async function toggleProxy(domain: string, context: ZoneContext, recordId: string, proxied: boolean) {
@@ -198,7 +268,7 @@ export const useDnsStore = defineStore('dns', () => {
         await invalidateRecords([{ accountId: context.accountId!, zoneId: context.zoneId!, zoneName: domain, credentialId: 0 }]);
         if (currentContext.value.zoneId === context.zoneId && recordsError.value) throw new Error(recordsError.value);
       }
-    } catch (error) { if (valid()) { applyRecord(domain, context, recordId, old); recordCache.delete(key(domain, context)); } throw error; }
+    } catch (error) { if (valid()) { applyRecord(domain, context, recordId, old); recordCache.delete(key(domain, context)); clearPageCache(context.zoneId); } throw error; }
     finally { const next = new Set(proxyPending.value); next.delete(pendingKey); proxyPending.value = next; }
   }
   async function fetchZoneSettings(domain: string, context: ZoneContext = currentContext.value) {
@@ -252,6 +322,7 @@ export const useDnsStore = defineStore('dns', () => {
     return data;
   }
   function forgetDeletedZones(results: Array<ZoneSelection & { success?: boolean }>) {
+    for (const result of results) if (result.zoneId) clearPageCache(result.zoneId);
     const touched = new Set(results.map(result => result.zoneId).filter(Boolean));
     const deleted = new Set(results.filter(result => result.success).map(result => result.zoneId).filter(Boolean));
     if (recordFlight && touched.has(recordFlight.key.split(':')[1])) revisions.set(recordFlight.key, (revisions.get(recordFlight.key) || 0) + 1);
@@ -275,12 +346,13 @@ export const useDnsStore = defineStore('dns', () => {
   }
   async function invalidateRecords(zones: BatchZone[]) {
     for (const zone of zones) {
+      clearPageCache(zone.zoneId);
       const keys = new Set([key(zone.zoneName, { accountId: zone.accountId, zoneId: zone.zoneId }), ...[...recordCache.keys()].filter(cacheKey => cacheKey.split(':')[1] === zone.zoneId)]);
       for (const cacheKey of keys) { recordCache.delete(cacheKey); revisions.set(cacheKey, (revisions.get(cacheKey) || 0) + 1); }
     }
     if (zones.some(z => z.zoneId === currentContext.value.zoneId)) await fetchRecords(currentDomain.value, { ...currentContext.value }, true);
   }
-  return { forgetDeletedZones, resetSensitiveState, setDomainScope, configureAccounts, domainErrors, domainStates, saveRecord, removeRecord, toggleProxy, proxyPending, invalidateRecords, domains, records, currentDomain, currentContext, loading, domainsLoading, recordsError,
+  return { zoneRecordTotal, recordMode, recordTotal, recordWindow, recordFilter, fetchRecordWindow, forgetDeletedZones, resetSensitiveState, setDomainScope, configureAccounts, domainErrors, domainStates, saveRecord, removeRecord, toggleProxy, proxyPending, invalidateRecords, domains, records, currentDomain, currentContext, loading, domainsLoading, recordsError,
     zoneSettings, settingsLoading, settingsError, fetchDomains, fetchRecords, clearSelection, isCurrent,
     createDomains, deleteDomains, fetchZoneSettings, updateZoneSettings, purgeZoneCache, updateZoneStatus };
 });

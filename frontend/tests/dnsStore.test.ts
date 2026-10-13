@@ -157,3 +157,44 @@ describe('DNS progressive reads and bounded in-memory snapshots', () => {
   expect(store.currentDomain).toBe(''); expect(store.domains).toEqual([{ id: 'kept', cfAccountId: 3 }]); await store.fetchRecords('alias.test', { accountId: 2, zoneId: 'shared-zone' }); expect(mock.getRecords).toHaveBeenCalledTimes(2);
  });
 });
+
+
+describe('DNS adaptive server windows', () => {
+ const target={accountId:1,zoneId:'large'};
+ const page=(count=10000, id='first')=>({data:{records:[{id,type:'A',name:'api.test',content:'192.0.2.1'}],meta:{scope:'page',total_count:count}}});
+ it('keeps a small Zone complete with one request and reads only one window for large Zones', async()=>{
+  mock.getRecords.mockResolvedValueOnce(page(1));const store=useDnsStore();await store.fetchRecords('small.test',target);
+  expect(store.recordMode).toBe('all');expect(mock.getRecords).toHaveBeenCalledTimes(1);
+  mock.getRecords.mockResolvedValueOnce(page());await store.fetchRecords('large.test',{accountId:2,zoneId:'b'});
+  expect(store.recordMode).toBe('page');expect(store.recordTotal).toBe(10000);expect(store.records).toHaveLength(1);
+ });
+ it('caches visited windows, includes filters in the key and preserves accurate totals', async()=>{
+  mock.getRecords.mockResolvedValueOnce(page()).mockResolvedValueOnce(page(10000,'second')).mockResolvedValueOnce(page(3,'filtered'));
+  const store=useDnsStore();await store.fetchRecords('large.test',target);await store.fetchRecordWindow(2);await store.fetchRecordWindow(1);
+  expect(mock.getRecords).toHaveBeenCalledTimes(2);expect(store.records[0].id).toBe('first');
+  await store.fetchRecordWindow(1,{type:'TXT',nameContains:'api'});expect(store.recordTotal).toBe(3);expect(store.zoneRecordTotal).toBe(10000);
+ });
+ it('isolates late pages and credential changes, and cancels the old consumer', async()=>{
+  const late=deferred<any>();mock.getRecords.mockResolvedValueOnce(page()).mockReturnValueOnce(late.promise).mockResolvedValueOnce({data:[{id:'other'}]});
+  const store=useDnsStore();await store.fetchRecords('large.test',target);const pending=store.fetchRecordWindow(2);
+  const signal=mock.getRecords.mock.calls.at(-1)![2];await store.fetchRecords('other.test',{accountId:2,zoneId:'other'});
+  late.resolve(page(10000,'late'));await pending;expect(signal.aborted).toBe(true);expect(store.records[0].id).toBe('other');
+ });
+ it('invalidates all aliases/windows after batch writes without fetching the entire Zone', async()=>{
+  mock.getRecords.mockResolvedValue(page());const store=useDnsStore();await store.fetchRecords('large.test',target);await store.fetchRecordWindow(2);
+  await store.invalidateRecords([{...target,credentialId:10,zoneName:'large.test'}]);expect(mock.getRecords.mock.calls.at(-1)![3]).toMatchObject({page:2,perPage:500});
+  await store.fetchRecordWindow(1);expect(mock.getRecords).toHaveBeenCalledTimes(4);
+ });
+ it('drops old complete snapshots when a Zone grows and evicts aliases before partial local updates',async()=>{
+  const alias={accountId:2,zoneId:'large'}, old={id:'old',type:'A',name:'old.test',content:'192.0.2.1',proxied:false,ttl:300};
+  const fresh={id:'new',type:'A',name:'new.test',content:'192.0.2.2',proxied:false,ttl:300};
+  mock.getRecords.mockResolvedValueOnce({data:[old]}).mockResolvedValueOnce({data:[old]}).mockResolvedValueOnce({data:{records:[fresh],meta:{total_count:10000}}}).mockResolvedValueOnce({data:{records:[{...fresh,proxied:true,ttl:1}],meta:{total_count:10000}}});
+  const store=useDnsStore();await store.fetchRecords('large.test',alias);await store.fetchRecords('large.test',target);await store.fetchRecords('large.test',target,true);
+  mock.updateProxy.mockResolvedValue({data:{...fresh,proxied:true,ttl:1}});await store.toggleProxy('large.test',target,'new',true);
+  expect(mock.updateProxy).toHaveBeenCalledOnce();await store.fetchRecords('large.test',alias);expect(mock.getRecords).toHaveBeenCalledTimes(4);expect(store.records[0].id).toBe('new');expect(store.records[0].proxied).toBe(true);
+ });
+ it('refuses a full page without total metadata rather than claiming it is the whole Zone', async()=>{
+  mock.getRecords.mockResolvedValue({data:{records:Array.from({length:500},(_,i)=>({id:String(i)})),meta:{scope:'page'}}});
+  const store=useDnsStore();await store.fetchRecords('large.test',target);expect(store.recordsError).toContain('total unavailable');expect(store.records).toHaveLength(0);
+ });
+});

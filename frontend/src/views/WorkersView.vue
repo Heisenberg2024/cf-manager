@@ -20,6 +20,7 @@
               >
                 <span class="worker-compact-card__name" :title="c.accountName">{{ c.accountName }}</span>
                 <n-progress
+                  v-if="c.requests != null"
                   type="line"
                   :percentage="calcUsagePercentage(c)"
                   :height="6"
@@ -28,13 +29,13 @@
                   :style="{ flex: '1 1 0', minWidth: '24px', overflow: 'hidden' }"
                 />
                 <span class="worker-compact-card__metric">{{ formatNumber(c.requests) }}</span>
-                <span class="worker-compact-card__count">{{ c.workerCount + c.pagesCount }}</span>
+                <span class="worker-compact-card__count">{{ resourceCount(c) }}</span>
               </div>
             </template>
             <div style="min-width: 220px; padding: 4px 0;">
               <div style="font-weight: bold; margin-bottom: 10px;">{{ c.accountName }}</div>
               <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px;">
-                <span>{{ t('workers.table.deployCount') }}</span><span>{{ c.workerCount }}W · {{ c.pagesCount }}P（{{ c.workerCount + c.pagesCount }}）</span>
+                <span>{{ t('workers.table.deployCount') }}</span><span>{{ c.workerCount ?? '—' }}W · {{ c.pagesCount ?? '—' }}P（{{ resourceCount(c) }}）</span>
               </div>
               <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px;">
                 <span>{{ t('workers.table.requests') }}</span><span>{{ formatNumber(c.requests) }} / 100,000</span>
@@ -57,6 +58,8 @@
       <n-empty v-else :description="t('workers.noAccounts')" />
     </div>
 
+    <n-alert v-if="workerStore.resourceError" type="warning" :bordered="false">{{ workerStore.resourceError === 'RESOURCE_READ_FAILED' ? t('workers.resourceReadFailed') : workerStore.resourceError }}</n-alert>
+    <n-button size="small" :loading="workerStore.loading" @click="workerStore.fetchWorkers(workerStore.selectedAccountId, true)">{{ t('common.refresh') }}</n-button>
     <AutoFitTable
       :columns="columns"
       :data="workerStore.workers"
@@ -64,6 +67,7 @@
       :loading="workerStore.loading"
       :scroll-x="700"
       :pagination="false"
+      :virtual-scroll="true"
       style="margin-top: 0"
     >
       <!-- 底部统计栏整合进 AutoFitTable 的 footer 插槽 -->
@@ -118,14 +122,13 @@
       :redeploy="redeployTarget"
       :all-accounts="allAccounts"
       @update:show="showDeployDialog = $event"
-      @deployed="onDeployed"
     />
 
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, h, computed, onMounted } from 'vue';
+import { ref, h, computed, onMounted, onUnmounted } from 'vue';
 import { NButton, NSpace, NTag, useMessage, NPopconfirm } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
@@ -162,6 +165,7 @@ const selectedAccountName = computed(() => {
 function selectAccount(accountId: number) {
   workerStore.selectedAccountId = accountId;
   workerStore.fetchWorkers(accountId);
+  workerStore.fetchAccountSummary(accountId);
 }
 const FREE_DAILY_LIMIT = 100000;
 
@@ -169,11 +173,13 @@ function calcUsagePercentage(u: { requests: number }) {
   return Math.min(100, Math.round((u.requests / FREE_DAILY_LIMIT) * 100));
 }
 
-function formatNumber(n: number): string {
-  return n.toLocaleString();
+function resourceCount(c: any) { return c.workerCount == null || c.pagesCount == null ? '—' : c.workerCount + c.pagesCount; }
+function formatNumber(n: number | null): string {
+  return n == null ? '—' : n.toLocaleString();
 }
 
-function formatCpuTime(ms: number): string {
+function formatCpuTime(ms: number | null): string {
+  if (ms == null) return '—';
   if (!ms) return '0ms';
   if (ms >= 1000000) return (ms / 1000000).toFixed(1) + 'Ks';
   if (ms >= 1000) return (ms / 1000).toFixed(1) + 's';
@@ -210,17 +216,6 @@ function openDeploy(row: any | null) {
   redeployTarget.value = row ? { type: row.type, name: row.name, accountId: row.cfAccountId } : null;
   showDeployDialog.value = true;
 }
-function onDeployed() {
-  // 部署后只刷新当前选中账户，不加载全部
-  if (workerStore.selectedAccountId) {
-    workerStore.fetchWorkers(workerStore.selectedAccountId);
-  } else {
-    workerStore.fetchWorkers();
-  }
-  // 刷新摘要（用量+数量）
-  workerStore.fetchSummary();
-}
-
 // ============ Logs ============
 async function handleViewLogs(row: any) {
   currentWorkerName.value = row.name;
@@ -240,14 +235,7 @@ async function handleDelete(row: any) {
   if (row.type === 'pages') await workersApi.deletePages(row.cfAccountId, row.name);
   else await workersApi.delete(row.cfAccountId, row.name);
   message.success(row.type === 'pages' ? t('workers.msg.pagesDeleted') : t('workers.msg.workerDeleted'));
-  // 删除后只刷新当前选中账户，不加载全部
-  if (workerStore.selectedAccountId) {
-    workerStore.fetchWorkers(workerStore.selectedAccountId);
-  } else {
-    workerStore.fetchWorkers();
-  }
-  // 刷新摘要（数量会变化）
-  workerStore.fetchSummary();
+  await workerStore.refreshAccounts([row.cfAccountId]);
 }
 
 // ============ Table Columns ============
@@ -296,17 +284,18 @@ const columns = computed<DataTableColumns<any>>(() => {
   return cols;
 });
 
+let viewActive = true;
+onUnmounted(() => { viewActive = false; });
 onMounted(async () => {
-  await loadDemoAccounts();
-  loadAllAccounts();
-  await workerStore.fetchSummary();
-  const list = workerStore.summary || [];
-  // 默认优先加载第一个有部署数量的账户；都没有则加载第一个账户；若没有任何账户则加载全部
-  const firstDeployed = list.find((c: any) => (c.workerCount || 0) + (c.pagesCount || 0) > 0);
-  if (firstDeployed) selectAccount(firstDeployed.accountId);
-  else if (list.length) selectAccount(list[0].accountId);
-  else workerStore.fetchWorkers();
+  await Promise.all([loadDemoAccounts(), loadAllAccounts()]);
+  if (!viewActive) return;
+  workerStore.configureAccounts(allAccounts.value);
+  const selected = workerStore.selectedAccountId;
+  const first = workerStore.summary.find(c => c.accountId === selected) || workerStore.summary[0];
+  if (first) selectAccount(first.accountId);
+  void workerStore.fetchSummary();
 });
+
 </script>
 
 <style scoped>

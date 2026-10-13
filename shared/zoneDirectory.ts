@@ -17,11 +17,12 @@ export function parseZoneContext(query: { accountId?: unknown; zoneId?: unknown 
   }
   return context;
 }
-export function recordPageQuery(query: { page?: unknown; perPage?: unknown; type?: unknown; search?: unknown }): string | undefined {
+export function recordPageQuery(query: { page?: unknown; perPage?: unknown; type?: unknown; search?: unknown; nameContains?: unknown; contentContains?: unknown }): string | undefined {
   if (query.page === undefined) return;
   const page = Number(query.page), perPage = Number(query.perPage ?? 100);
   if (!Number.isInteger(page) || page < 1 || page > 1000 || !Number.isInteger(perPage) || perPage < 1 || perPage > 500 || (query.type !== undefined && (typeof query.type !== 'string' || !/^[A-Z0-9]+$/.test(query.type))) || (query.search !== undefined && (typeof query.search !== 'string' || query.search.length > 256))) throw Object.assign(new Error('Invalid DNS page/filter parameters'), { statusCode: 400, code: 'VALIDATION_ERROR' });
-  return new URLSearchParams({ page: String(page), per_page: String(perPage), ...(query.type ? { type: String(query.type) } : {}), ...(query.search ? { search: String(query.search) } : {}) }).toString();
+  for (const value of [query.nameContains, query.contentContains]) if (value !== undefined && (typeof value !== 'string' || value.length > 256)) throw Object.assign(new Error('Invalid DNS field filter'), { statusCode: 400, code: 'VALIDATION_ERROR' });
+  return new URLSearchParams({ page: String(page), per_page: String(perPage), ...(query.type ? { type: String(query.type) } : {}), ...(query.search ? { search: String(query.search) } : {}), ...(query.nameContains ? { 'name.contains': String(query.nameContains) } : {}), ...(query.contentContains ? { 'content.contains': String(query.contentContains) } : {}), ...(query.nameContains || query.contentContains ? { match: 'all' } : {}) }).toString();
 }
 type Entry = { signature: string; cloudflareAccountId: string; snapshot?: ZoneSnapshot; flight?: Promise<ZoneSnapshot>; failed?: string };
 export function requireDnsBinding<T extends DnsBinding>(account: T | undefined | null): T {

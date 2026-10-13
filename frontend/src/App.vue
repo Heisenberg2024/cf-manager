@@ -135,6 +135,7 @@
 </template>
 
 <script setup lang="ts">
+import { useWorkerStore } from './stores/workerStore';
 import { useDnsStore } from './stores/dnsStore';
 import { ref, reactive, computed, h, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
@@ -268,7 +269,7 @@ function onResize() {
 }
 
 function onAuthExpired() {
-  useDnsStore().resetSensitiveState();
+  useDnsStore().resetSensitiveState(); useWorkerStore().resetSensitiveState();
   isAuthenticated.value = false;
   showLogin.value = true;
 }
@@ -308,7 +309,7 @@ async function handleLogin() {
     showLogin.value = false;
   } catch {
     localStorage.removeItem('api_token');
-    useDnsStore().resetSensitiveState();
+    useDnsStore().resetSensitiveState(); useWorkerStore().resetSensitiveState();
     isAuthenticated.value = false;
     globalMessage.error(t('app.invalidApiSecret'));
   } finally {
@@ -318,7 +319,7 @@ async function handleLogin() {
 
 function handleLogout() {
   localStorage.removeItem('api_token');
-  useDnsStore().resetSensitiveState();
+  useDnsStore().resetSensitiveState(); useWorkerStore().resetSensitiveState();
   isAuthenticated.value = false;
   showLogin.value = true;
   loginSecret.value = '';

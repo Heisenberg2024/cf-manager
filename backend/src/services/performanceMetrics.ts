@@ -7,8 +7,8 @@ export function recordPerformance(metric: ReadMetric & { scope?: string; proxy?:
   const summary = performanceContext.getStore();
   if (summary) {
     if (metric.event.startsWith('cf_')) summary.upstreamCalls++;
-    if (metric.event === 'zone_lookup') summary.cacheLookups++;
-    if (metric.event === 'zone_hit') summary.cacheHits++;
+    if (['zone_lookup', 'resource_lookup'].includes(metric.event)) summary.cacheLookups++;
+    if (['zone_hit', 'resource_hit'].includes(metric.event)) summary.cacheHits++;
     if (metric.event === 'zone_stale') summary.staleHits++;
     if (metric.event.endsWith('_merged')) summary.merged++;
     if (metric.event === 'cf_rate_limited' || (metric.event === 'write_failed' && metric.status === 429)) summary.rateLimited++;

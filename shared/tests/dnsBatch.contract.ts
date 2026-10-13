@@ -34,7 +34,11 @@ export function dnsBatchContract(label: string, implementation: { previewBatch: 
         const rows=store.get(z.zoneId)!;
         const url=new URL(path,'https://cf.test');
         const id=url.pathname.split('/')[4];
-        if(method==='GET'&&!id)return {result:structuredClone(rows.filter(r=>r.name===url.searchParams.get('name.exact'))),result_info:{total_pages:1}};
+        if(method==='GET'&&!id) {
+          const matched=rows.filter(r=>(!url.searchParams.has('name.exact') || r.name===url.searchParams.get('name.exact')) && (!url.searchParams.has('type') || r.type===url.searchParams.get('type')));
+          const perPage=Number(url.searchParams.get('per_page') || 100),page=Number(url.searchParams.get('page') || 1);
+          return {result:structuredClone(matched.slice((page-1)*perPage,page*perPage)),result_info:{total_pages:Math.ceil(matched.length/perPage)}};
+        }
         const index=rows.findIndex(r=>r.id===id);
         if(method==='GET') {if(index<0)throw new CloudflareError(404,'Not found');return {result:structuredClone(rows[index])};}
         if(method==='POST'){const created={id:`new-${z.accountId}`,...body};rows.push(created);return {result:created};}
@@ -50,6 +54,41 @@ export function dnsBatchContract(label: string, implementation: { previewBatch: 
   }
   const run = async (plan: Awaited<ReturnType<typeof previewBatch>>, runtime: BatchRuntime) => {await verifyPreview(plan,'test-secret');const events:BatchEvent[]=[];const result=await executeBatch(plan,runtime,async e=>{events.push(structuredClone(e))});return {result,events};};
   describe(`${label}: multi-Zone DNS contract`,()=>{
+    it('previews explicit IDs from different pages and signs their immutable identities', async () => {
+      const target=zones(1), rows=Array.from({length:1000},(_,i)=>row(target[0]!,`api${i}`,{id:`record${i}`}));
+      const f=fake(target,[rows]);
+      const input={...spec('delete',target),selection:{kind:'ids' as const,recordIds:['record1','record999']}};
+      const plan=await previewBatch(input,f.runtime,'secret');
+      expect(plan.items.map(i=>i.recordId)).toEqual(['record1','record999']);
+      expect(plan.items.map(i=>i.name)).toEqual(['api1.a.com','api999.a.com']);
+      await verifyPreview(plan,'secret');
+      plan.spec.selection!.recordIds!.push('record2');
+      await expect(verifyPreview(plan,'secret')).rejects.toThrow('changed');
+    });
+    it('enumerates the entire selected Zone and applies deterministic filtered selection', async () => {
+      const target=zones(1), rows=Array.from({length:1000},(_,i)=>row(target[0]!,`api${i}`,{id:`record${i}`,type:i%2?'TXT':'A'}));
+      const f=fake(target,[rows]);
+      const plan=await previewBatch({...spec('delete',target),selection:{kind:'zone'}},f.runtime,'secret');
+      expect(plan.items).toHaveLength(1000);
+      const filtered=await previewBatch({...spec('delete',target),selection:{kind:'filter',filter:{type:'TXT',nameContains:'API99'}}},f.runtime,'secret');
+      expect(filtered.items.filter(i=>i.status==='FOUND')).toHaveLength(6);
+      expect(f.calls.filter(c=>c.path.includes('search='))).toHaveLength(0);
+    });
+    it('signs all 10000 Zone targets without silently truncating the preview', async () => {
+      const target=zones(1), rows=Array.from({length:10000},(_,i)=>row(target[0]!,`api${i}`,{id:`record${i}`}));
+      const f=fake(target,[rows]);const plan=await previewBatch({...spec('delete',target),selection:{kind:'zone'}},f.runtime,'secret');
+      expect(plan.items).toHaveLength(10000);await verifyPreview(plan,'secret');
+      expect(plan.items[9999]!.recordId).toBe('record9999');
+    });
+    it('refuses ambiguous filters, duplicate IDs, traversal IDs and multiple-Zone scope', () => {
+      for(const selection of [{kind:'filter',filter:{search:'api'}},{kind:'ids',recordIds:['a','a']},{kind:'ids',recordIds:['../a']}]) expect(()=>validateBatchSpec({...spec('delete',zones(1)),selection} as BatchSpec)).toThrow();
+      expect(()=>validateBatchSpec({...spec('delete'),selection:{kind:'zone'}})).toThrow();
+    });
+    it('does not silently omit a missing explicit target during preview', async () => {
+      const target=zones(1), f=fake(target);
+      const plan=await previewBatch({...spec('delete',target),selection:{kind:'ids',recordIds:['gone']}},f.runtime,'secret');
+      expect(plan.items[0]!.status).toBe('ERROR');
+    });
     it('A: creates www in three Zones, routes each through its own Account/Credential',async()=>{
       const target=zones(),f=fake(target,target.map(()=>[]));const plan=await previewBatch(spec('create'),f.runtime,'test-secret');
       expect(plan.items.map(i=>i.status)).toEqual(['READY','READY','READY']);expect(f.calls.some(c=>c.method!=='GET')).toBe(false);

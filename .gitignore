@@ -101,3 +101,8 @@ backend/src/services/readScheduler.ts
 worker/src/services/readScheduler.ts
 backend/src/services/zoneDirectory.ts
 worker/src/services/zoneDirectory.ts
+
+backend/src/services/workerResources.ts
+worker/src/services/workerResources.ts
+backend/src/services/accountZones.ts
+worker/src/services/accountZones.ts

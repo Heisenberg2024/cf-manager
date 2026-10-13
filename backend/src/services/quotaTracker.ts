@@ -62,7 +62,7 @@ async function executeSyncFromCloudflare(): Promise<void> {
 
     if (hasFeature(account, 'workers')) {
       try {
-        const workersUsage = await getWorkersUsageToday(account);
+        const workersUsage = await getWorkersUsageToday(account, true);
         // 只有当 CF 返回非零值才更新
         if (workersUsage.requests > 0) {
           setQuota(account.id, 'workers_requests', workersUsage.requests);

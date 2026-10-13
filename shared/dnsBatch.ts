@@ -1,10 +1,11 @@
 import { type CfRequest } from './accountDiscovery';
 import { errorDetails, redact } from './cfErrors';
-import { buildDnsRecord, dnsName, DNS_TYPES, PROXY_TYPES, validateDnsTtl, type DnsRecordForm, type DnsRecordInput } from './dnsRecord';
+import { buildDnsRecord, dnsName, dnsRecordId, DNS_TYPES, PROXY_TYPES, validateDnsTtl, type DnsRecordForm, type DnsRecordInput } from './dnsRecord';
 
 export type BatchAction = 'create' | 'update' | 'delete' | 'proxy' | 'ttl';
 export interface BatchZone { credentialId: number; accountId: number; zoneId: string; zoneName: string }
-export interface BatchSpec { zones: BatchZone[]; action: BatchAction; match: { host: string; types: string[]; currentContent?: string }; record?: DnsRecordForm; changes?: DnsRecordInput; conflictPolicy?: 'skip' | 'update' | 'create' }
+export interface BatchSelection { kind: 'ids' | 'filter' | 'zone'; recordIds?: string[]; filter?: { type?: string; nameContains?: string; contentContains?: string } }
+export interface BatchSpec { selection?: BatchSelection; zones: BatchZone[]; action: BatchAction; match: { host: string; types: string[]; currentContent?: string }; record?: DnsRecordForm; changes?: DnsRecordInput; conflictPolicy?: 'skip' | 'update' | 'create' }
 export interface BatchRecord extends DnsRecordInput { id: string; type: string; name: string; content?: string; tags?: string[]; settings?: unknown; modified_on?: string }
 export type BatchStatus = 'READY' | 'FOUND' | 'SKIP' | 'ERROR' | 'PENDING' | 'RUNNING' | 'SUCCESS' | 'SKIPPED' | 'CONFLICT' | 'NOT_FOUND' | 'FAILED';
 export interface BatchItem { id: string; zone: BatchZone; action: BatchAction; name: string; type: string; status: BatchStatus; operation?: 'POST' | 'PATCH' | 'DELETE'; recordId?: string; before?: BatchRecord; after?: DnsRecordInput; existing?: string; message?: string; httpStatus?: number; cfCodes?: Array<number | string> }
@@ -51,8 +52,21 @@ function validateSpec(input: BatchSpec): BatchSpec {
     if (zones.has(z.zoneId)) throw batchError('The same Cloudflare Zone is selected through multiple bindings; select it once');
     zones.add(z.zoneId);
   }
-  if (!input.match || typeof input.match.host !== 'string' || !input.match.host.trim() || !Array.isArray(input.match.types) || !input.match.types.length || input.match.types.some(t => !(DNS_TYPES as readonly string[]).includes(t))) throw batchError('Exact relative host and record type are required');
-  if (input.match.currentContent !== undefined && typeof input.match.currentContent !== 'string') throw batchError('Current Content must be text');
+  if (input.selection) {
+    if (!input.match || !Array.isArray(input.match.types)) throw batchError('Invalid scope match envelope');
+    const selection = input.selection;
+    if (input.action === 'create' || input.zones.length !== 1 || !['ids', 'filter', 'zone'].includes(selection.kind)) throw batchError('Scoped selection requires one Zone and an existing-record action');
+    if (selection.kind === 'ids') {
+      if (!Array.isArray(selection.recordIds) || !selection.recordIds.length || selection.recordIds.length > 10000) throw batchError('Select 1–10000 explicit records');
+      selection.recordIds.forEach(dnsRecordId);
+      if (new Set(selection.recordIds).size !== selection.recordIds.length) throw batchError('Duplicate record IDs');
+    } else if (selection.recordIds !== undefined) throw batchError('Record IDs only apply to explicit selection');
+    const filter = selection.filter;
+    if (selection.kind !== 'filter' && filter !== undefined) throw batchError('Filter only applies to filtered selection');
+    if (selection.kind === 'filter' && (!filter || Object.keys(filter).some(k => !['type', 'nameContains', 'contentContains'].includes(k)) || (filter.type !== undefined && !(DNS_TYPES as readonly string[]).includes(filter.type)) || [filter.nameContains, filter.contentContains].some(v => v !== undefined && (typeof v !== 'string' || v.length > 256)))) throw batchError('Use deterministic type/name/content filters');
+  }
+  if (!input.selection && (!input.match || typeof input.match.host !== 'string' || !input.match.host.trim() || !Array.isArray(input.match.types) || !input.match.types.length || input.match.types.some(t => !(DNS_TYPES as readonly string[]).includes(t)))) throw batchError('Exact relative host and record type are required');
+  if (input.match?.currentContent !== undefined && typeof input.match.currentContent !== 'string') throw batchError('Current Content must be text');
   if (input.conflictPolicy && !['skip', 'update', 'create'].includes(input.conflictPolicy)) throw batchError('Invalid duplicate strategy');
   if (input.action === 'create') {
     if (!input.record || typeof input.record.type !== 'string' || typeof input.record.name !== 'string' || typeof input.record.content !== 'string' || typeof input.record.ttl !== 'number' || typeof input.record.proxied !== 'boolean' || (input.record.comment !== undefined && typeof input.record.comment !== 'string')) throw batchError('DNS Type, relative Host, Content, numeric TTL and boolean Proxy are required');
@@ -76,7 +90,7 @@ function validateSpec(input: BatchSpec): BatchSpec {
     if (input.action === 'proxy' && (Object.keys(changes).length !== 1 || typeof changes.proxied !== 'boolean')) throw batchError('Proxy action only patches proxied');
     if (input.action === 'ttl' && (Object.keys(changes).length !== 1 || changes.ttl === undefined)) throw batchError('TTL action only patches ttl');
   }
-  for (const z of input.zones) dnsName(input.match.host, z.zoneName, true);
+  if (!input.selection) for (const z of input.zones) dnsName(input.match.host, z.zoneName, true);
   return JSON.parse(JSON.stringify(input)) as BatchSpec;
 }
 async function resolve(runtime: BatchRuntime, zone: BatchZone): Promise<CfRequest> {
@@ -97,6 +111,41 @@ async function records(request: CfRequest, zone: BatchZone, name: string): Promi
   }
   throw new Error('DNS pagination limit exceeded');
 }
+async function selectedRecords(request: CfRequest, zone: BatchZone, selection: BatchSelection): Promise<BatchRecord[]> {
+  if (selection.kind === 'ids' && selection.recordIds!.length <= 20) {
+    // IDs are captured by the user; never infer missing records from the loaded page.
+    const rows: BatchRecord[] = [];
+    for (const id of selection.recordIds!) {
+      const row = (await request(`/zones/${zone.zoneId}/dns_records/${dnsRecordId(id)}`)).result as BatchRecord;
+      if (row?.id !== id) throw batchError('Unexpected record identity');
+      rows.push(row);
+    }
+    return rows;
+  }
+  const filter = selection.kind === 'filter' ? selection.filter! : {};
+  const params = new URLSearchParams({ per_page: '500', match: 'all', order: 'name', direction: 'asc' });
+  if (filter.type) params.set('type', filter.type);
+  if (filter.nameContains) params.set('name.contains', filter.nameContains);
+  if (filter.contentContains) params.set('content.contains', filter.contentContains);
+  const ids = selection.kind === 'ids' ? new Set(selection.recordIds) : undefined;
+  const rows: BatchRecord[] = [];
+  for (let page = 1; page <= 1000; page++) {
+    params.set('page', String(page));
+    const data = await request(`/zones/${zone.zoneId}/dns_records?${params}`);
+    if (!Array.isArray(data.result)) throw batchError('Unexpected record list');
+    for (const row of data.result as BatchRecord[]) {
+      const matches = (!filter.type || row.type === filter.type) && (!filter.nameContains || row.name.toLowerCase().includes(filter.nameContains.toLowerCase())) && (!filter.contentContains || (row.content || '').toLowerCase().includes(filter.contentContains.toLowerCase()));
+      if (matches && (!ids || ids.has(row.id))) rows.push(row);
+    }
+    if (rows.length > 10000) throw batchError('Preview exceeds 10000 records; narrow the scope');
+    if (data.result_info?.total_pages !== undefined ? page >= data.result_info.total_pages : data.result.length < 500) {
+      if (ids && rows.length !== ids.size) throw batchError('Some selected records no longer exist; select and preview again');
+      if (new Set(rows.map(r => r.id)).size !== rows.length) throw batchError('Record pages changed while reading; preview again');
+      return rows;
+    }
+  }
+  throw batchError('DNS pagination limit exceeded');
+}
 function patchFor(record: BatchRecord, changes: DnsRecordInput): DnsRecordInput {
   if (changes.proxied !== undefined && !PROXY_TYPES.includes(record.type)) throw batchError(`${record.type} does not support Proxy`);
   if (changes.ttl !== undefined && changes.ttl !== 1 && (changes.proxied ?? record.proxied)) throw batchError('Proxied DNS uses Auto TTL; disable Proxy before changing TTL');
@@ -114,11 +163,11 @@ function patchFor(record: BatchRecord, changes: DnsRecordInput): DnsRecordInput 
   return patch;
 }
 async function previewZone(runtime: BatchRuntime, spec: BatchSpec, zone: BatchZone): Promise<BatchItem[]> {
-  const name = dnsName(spec.action === 'create' ? spec.record!.name : spec.match.host, zone.zoneName, true);
+  const name = spec.selection ? zone.zoneName : dnsName(spec.action === 'create' ? spec.record!.name : spec.match.host, zone.zoneName, true);
   const base: BatchItem = { id: `${zone.accountId}:${zone.zoneId}:none`, zone, action: spec.action, name, type: spec.action === 'create' ? spec.record!.type : spec.match.types.join('/'), status: 'READY' };
   try {
-    const request = await resolve(runtime, zone); const all = await records(request, zone, name);
-    const existing = stable(all.map(snapshot).sort((a, b) => a.id.localeCompare(b.id)));
+    const request = await resolve(runtime, zone); const all = spec.selection ? await selectedRecords(request, zone, spec.selection) : await records(request, zone, name);
+    const existing = spec.action === 'create' ? stable(all.map(snapshot).sort((a, b) => a.id.localeCompare(b.id))) : undefined;
     if (spec.action === 'create') {
       const after = buildDnsRecord(spec.record!, zone.zoneName, true);
       const sameType = all.filter(r => r.type === after.type);
@@ -134,10 +183,10 @@ async function previewZone(runtime: BatchRuntime, spec: BatchSpec, zone: BatchZo
       }
       return [{ ...base, operation: 'POST', after, existing }];
     }
-    const matched = all.filter(r => spec.match.types.includes(r.type));
+    const matched = spec.selection ? all : all.filter(r => spec.match.types.includes(r.type));
     if (!matched.length) return [{ ...base, status: 'NOT_FOUND', message: 'No matching DNS record' }];
     return matched.map(r => {
-      const item: BatchItem = { ...base, id: `${zone.accountId}:${zone.zoneId}:${r.id}`, type: r.type, status: 'FOUND', recordId: r.id, before: snapshot(r), operation: spec.action === 'delete' ? 'DELETE' : 'PATCH' };
+      const item: BatchItem = { ...base, id: `${zone.accountId}:${zone.zoneId}:${r.id}`, type: r.type, name: r.name, status: 'FOUND', recordId: r.id, before: snapshot(r), operation: spec.action === 'delete' ? 'DELETE' : 'PATCH' };
       if (spec.match.currentContent !== undefined && recordContent(r) !== spec.match.currentContent) return { ...item, status: 'CONFLICT', message: 'Current Content does not match' };
       try {
         if (spec.action === 'delete') return item;
@@ -154,14 +203,14 @@ function unsigned(preview: BatchPreview): string { const { token: _token, ...pla
 export async function previewBatch(input: BatchSpec, runtime: BatchRuntime, secret: string): Promise<BatchPreview> {
   const spec = validateBatchSpec(input);
   const items = (await concurrent(spec.zones, zone => previewZone(runtime, spec, zone))).flat();
-  if (items.length > 5000) throw batchError('Preview exceeds 5000 records; narrow the match');
+  if (items.length > (spec.selection ? 10000 : 5000)) throw batchError(`Preview exceeds ${spec.selection ? 10000 : 5000} records; narrow the match`);
   const plan: BatchPreview = { id: crypto.randomUUID(), expiresAt: Date.now() + 15 * 60_000, spec, items, token: '' };
   const signed = await crypto.subtle.sign('HMAC', await signingKey(secret), encoder.encode(unsigned(plan)));
   plan.token = Array.from(new Uint8Array(signed), v => v.toString(16).padStart(2, '0')).join('');
   return plan;
 }
 export async function verifyPreview(plan: BatchPreview, secret: string): Promise<void> {
-  if (!plan || !Array.isArray(plan.items) || plan.items.length > 5000 || typeof plan.token !== 'string' || !/^[a-f\d]{64}$/.test(plan.token) || plan.expiresAt < Date.now()) throw batchError('Preview expired or invalid; preview again');
+  if (!plan || !Array.isArray(plan.items) || plan.items.length > (plan.spec?.selection ? 10000 : 5000) || typeof plan.token !== 'string' || !/^[a-f\d]{64}$/.test(plan.token) || plan.expiresAt < Date.now()) throw batchError('Preview expired or invalid; preview again');
   const bytes = Uint8Array.from(plan.token.match(/../g)!, s => parseInt(s, 16));
   if (!await crypto.subtle.verify('HMAC', await signingKey(secret), bytes, encoder.encode(unsigned(plan)))) throw batchError('Preview was changed; preview again');
 }

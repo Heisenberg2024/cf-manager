@@ -1,8 +1,13 @@
+import { accountZones, liveAccountZone } from '../services/accountZones';
+import { getDnsDirectory } from '../services/dnsDirectory';
 import { Hono } from 'hono';
 import type { Env } from '../types';
 import { getAccountById, getActiveAccountsByFeature, addAuditLog } from '../db/models';
-import { cfFetch, cfFetchRaw, cfFetchAll } from '../services/cfApi';
-import { getWorkersUsageToday } from '../services/quotaTracker';
+import { cfFetch, cfFetchRaw } from '../services/cfApi';
+import { getWorkerResources } from '../services/workerResourcesRuntime';
+import { requireWorkerBinding, unavailableWorkerSummary } from '../services/workerResources';
+import { parseZoneContext } from '../services/zoneDirectory';
+import { accountRequest } from '../services/cfApi';
 import { mapConcurrent } from '../utils/concurrent';
 import { normalizeCronExpressions } from '../utils/cronValidation';
 import { demoDestructiveGuard } from '../services/demo';
@@ -14,6 +19,23 @@ import { varsToBindings, resolveManualBindings, buildPagesConfigsFromInput, Manu
 import { getWorkerConfig, getPagesConfig, applyWorkerConfigDiff } from '../services/workerConfig';
 
 const app = new Hono<{ Bindings: Env }>();
+app.use('*', async (c, next) => {
+  c.header('Cache-Control', 'no-store');
+  try { await next(); }
+  finally {
+    if (!['GET','HEAD','OPTIONS'].includes(c.req.method)) {
+      const direct = c.req.path.match(/\/(\d+)\/(?:workers|pages)\//)?.[1];
+      let targets: any[] = [];
+      try {
+        const raw = c.req.header('content-type')?.includes('multipart/form-data') ? (await c.req.parseBody()).targets : (await c.req.json()).targets;
+        targets = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      } catch { /* A single-resource request already carries its local Account ID. */ }
+      const ids = new Set<number>([...(direct ? [Number(direct)] : []), ...(Array.isArray(targets) ? targets.map(t => Number(t.accountId ?? t.account_id)) : [])]);
+      for (const id of ids) if (Number.isSafeInteger(id) && id > 0) getWorkerResources(c.env.DB).invalidate(id, (await getAccountById(c.env.DB, id))?.account_id);
+    }
+  }
+});
+
 
 // 演示账户：拦截所有销毁/删除类操作（DELETE 等）
 app.use('/:accountId/*', demoDestructiveGuard());
@@ -27,30 +49,15 @@ async function requireAccount(c: any) {
 
 // ============ List all ============
 // 支持 ?accountId= 仅返回该账户的 Worker/Pages（按需加载）；不带参数返回全部（批量部署/环境同步用）
-app.get('/', async (c) => {
-  const accountIdQ = c.req.query('accountId');
-  let accounts;
-  if (accountIdQ) {
-    const acc = await getAccountById(c.env.DB, parseInt(accountIdQ, 10));
-    accounts = acc ? [acc] : [];
-  } else {
-    accounts = await getActiveAccountsByFeature(c.env.DB, 'workers');
-  }
-  const results = await mapConcurrent(accounts, 3, async (account) => {
-    const items: any[] = [];
-    const [workersRes, pagesRes] = await Promise.allSettled([
-      cfFetch<{ result: any[] }>(account, `/accounts/${account.account_id}/workers/scripts`, c.env.ENCRYPTION_KEY),
-      cfFetch<{ result: any[] }>(account, `/accounts/${account.account_id}/pages/projects`, c.env.ENCRYPTION_KEY),
-    ]);
-    if (workersRes.status === 'fulfilled') {
-      items.push(...(workersRes.value.result || []).map(w => ({ ...w, name: w.id, status: 'deployed', type: 'worker', cfAccountId: account.id, accountName: account.name })));
-    } else { console.error(`[Workers] list failed for ${account.name}: ${workersRes.reason}`); }
-    if (pagesRes.status === 'fulfilled') {
-      items.push(...(pagesRes.value.result || []).map(p => ({ ...p, name: p.name ?? p.id, type: 'pages', cfAccountId: account.id, accountName: account.name })));
-    } else { console.error(`[Pages] list failed for ${account.name}: ${pagesRes.reason}`); }
-    return items;
+app.get('/', async c => {
+  const id = parseZoneContext(c.req.query()).accountId;
+  const accounts = id ? [requireWorkerBinding(await getAccountById(c.env.DB, id))] : await getActiveAccountsByFeature(c.env.DB, 'workers');
+  const results = await mapConcurrent(accounts, 3, async account => {
+    try { return await getWorkerResources(c.env.DB).list(account, await accountRequest(account, c.env.ENCRYPTION_KEY), { refresh: c.req.query('refresh') === 'true', signal: c.req.raw.signal }); }
+    catch { return {items: [], states: {workers: 'error', pages: 'error'}}; }
   });
-  return c.json(results.flat());
+  if (c.req.query('details') === 'true') return c.json({ items: results.flatMap(result => result.items), states: accounts.map((account, i) => ({ accountId: account.id, ...results[i]!.states })) });
+  return c.json(results.flatMap(result => result.items));
 });
 
 // ============ Delete Worker/Pages ============
@@ -179,6 +186,7 @@ app.get('/:accountId/workers/:name/routes', async (c) => {
   const account = await requireAccount(c);
   const zoneId = c.req.query('zone_id');
   if (!zoneId) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'zone_id is required' } }, 400);
+  await liveAccountZone(getDnsDirectory(c.env.DB), account, await accountRequest(account, c.env.ENCRYPTION_KEY), zoneId);
   const data = await cfFetch<{ result: any[] }>(account, `/zones/${zoneId}/workers/routes`, c.env.ENCRYPTION_KEY);
   return c.json(data.result || []);
 });
@@ -187,6 +195,7 @@ app.post('/:accountId/workers/:name/routes', async (c) => {
   const account = await requireAccount(c);
   const body = await c.req.json();
   if (!body.zone_id || !body.pattern) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'zone_id and pattern are required' } }, 400);
+  await liveAccountZone(getDnsDirectory(c.env.DB), account, await accountRequest(account, c.env.ENCRYPTION_KEY), body.zone_id);
   const result = await cfFetch(account, `/zones/${body.zone_id}/workers/routes`, c.env.ENCRYPTION_KEY, {
     method: 'POST', body: JSON.stringify({ pattern: body.pattern, script: body.script || c.req.param('name') }),
   });
@@ -197,6 +206,7 @@ app.delete('/:accountId/workers/:name/routes/:routeId', async (c) => {
   const account = await requireAccount(c);
   const zoneId = c.req.query('zone_id');
   if (!zoneId) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'zone_id is required' } }, 400);
+  await liveAccountZone(getDnsDirectory(c.env.DB), account, await accountRequest(account, c.env.ENCRYPTION_KEY), zoneId);
   await cfFetch(account, `/zones/${zoneId}/workers/routes/${c.req.param('routeId')}`, c.env.ENCRYPTION_KEY, { method: 'DELETE' });
   return c.json({ success: true });
 });
@@ -384,8 +394,7 @@ app.get('/:accountId/resources/r2', async (c) => {
 
 app.get('/:accountId/resources/zones', async (c) => {
   const account = await requireAccount(c);
-  const data = await cfFetchAll<any>(account, '/zones', c.env.ENCRYPTION_KEY, 100);
-  return c.json(data.filter(z => z.account?.id === account.account_id));
+  return c.json(await accountZones(getDnsDirectory(c.env.DB), account, await accountRequest(account, c.env.ENCRYPTION_KEY)));
 });
 
 app.put('/:accountId/pages/:name/bindings', async (c) => {
@@ -398,40 +407,22 @@ app.put('/:accountId/pages/:name/bindings', async (c) => {
 });
 
 // ============ Summary (用量 + 已部署数量) ============
-app.get('/summary', async (c) => {
-  const accounts = await getActiveAccountsByFeature(c.env.DB, 'workers');
-  const results = await mapConcurrent(accounts, 6, async (account) => {
-    try {
-      const [usageP, workersP, pagesP] = await Promise.allSettled([
-        getWorkersUsageToday(account, c.env.ENCRYPTION_KEY),
-        cfFetch<{ result: any[] }>(account, `/accounts/${account.account_id}/workers/scripts`, c.env.ENCRYPTION_KEY),
-        cfFetch<{ result: any[] }>(account, `/accounts/${account.account_id}/pages/projects`, c.env.ENCRYPTION_KEY),
-      ]);
-      const usage = usageP.status === 'fulfilled' ? usageP.value : { requests: 0, errors: 0, subrequests: 0, cpuTimeMs: 0 };
-      const workerCount = workersP.status === 'fulfilled' ? (workersP.value.result?.length || 0) : 0;
-      const pagesCount = pagesP.status === 'fulfilled' ? (pagesP.value.result?.length || 0) : 0;
-      return { accountId: account.id, accountName: account.name, ...usage, workerCount, pagesCount };
-    } catch (err) {
-      console.error(`[Summary] Failed for ${account.name}: ${err}`);
-      return { accountId: account.id, accountName: account.name, requests: 0, errors: 0, subrequests: 0, cpuTimeMs: 0, workerCount: 0, pagesCount: 0 };
-    }
-  });
-  return c.json(results);
+app.get('/summary', async c => {
+  const id = parseZoneContext(c.req.query()).accountId;
+  const accounts = id ? [requireWorkerBinding(await getAccountById(c.env.DB, id))] : await getActiveAccountsByFeature(c.env.DB, 'workers');
+  return c.json(await mapConcurrent(accounts, 3, async account => {
+    try { return await getWorkerResources(c.env.DB).summary(account, await accountRequest(account, c.env.ENCRYPTION_KEY), { refresh: c.req.query('refresh') === 'true', usage: c.req.query('usage') !== 'false', background: c.req.query('background') === 'true', signal: c.req.raw.signal }); }
+    catch (error) { return unavailableWorkerSummary(account, error); }
+  }));
 });
 
-// ============ Usage ============
-app.get('/usage', async (c) => {
-  const accounts = await getActiveAccountsByFeature(c.env.DB, 'workers');
-  const results = await mapConcurrent(accounts, 6, async (account) => {
-    try {
-      const usage = await getWorkersUsageToday(account, c.env.ENCRYPTION_KEY);
-      return { accountId: account.id, accountName: account.name, ...usage };
-    } catch (err) {
-      console.error(`[Usage] Failed for ${account.name}: ${err}`);
-      return { accountId: account.id, accountName: account.name, requests: 0, errors: 0, subrequests: 0, cpuTimeMs: 0 };
-    }
-  });
-  return c.json(results);
+app.get('/usage', async c => {
+  const id = parseZoneContext(c.req.query()).accountId;
+  const accounts = id ? [requireWorkerBinding(await getAccountById(c.env.DB, id))] : await getActiveAccountsByFeature(c.env.DB, 'workers');
+  return c.json(await mapConcurrent(accounts, 3, async account => {
+    try { return { accountId: account.id, accountName: account.name, ...await getWorkerResources(c.env.DB).read(account, await accountRequest(account, c.env.ENCRYPTION_KEY), 'usage', { refresh: c.req.query('refresh') === 'true', signal: c.req.raw.signal }) as object }; }
+    catch { return { accountId: account.id, accountName: account.name, requests: null, errors: null, subrequests: null, cpuTimeMs: null, state: 'error' }; }
+  }));
 });
 
 // ============ Batch Deploy ============

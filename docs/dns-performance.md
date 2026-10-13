@@ -1,5 +1,7 @@
 # DNS 性能优化第一阶段（2.6.0）
 
+> 本文保留第一阶段验收事实；2.7.0 已接入自适应记录窗口和明确跨页范围，当前架构及验收见 [第二阶段报告](performance-v2.7.md)。
+
 ## 已确认的瓶颈
 
 基线为 `7d45afd49ca307ca3264ef8c23ab5e3a7da51b6a`。进入 DNS 页原先先等 `/accounts` 与 `/credentials`，再请求全量 `/dns/domains`；精确 accountId/zoneId 操作仍调用 `findAccountByDomain → getAllZones`。全量缓存是一个 300 秒的成功数组，单账号失败返回空数组后也会进入缓存；缓存过期时没有请求合并。

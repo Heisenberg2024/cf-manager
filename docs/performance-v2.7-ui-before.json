@@ -1,0 +1,61 @@
+{
+  "source": "Local isolated Chromium simulation, not production latency or P95",
+  "baseline": true,
+  "dns": [
+    {
+      "width": 1440,
+      "records": 100,
+      "firstScreenMs": 106,
+      "interactionMs": 59,
+      "firstPayloadRows": 100,
+      "jsHeapUsedBytes": 18747756,
+      "recordRequests": 1
+    },
+    {
+      "width": 1440,
+      "records": 1000,
+      "firstScreenMs": 104,
+      "interactionMs": 60,
+      "firstPayloadRows": 1000,
+      "jsHeapUsedBytes": 18938928,
+      "recordRequests": 1
+    },
+    {
+      "width": 1440,
+      "records": 10000,
+      "firstScreenMs": 348,
+      "interactionMs": 52,
+      "firstPayloadRows": 10000,
+      "jsHeapUsedBytes": 20638892,
+      "recordRequests": 1
+    },
+    {
+      "width": 390,
+      "records": 100,
+      "firstScreenMs": 99,
+      "interactionMs": 53,
+      "firstPayloadRows": 100,
+      "jsHeapUsedBytes": 17209748,
+      "recordRequests": 1
+    },
+    {
+      "width": 390,
+      "records": 1000,
+      "firstScreenMs": 99,
+      "interactionMs": null,
+      "firstPayloadRows": 1000,
+      "jsHeapUsedBytes": 17396916,
+      "recordRequests": 1
+    },
+    {
+      "width": 390,
+      "records": 10000,
+      "firstScreenMs": 342,
+      "interactionMs": null,
+      "firstPayloadRows": 10000,
+      "jsHeapUsedBytes": 19103532,
+      "recordRequests": 1
+    }
+  ],
+  "workers": []
+}

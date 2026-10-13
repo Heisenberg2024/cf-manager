@@ -1,0 +1,52 @@
+{
+  "baseline": "43567701e1062837454b78125aa56f63935e40b5",
+  "runtime": "v24.21.0",
+  "before": {
+    "optimized": false,
+    "scenario": "Local synthetic CF transport; 2ms fast, 20ms slow and explicit 403 Accounts. Not production P95.",
+    "samples": [
+      {
+        "accounts": 20,
+        "coldCalls": 62,
+        "warmCalls": 62,
+        "concurrent5Calls": 300,
+        "firstCurrentMs": 13.416375000000016,
+        "p50Ms": 13.458332999999982,
+        "p95Ms": 34.75262500000002
+      },
+      {
+        "accounts": 60,
+        "coldCalls": 182,
+        "warmCalls": 182,
+        "concurrent5Calls": 900,
+        "firstCurrentMs": 78.85779200000002,
+        "p50Ms": 75.12241599999993,
+        "p95Ms": 85.52304200000003
+      }
+    ]
+  },
+  "after": {
+    "optimized": true,
+    "scenario": "Local synthetic CF transport; 2ms fast, 20ms slow and explicit 403 Accounts. Not production P95.",
+    "samples": [
+      {
+        "accounts": 20,
+        "coldCalls": 60,
+        "warmCalls": 0,
+        "concurrent5Calls": 60,
+        "firstCurrentMs": 3.1101659999999356,
+        "p50Ms": 36.713292000000024,
+        "p95Ms": 53.239874999999984
+      },
+      {
+        "accounts": 60,
+        "coldCalls": 180,
+        "warmCalls": 0,
+        "concurrent5Calls": 180,
+        "firstCurrentMs": 3.583708000000115,
+        "p50Ms": 272.49637500000017,
+        "p95Ms": 274.24924999999996
+      }
+    ]
+  }
+}

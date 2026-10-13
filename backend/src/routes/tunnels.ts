@@ -1,4 +1,7 @@
-﻿import { Router } from 'express';
+import { liveAccountZone } from '../services/accountZones';
+import { dnsDirectory } from '../services/dnsDirectory';
+import { accountRequest } from '../services/cfFactory';
+import { Router } from 'express';
 import {
   listTunnelAccounts, getTunnelAccount, listTunnels, createTunnel,
   deleteTunnel, getTunnelToken, getTunnelConnections, getTunnelConfig,
@@ -126,6 +129,7 @@ router.post('/accounts/:id/wizard', async (req, res, next) => {
 
     let cname: any;
     try {
+      await liveAccountZone(dnsDirectory, account, accountRequest(account), zone.id);
       cname = await createDnsRecord(account, zone.id, { type: 'CNAME', name: hostname, content: `${tunnelId}.cfargotunnel.com`, ttl: 1, proxied: true });
       createdCnameId = cname?.result?.id ?? cname?.id ?? null;
     } catch (cnameErr: any) {
@@ -155,7 +159,7 @@ router.post('/accounts/:id/wizard', async (req, res, next) => {
   } catch (err: any) {
     const rollbackErrors: string[] = [];
     if (createdCnameId && zone) {
-      try { await deleteDnsRecord(account, zone.id, createdCnameId); } catch (re: any) { rollbackErrors.push(`CNAME ${createdCnameId}: ${re.message}`); }
+      try { await liveAccountZone(dnsDirectory, account, accountRequest(account), zone.id); await deleteDnsRecord(account, zone.id, createdCnameId); } catch (re: any) { rollbackErrors.push(`CNAME ${createdCnameId}: ${re.message}`); }
     }
     if (mode === 'create' && createdTunnelId) {
       try { await deleteTunnel(account, createdTunnelId); } catch (re: any) { rollbackErrors.push(`Tunnel ${createdTunnelId}: ${re.message}`); }

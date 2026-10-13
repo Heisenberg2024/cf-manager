@@ -195,13 +195,13 @@ async function handleDeploy() {
       message.success(t('workers.deployDialog.allSuccess', { success: successCount, total: results.value.length }));
       emit('deployed', { success: true, results: results.value });
       visible.value = false;
-      refresh();
+
     } else {
       message.warning(t('workers.deployDialog.partialFail', { success: successCount, failed: results.value.length - successCount }));
     }
   } catch (e: any) {
     message.error(t('workers.deployDialog.deployFailed', { error: e?.errorMessage || e?.message || t('common.unknown') }));
-  } finally { deploying.value = false; }
+  } finally { deploying.value = false; refresh(); }
 }
 
 async function retryAccount(r: any) {
@@ -224,14 +224,10 @@ async function retryAccount(r: any) {
     if (res?.success) message.success(t('workers.deployDialog.retrySuccess', { name: r.accountName || t('workers.deployDialog.accountFallback', { id: r.accountId }) }));
   } catch (e: any) {
     r.error = e?.errorMessage || e?.message || t('workers.deployDialog.retryFailed');
-  } finally { r.retrying = false; }
+  } finally { r.retrying = false; void workerStore.refreshAccounts([r.accountId]); }
 }
 
-function refresh() {
-  if (workerStore.selectedAccountId) workerStore.fetchWorkers(workerStore.selectedAccountId);
-  else workerStore.fetchWorkers();
-  workerStore.fetchSummary();
-}
+function refresh() { void workerStore.refreshAccounts([...targetAccountIds.value]); }
 
 watch(() => props.show, (s) => {
   if (!s) return;

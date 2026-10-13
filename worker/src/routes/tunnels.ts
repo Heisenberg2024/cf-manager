@@ -1,8 +1,11 @@
+import { liveAccountZone, accountZones } from '../services/accountZones';
+import { getDnsDirectory } from '../services/dnsDirectory';
+import { accountRequest } from '../services/cfApi';
 import { Hono } from 'hono';
 import type { Env } from '../types';
 import { getAllAccounts, getAccountById, addAuditLog } from '../db/models';
 import { isDemoAccount } from '../services/demo';
-import { cfFetch, cfFetchAll } from '../services/cfApi';
+import { cfFetch } from '../services/cfApi';
 import {
   listTunnelAccounts, listTunnels, createTunnel, deleteTunnel,
   getTunnelToken, getTunnelConnections, getTunnelConfig, updateTunnelConfig,
@@ -25,7 +28,7 @@ app.get('/accounts/:id/tunnels', async (c) => {
 app.get('/accounts/:id/zones', async (c) => {
   const account = await getAccountById(c.env.DB, parseInt(c.req.param('id'), 10));
   if (!account || !account.account_id) return c.json({ error: { code: 'BAD_ACCOUNT', message: '账户无效或未配置 account_id' } }, 400);
-  const zones = await cfFetchAll<any>(account, '/zones', c.env.ENCRYPTION_KEY, 50);
+  const zones = await accountZones(getDnsDirectory(c.env.DB), account, await accountRequest(account, c.env.ENCRYPTION_KEY));
   return c.json(zones.map((z) => ({ id: z.id, name: z.name })));
 });
 
@@ -67,7 +70,7 @@ app.get('/accounts/:id/tunnels/:tunnelId/connections', async (c) => {
 app.get('/accounts/:id/tunnels/:tunnelId/hostnames', async (c) => {
   const account = await getAccountById(c.env.DB, parseInt(c.req.param('id'), 10));
   if (!account || !account.account_id) return c.json({ error: { code: 'BAD_ACCOUNT', message: '账户无效或未配置 account_id' } }, 400);
-  return c.json(await listTunnelHostnames(account, c.req.param('tunnelId'), c.env.ENCRYPTION_KEY));
+  return c.json(await listTunnelHostnames(account, c.req.param('tunnelId'), c.env.ENCRYPTION_KEY, c.env.DB));
 });
 
 app.get('/accounts/:id/tunnels/:tunnelId/config', async (c) => {
@@ -114,12 +117,13 @@ app.post('/accounts/:id/wizard', async (c) => {
     }
     const tunnelId: string = createdTunnelId!;
 
-    const zones: any[] = await cfFetchAll<any>(account, '/zones', c.env.ENCRYPTION_KEY, 50);
+    const zones: any[] = await accountZones(getDnsDirectory(c.env.DB), account, await accountRequest(account, c.env.ENCRYPTION_KEY));
     zone = zones.filter((z) => hostname === z.name || hostname.endsWith('.' + z.name)).sort((a, b) => b.name.length - a.name.length)[0] || null;
     if (!zone) return c.json({ error: { code: 'ZONE_NOT_FOUND', message: '该 hostname 所属域名不在当前隧道账户下，向导要求隧道与域名属于同一账户' } }, 400);
 
     let cname: any;
     try {
+      await liveAccountZone(getDnsDirectory(c.env.DB), account, await accountRequest(account, c.env.ENCRYPTION_KEY), zone.id);
       cname = await cfFetch(account, `/zones/${zone.id}/dns_records`, c.env.ENCRYPTION_KEY, {
         method: 'POST', body: JSON.stringify({ type: 'CNAME', name: hostname, content: `${tunnelId}.cfargotunnel.com`, ttl: 1, proxied: true }),
       });
@@ -150,7 +154,7 @@ app.post('/accounts/:id/wizard', async (c) => {
   } catch (err: any) {
     const rollbackErrors: string[] = [];
     if (createdCnameId && zone) {
-      try { await cfFetch(account, `/zones/${zone.id}/dns_records/${createdCnameId}`, c.env.ENCRYPTION_KEY, { method: 'DELETE' }); }
+      try { await liveAccountZone(getDnsDirectory(c.env.DB), account, await accountRequest(account, c.env.ENCRYPTION_KEY), zone.id); await cfFetch(account, `/zones/${zone.id}/dns_records/${createdCnameId}`, c.env.ENCRYPTION_KEY, { method: 'DELETE' }); }
       catch (re: any) { rollbackErrors.push(`CNAME ${createdCnameId}: ${re.message}`); }
     }
     if (mode === 'create' && createdTunnelId) {

@@ -32,7 +32,8 @@
         label-width="120"
         style="margin-top: 12px"
       >
-        <template v-if="operation !== 'create'">
+        <n-alert v-if="scopedSelection" type="info" :bordered="false">{{ t(`dns.paging.scope.${scopedSelection.kind}`) }} · {{ scopedSelection.kind === 'ids' ? scopedSelection.recordIds?.length : JSON.stringify(scopedSelection.filter || {}) }}</n-alert>
+        <template v-if="operation !== 'create' && !scopedSelection">
           <n-form-item :label="t('dns.recordType')">
             <n-select
               v-model:value="types"
@@ -207,13 +208,14 @@ import { useMessage, NTag } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
 import DnsRecordFields from './DnsRecordFields.vue';
 import { DNS_TYPES, type DnsRecordForm, type DnsRecordInput } from '../utils/dnsRecord';
-import { summarizeBatch, validateBatchSpec, type BatchAction, type BatchZone, type BatchPreview, type BatchItem, type BatchSpec } from '../shared/dnsBatch';
+import { summarizeBatch, validateBatchSpec, type BatchAction, type BatchZone, type BatchPreview, type BatchItem, type BatchSpec, type BatchSelection } from '../shared/dnsBatch';
 import { dnsApi } from '../api/dns';
 const visible = defineModel<boolean>('show', { required: true });
-const props = defineProps<{ zones: BatchZone[]; action: BatchAction }>();
+const props = defineProps<{ zones: BatchZone[]; action: BatchAction; selection?: BatchSelection; initialChanges?: DnsRecordInput }>();
 const emit = defineEmits<{ completed: [zones: BatchZone[]] }>();
 const { t } = useI18n(); const message = useMessage();
 const targets = ref<BatchZone[]>([]); const operation = ref<BatchAction>('create');
+const scopedSelection = ref<BatchSelection>();
 const step = ref<'configure' | 'preview' | 'confirm' | 'execute' | 'result'>('configure');
 const types = ref<string[]>(['A']); const host = ref('www'); const currentContent = ref('');
 const record = ref<DnsRecordForm>({ type: 'A', name: 'www', content: '', ttl: 1, proxied: true, priority: 10, weight: 0, port: 443, flags: 0, tag: 'issue', comment: '' });
@@ -237,7 +239,7 @@ const columns = computed<DataTableColumns<BatchItem>>(() => [
  {title: t('dns.multi.detail'), key: 'message', minWidth: 240, render: r => [r.httpStatus ? `HTTP ${r.httpStatus}` : '',r.cfCodes?.length ? `CF ${r.cfCodes.join(',')}` : '',r.message].filter(Boolean).join(' · ')},
 ]);
 function reset() { policy.value = 'skip'; ++generation; previewing.value = false; preview.value = null; items.value = []; step.value = 'configure'; filter.value = 'all'; completed.value = 0; confirmed.value = false; streamError.value = ''; }
-watch(visible, show => { if(show) { reset(); targets.value = props.zones.map(z => ({...z})); operation.value = props.action; if(operation.value === 'proxy') types.value=['A','AAAA','CNAME']; } else ++generation; });
+watch(visible, show => { if(show) { reset(); scopedSelection.value = props.selection ? JSON.parse(JSON.stringify(props.selection)) : undefined; targets.value = props.zones.map(z => ({...z})); operation.value = props.action; if(props.initialChanges) record.value = { ...record.value, ...props.initialChanges }; if(operation.value === 'proxy') types.value=['A','AAAA','CNAME']; } else ++generation; });
 watch(types, value => { if(value.length && (value.length === 1 || !value.includes(record.value.type))) record.value.type = value[0]!; },{deep:true});
 watch(() => record.value.type, () => { fields.value = fields.value.filter(f => patchFields.value.includes(f)); });
 watch([record, types, host, currentContent, fields, policy], () => { if(step.value === 'configure') { ++generation; previewing.value = false; preview.value = null; } }, {deep: true});
@@ -248,7 +250,7 @@ function spec(): BatchSpec {
    if(['weight','port','flags','tag'].includes(key)) { changes.data = {...changes.data,[key]:record.value[key as keyof DnsRecordForm] as string | number}; }
    else Object.assign(changes,{[key]:record.value[key as keyof DnsRecordForm]});
  }
- return validateBatchSpec({ zones: targets.value, action: operation.value, match: {host: operation.value === 'create' ? record.value.name : host.value, types: operation.value === 'create' ? [record.value.type] : types.value, ...(currentContent.value ? {currentContent: currentContent.value} : {})}, ...(operation.value === 'create' ? {record:record.value,conflictPolicy:policy.value} : operation.value === 'delete' ? {} : {changes}) });
+ return validateBatchSpec({ ...(scopedSelection.value ? { selection: scopedSelection.value } : {}), zones: targets.value, action: operation.value, match: scopedSelection.value ? {host: '@', types: [...DNS_TYPES]} : {host: operation.value === 'create' ? record.value.name : host.value, types: operation.value === 'create' ? [record.value.type] : types.value, ...(currentContent.value ? {currentContent: currentContent.value} : {})}, ...(operation.value === 'create' ? {record:record.value,conflictPolicy:policy.value} : operation.value === 'delete' ? {} : {changes}) });
 }
 async function makePreview() {
  const identity = ++generation; previewing.value = true;

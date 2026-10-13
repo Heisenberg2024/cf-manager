@@ -1,5 +1,7 @@
+import { accountZones } from './accountZones';
+import { getDnsDirectory } from './dnsDirectory';
 import type { Account } from '../db/models';
-import { cfFetch, cfFetchAll } from './cfApi';
+import { cfFetch, cfFetchAll, accountRequest } from './cfApi';
 
 export interface TunnelAccountItem { id: number; name: string; account_id: string; }
 
@@ -46,13 +48,13 @@ export async function updateTunnelConfig(account: Account, tunnelId: string, ing
  * 获取隧道绑定的域名列表：扫描账户下所有 zone 的 CNAME 记录，
  * 找到 content 为 {tunnelId}.cfargotunnel.com 的记录，返回其 name（hostname）。
  */
-export async function listTunnelHostnames(account: Account, tunnelId: string, key: string): Promise<string[]> {
+export async function listTunnelHostnames(account: Account, tunnelId: string, key: string, db: D1Database): Promise<string[]> {
   const target = `${tunnelId}.cfargotunnel.com`;
-  const zones = await cfFetchAll<any>(account, '/zones', key, 50);
+  const zones = await accountZones(getDnsDirectory(db), account, await accountRequest(account, key));
   const hostnames: string[] = [];
   for (const zone of zones) {
     try {
-      const records = await cfFetchAll<any>(account, `/zones/${zone.id}/dns_records?type=CNAME`, key, 100);
+      const records = await cfFetchAll<any>(account, `/zones/${zone.id}/dns_records?type=CNAME&content.exact=${encodeURIComponent(target)}`, key, 100);
       for (const r of records) {
         if (r.content === target) {
           hostnames.push(r.name);

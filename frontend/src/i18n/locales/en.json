@@ -571,6 +571,16 @@
       "stale": "Showing the last successful snapshot; refreshing in the background",
       "accountFailed": "Fetch failed; existing results may be stale",
       "retry": "Retry"
+    },
+    "paging": {
+      "selectZone": "Select entire Zone",
+      "total": "{count} matching records",
+      "search": "Search selected field",
+      "scope": {
+        "ids": "Explicitly selected records only",
+        "filter": "All filtered records (server preview)",
+        "zone": "Entire Zone (server preview)"
+      }
     }
   },
   "workers": {
@@ -714,7 +724,8 @@
       "errors": "Errors",
       "cpuTime": "CPU Time",
       "subrequests": "Subrequests"
-    }
+    },
+    "resourceReadFailed": "Cloudflare resource read failed. Counts are unknown; refresh to retry."
   },
   "ai": {
     "title": "AI Workspace",

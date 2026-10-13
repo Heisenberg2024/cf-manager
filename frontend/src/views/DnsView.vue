@@ -119,29 +119,33 @@
               <n-text v-if="dnsStore.loading && dnsStore.records.length" depth="3">{{ t('dns.cacheStatus.refreshing') }}</n-text>
               <n-space align="center" style="margin-bottom: 8px; flex-shrink: 0">
                 <n-button size="small" :disabled="batchRunning" @click="selectPageRecords">{{ t('dns.batch.selectPage') }}</n-button>
-                <n-button size="small" :disabled="batchRunning" @click="selectedRecordIds = filteredRecords.map(r => r.id)">{{ t('dns.batch.selectAll', { count: filteredRecords.length }) }}</n-button>
-                <n-button size="small" :disabled="batchRunning" @click="selectedRecordIds = []">{{ t('common.clearSelection') }}</n-button>
-                <n-text>{{ t('dns.batch.selected', { count: selectedRecordIds.length }) }}</n-text>
-                <n-button size="small" :disabled="!selectedRecordIds.length || currentDomainIsDemo || batchRunning" @click="showBatchRecordEdit = true">{{ t('dns.batch.edit') }}</n-button>
-                <n-button size="small" type="error" :disabled="!selectedRecordIds.length || currentDomainIsDemo || batchRunning" @click="confirmRecordBatch('delete')">{{ t('common.delete') }}</n-button>
+                <n-button size="small" :disabled="batchRunning" @click="selectFilteredRecords">{{ t('dns.batch.selectAll', { count: filteredRecordTotal }) }}</n-button>
+                <n-button size="small" :disabled="batchRunning" @click="recordSelectionScope = 'zone'; selectedRecordIds = []">{{ t('dns.paging.selectZone') }}</n-button>
+                <n-button size="small" :disabled="batchRunning" @click="clearRecordSelection">{{ t('common.clearSelection') }}</n-button>
+                <n-text>{{ t('dns.batch.selected', { count: recordSelectionCount }) }}</n-text>
+                <n-button size="small" :disabled="!recordSelectionCount || currentDomainIsDemo || batchRunning" @click="showBatchRecordEdit = true">{{ t('dns.batch.edit') }}</n-button>
+                <n-button size="small" type="error" :disabled="!recordSelectionCount || currentDomainIsDemo || batchRunning" @click="confirmRecordBatch('delete')">{{ t('common.delete') }}</n-button>
                 <n-button size="small" :loading="dnsStore.loading" @click="dnsStore.fetchRecords(dnsStore.currentDomain, dnsStore.currentContext, true)">{{ t('common.refresh') }}</n-button>
                 <n-button size="small" type="primary" @click="openAddRecordModal">{{ t('dns.addRecord') }}</n-button>
               </n-space>
               <n-space align="center" style="margin-bottom: 8px; flex-shrink: 0">
-                <n-input v-model:value="recordSearch" :placeholder="t('dns.multi.searchRecords')" clearable size="small" style="width: 220px" />
+                <n-select v-model:value="recordSearchField" :options="[{label: t('dns.recordName'), value: 'nameContains'}, {label: t('dns.recordContent'), value: 'contentContains'}]" size="small" style="width: 120px" />
+                <n-input v-model:value="recordSearch" :placeholder="t('dns.paging.search')" clearable size="small" style="width: 220px" />
                 <n-select v-model:value="recordType" :options="recordTypeOptions" :placeholder="t('dns.recordType')" clearable size="small" style="width: 120px" />
               </n-space>
-              <n-progress v-if="batchRunning" type="line" :percentage="Math.round(batchCompleted / Math.max(batchTotal, 1) * 100)" :show-indicator="true" />
-              <n-skeleton v-if="dnsStore.loading && !dnsStore.records.length" :repeat="6" text />
+              <n-text depth="3">{{ t(`dns.paging.scope.${recordSelectionScope}`) }} · {{ t('dns.paging.total', { count: filteredRecordTotal }) }}</n-text>
+              <n-text v-if="dnsStore.loading && !dnsStore.records.length" depth="3">{{ t('common.loading') }}</n-text>
               <AutoFitTable
                 style="flex: 1 1 0%; min-height: 0; margin-top: 0;"
                 :columns="recordColumns"
-                :data="filteredRecords"
-                :loading="dnsStore.loading && !dnsStore.records.length"
+                :data="visibleRecords"
+                :remote="dnsStore.recordMode === 'page'"
+                :loading="false"
                 :scroll-x="680"
-                :pagination="{ page: recordPage, pageSize: recordPageSize, showSizePicker: true, pageSizes: [20, 50, 100], onUpdatePage: (page: number) => recordPage = page, onUpdatePageSize: (size: number) => { recordPageSize = size; recordPage = 1; } }"
+                :pagination="{ page: recordPage, pageSize: recordPageSize, showSizePicker: true, pageSlot: 5, pageSizes: [20, 50, 100], itemCount: filteredRecordTotal, onUpdatePage: (page: number) => recordPage = page, onUpdatePageSize: (size: number) => { recordPageSize = size; recordPage = 1; } }"
                 :row-key="(row: any) => row.id"
-                v-model:checked-row-keys="selectedRecordIds"
+                :checked-row-keys="selectedRecordIds"
+                @update:checked-row-keys="onRecordChecked"
               />
             </n-tab-pane>
 
@@ -321,7 +325,7 @@
       </n-gi>
     </n-grid>
 
-    <DnsBatchDialog v-model:show="showMultiDns" :zones="multiTargets" :action="multiAction" @completed="onMultiCompleted" />
+    <DnsBatchDialog v-model:show="showMultiDns" :zones="multiTargets" :action="multiAction" :selection="multiSelection" :initial-changes="multiChanges" @completed="onMultiCompleted" />
     <!-- 添加 DNS 记录 Modal -->
     <n-modal v-model:show="showAddRecordModal" preset="dialog" :title="editingRecordId ? t('dns.editRecordModalTitle') : t('dns.addRecordModalTitle')" style="width: 520px; max-width: 95vw">
       <n-form ref="recordFormRef" :model="newRecord" :rules="recordRules" label-placement="left" label-width="80">
@@ -364,18 +368,14 @@
     <ZonePlanDialog v-model:show="showPlanChange" :targets="planChangeTargets" @completed="onPlanChanged" />
     <ZoneDeleteDialog v-model:show="showZoneDelete" :targets="zoneDeleteTargets" @completed="onZonesDeleted" />
     <n-modal v-model:show="showBatchRecordEdit" preset="dialog" :title="t('dns.batch.edit')" style="width: 480px; max-width: 95vw">
-      <n-text>{{ t('dns.batch.selected', { count: selectedRecordIds.length }) }}</n-text>
+      <n-text>{{ t('dns.batch.selected', { count: recordSelectionCount }) }}</n-text>
       <n-form label-placement="left" label-width="100" style="margin-top: 12px">
         <n-form-item label="TTL"><n-input-number v-model:value="batchTtl" :min="1" :max="86400" /><n-button style="margin-left: 8px" :disabled="batchTtl !== 1 && batchTtl < 60" @click="confirmRecordBatch('ttl')">{{ t('common.save') }}</n-button></n-form-item>
         <n-form-item label="Proxy"><n-select v-model:value="batchProxy" :options="[{ label: 'On', value: 'on' }, { label: 'Off', value: 'off' }]" /><n-button style="margin-left: 8px" @click="confirmRecordBatch('proxy')">{{ t('common.save') }}</n-button></n-form-item>
       </n-form>
       <n-text depth="3">{{ t('dns.batch.proxyHint') }}</n-text>
     </n-modal>
-    <n-modal v-model:show="showRecordBatchResult" preset="dialog" :title="t('dns.batch.result')" style="width: 760px; max-width: 95vw">
-      <n-text>{{ t('dns.batch.summary', { total: recordBatchResults.length, success: recordBatchResults.filter(r => r.success).length, failed: recordBatchResults.filter(r => !r.success).length }) }}</n-text>
-      <n-data-table :columns="recordBatchResultColumns" :data="recordBatchResults" :max-height="320" size="small" />
-      <template #action><n-button @click="showRecordBatchResult = false">{{ t('common.close') }}</n-button></template>
-    </n-modal>
+
   </div>
 </template>
 
@@ -393,12 +393,11 @@ import ZonePlanDialog from '../components/ZonePlanDialog.vue';
 import ZoneDeleteDialog from '../components/ZoneDeleteDialog.vue';
 import DnsOperationModal from '../components/DnsOperationModal.vue';
 import { dnsPlanOptionLabel, dnsPlanTierLabel } from '../utils/dnsPlanLabel';
-import type { BatchAction, BatchZone } from '../shared/dnsBatch';
+import type { BatchAction, BatchZone, BatchSelection } from '../shared/dnsBatch';
 import { dnsApi } from '../api/dns';
 import { accountsApi } from '../api/accounts';
 import { credentialsApi } from '../api/credentials';
 import { buildDnsRecord, DNS_TYPES } from '../utils/dnsRecord';
-import { runBatch, type BatchResult } from '../utils/batchOperation';
 import type { DeleteZonesResult, PlanChangeTarget, ZoneContext } from '../api/dns';
 import { setDemoAccounts, isDemoAccount } from '../utils/demoAccounts';
 import { dnsAccountLabel, type DnsAccountIdentity } from '../utils/dnsAccountLabel';
@@ -556,6 +555,8 @@ function onAccountChange(val: string) {
 
 const showMultiDns = ref(false);
 const multiAction = ref<BatchAction>('create');
+const multiSelection = ref<BatchSelection>();
+const multiChanges = ref<{ ttl?: number; proxied?: boolean }>();
 const multiTargets = ref<BatchZone[]>([]);
 const multiDnsOptions = computed(() => [
   ...['create', 'update', 'delete', 'proxy', 'ttl'].map(key => ({key, label:t(`dns.multi.${key}`)})),
@@ -576,11 +577,12 @@ function selectMatchingDomains() {
   selectedDomains.value = new Set(selectedDomains.value);
 }
 function openMultiDns(key: string) {
+  multiSelection.value = undefined; multiChanges.value = undefined;
   if (key === 'plan') { openPlanChange(allDomains.value.filter(domain => selectedDomains.value.has(zoneKey(domain)))); return; }
   multiTargets.value = allDomains.value.filter(d => selectedDomains.value.has(zoneKey(d))).map(d => ({accountId:d.cfAccountId, credentialId:d.credentialId, zoneId:d.id, zoneName:d.name}));
   multiAction.value = key as BatchAction; showMultiDns.value = true;
 }
-async function onMultiCompleted(zones: BatchZone[]) { await dnsStore.invalidateRecords(zones); }
+async function onMultiCompleted(zones: BatchZone[]) { clearRecordSelection(); await dnsStore.invalidateRecords(zones); }
 watch(() => dnsStore.domains, () => {
   const present = new Set(allDomains.value.map(zoneKey));
   selectedDomains.value = new Set([...selectedDomains.value].filter(key => present.has(key)));
@@ -686,62 +688,54 @@ const currentDomainIsDemo = computed(() => {
   return d ? isDemoDomain(d) : false;
 });
 
-interface DnsRow { id: string; type: string; name: string; content: string; ttl: number; proxied: boolean }
 const selectedRecordIds = ref<string[]>([]);
 const recordSearch = ref('');
 const recordType = ref<string | null>(null);
 const recordTypeOptions = DNS_TYPES.map(value => ({ label: value, value }));
-const filteredRecords = computed(() => dnsStore.records.filter(r => (!recordType.value || r.type === recordType.value) && (!recordSearch.value || `${r.name} ${r.content || ''} ${JSON.stringify(r.data || '')}`.toLowerCase().includes(recordSearch.value.toLowerCase()))));
+const recordSearchField = ref<'nameContains' | 'contentContains'>('nameContains');
+const recordSelectionScope = ref<'ids' | 'filter' | 'zone'>('ids');
+const recordSelectionCount = computed(() => recordSelectionScope.value === 'ids' ? selectedRecordIds.value.length : recordSelectionScope.value === 'filter' ? filteredRecordTotal.value : dnsStore.recordMode === 'page' ? dnsStore.zoneRecordTotal : dnsStore.records.length);
 const recordPage = ref(1);
-watch([recordSearch, recordType], () => { recordPage.value = 1; });
 const recordPageSize = ref(20);
-const batchRunning = ref(false);
-const batchCompleted = ref(0);
-const batchTotal = ref(0);
+const appliedRecordSearch = ref('');
+const filterSpec = computed(() => ({ ...(recordType.value ? { type: recordType.value } : {}), ...(appliedRecordSearch.value ? { [recordSearchField.value]: appliedRecordSearch.value } : {}) }));
+const filteredRecords = computed(() => dnsStore.recordMode === 'page' ? dnsStore.records : dnsStore.records.filter(r => (!recordType.value || r.type === recordType.value) && (!appliedRecordSearch.value || String(recordSearchField.value === 'nameContains' ? r.name : r.content || '').toLowerCase().includes(appliedRecordSearch.value.toLowerCase()))));
+const filteredRecordTotal = computed(() => dnsStore.recordMode === 'page' ? dnsStore.recordTotal : filteredRecords.value.length);
+const visibleRecords = computed(() => dnsStore.recordMode === 'page' ? filteredRecords.value.slice(((recordPage.value - 1) * recordPageSize.value) % 500, ((recordPage.value - 1) * recordPageSize.value) % 500 + recordPageSize.value) : filteredRecords.value);
+let recordSearchTimer: ReturnType<typeof setTimeout>;
+function onRecordChecked(keys: Array<string | number>) { recordSelectionScope.value = 'ids'; selectedRecordIds.value = keys.map(String); }
+function clearRecordSelection() { selectedRecordIds.value = []; recordSelectionScope.value = 'ids'; }
+function selectFilteredRecords() {
+  clearTimeout(recordSearchTimer); appliedRecordSearch.value = recordSearch.value.trim();
+  recordSelectionScope.value = 'filter'; selectedRecordIds.value = [];
+  if (dnsStore.recordMode === 'page') { recordPage.value = 1; void dnsStore.fetchRecordWindow(1, filterSpec.value); }
+}
+watch([recordSearch, recordType, recordSearchField], () => {
+  clearTimeout(recordSearchTimer); clearRecordSelection(); recordPage.value = 1;
+  recordSearchTimer = setTimeout(() => { appliedRecordSearch.value = recordSearch.value.trim(); if (dnsStore.recordMode === 'page') void dnsStore.fetchRecordWindow(1, filterSpec.value); }, 200);
+});
+watch(filteredRecordTotal, total => { recordPage.value = Math.min(recordPage.value, Math.max(1, Math.ceil(total / recordPageSize.value))); });
+watch([recordPage, recordPageSize], () => { if (dnsStore.recordMode === 'page') void dnsStore.fetchRecordWindow(Math.floor(((recordPage.value - 1) * recordPageSize.value) / 500) + 1, filterSpec.value); });
+onUnmounted(() => clearTimeout(recordSearchTimer));
+
+const batchRunning = computed(() => showMultiDns.value);
 const showBatchRecordEdit = ref(false);
-const showRecordBatchResult = ref(false);
-const recordBatchResults = ref<Array<BatchResult<DnsRow, unknown>>>([]);
 const batchTtl = ref(300);
 const batchProxy = ref('on');
-watch(() => [dnsStore.currentDomain, dnsStore.currentContext.accountId, dnsStore.currentContext.zoneId], () => { selectedRecordIds.value = []; recordPage.value = 1; showAddRecordModal.value = false; });
+watch(() => `${dnsStore.currentDomain}:${dnsStore.currentContext.accountId}:${dnsStore.currentContext.zoneId}`, () => { clearTimeout(recordSearchTimer); clearRecordSelection(); recordSearch.value = ''; appliedRecordSearch.value = ''; recordType.value = null; recordPage.value = 1; showAddRecordModal.value = false; });
 function selectPageRecords() {
-  selectedRecordIds.value = filteredRecords.value.slice((recordPage.value - 1) * recordPageSize.value, recordPage.value * recordPageSize.value).map(row => row.id);
+  recordSelectionScope.value = 'ids';
+  const rows = dnsStore.recordMode === 'page' ? visibleRecords.value : filteredRecords.value.slice((recordPage.value - 1) * recordPageSize.value, recordPage.value * recordPageSize.value);
+  selectedRecordIds.value = [...new Set([...selectedRecordIds.value, ...rows.map(row => row.id)])];
 }
 function confirmRecordBatch(action: 'delete' | 'ttl' | 'proxy') {
-  const ids = new Set(selectedRecordIds.value);
-  const rows: DnsRow[] = dnsStore.records.filter(row => ids.has(row.id)).map(row => ({ ...row }));
-  if (!rows.length || batchRunning.value || currentDomainIsDemo.value) return;
-  const target = captureTarget();
-  const ttl = batchTtl.value;
-  const proxied = batchProxy.value === 'on';
-  dialog.warning({
-    title: action === 'delete' ? t('common.delete') : t('dns.batch.edit'),
-    content: t('dns.batch.confirm', { action: action === 'delete' ? t('common.delete') : action === 'ttl' ? `TTL ${ttl}` : `Proxy ${proxied ? 'on' : 'off'}`, count: rows.length, domain: target.domain, account: currentDomainInfo.value?.accountName || target.context.accountId, records: rows.slice(0, 8).map(row => `${row.type} ${row.name} → ${row.content}`).join('; '), more: rows.length > 8 ? t('dns.batch.more', { count: rows.length - 8 }) : '' }),
-    positiveText: t('common.confirm'), negativeText: t('common.cancel'),
-    onPositiveClick: async () => {
-      showBatchRecordEdit.value = false;
-      batchRunning.value = true; batchCompleted.value = 0; batchTotal.value = rows.length;
-      try {
-        recordBatchResults.value = await runBatch(rows, async row => {
-          if (action === 'delete') return dnsStore.removeRecord(target.domain, target.context, row.id);
-          if (action === 'proxy') {
-            if (!['A', 'AAAA', 'CNAME'].includes(row.type)) throw new Error(t('dns.batch.proxyUnsupported', { name: row.name, type: row.type }));
-            return dnsStore.saveRecord(target.domain, target.context, { proxied }, row.id);
-          }
-          if (row.proxied && ttl !== 1) throw new Error(t('dns.batch.proxyTtl', { name: row.name }));
-          return dnsStore.saveRecord(target.domain, target.context, { ttl }, row.id);
-        }, count => { batchCompleted.value = count; });
-        if (dnsStore.isCurrent(target.domain, target.context)) selectedRecordIds.value = [];
-        showRecordBatchResult.value = true;
-      } finally { batchRunning.value = false; }
-    },
-  });
+  if (!recordSelectionCount.value || batchRunning.value || currentDomainIsDemo.value || !currentDomainInfo.value) return;
+  const zone = currentDomainInfo.value;
+  multiTargets.value = [{accountId: zone.cfAccountId, credentialId: zone.credentialId, zoneId: zone.id, zoneName: zone.name}];
+  multiSelection.value = recordSelectionScope.value === 'ids' ? {kind: 'ids', recordIds: [...selectedRecordIds.value]} : recordSelectionScope.value === 'filter' ? {kind: 'filter', filter: {...filterSpec.value}} : {kind: 'zone'};
+  multiChanges.value = action === 'ttl' ? {ttl: batchTtl.value} : action === 'proxy' ? {proxied: batchProxy.value === 'on'} : undefined;
+  multiAction.value = action; showBatchRecordEdit.value = false; showMultiDns.value = true;
 }
-const recordBatchResultColumns = computed<DataTableColumns<BatchResult<DnsRow, unknown>>>(() => [
-  { title: t('dns.recordName'), key: 'name', render: row => `${row.item.type} ${row.item.name}` },
-  { title: t('common.result'), key: 'success', render: row => row.success ? t('common.success') : t('common.error') },
-  { title: t('common.message'), key: 'error' },
-]);
 
 const recordColumns = computed<DataTableColumns<any>>(() => [
   { type: 'selection', width: 40, disabled: () => currentDomainIsDemo.value || batchRunning.value },
@@ -1138,6 +1132,12 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+.dns-right-card :deep(.n-pagination) {
+  max-width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .dns-tab-form-scroll {
