@@ -48,6 +48,13 @@ export class ZoneDirectory {
     this.entries.delete(accountId);
     if (cloudflareAccountId) for (const [id, entry] of this.entries) if (entry.cloudflareAccountId === cloudflareAccountId) { this.revisions.set(id, (this.revisions.get(id) || 0) + 1); this.entries.delete(id); }
   }
+  updateZone(account:DnsBinding,zoneId:string,patch:{paused:boolean;status?:string}) {
+    const ids=new Set([account.id]);
+    for(const [id,entry] of this.entries)if(entry.cloudflareAccountId===account.account_id){
+      ids.add(id);this.entries.set(id,{...entry,flight:undefined,snapshot:entry.snapshot?{...entry.snapshot,zones:entry.snapshot.zones.map(zone=>zone.id===zoneId?{...zone,paused:patch.paused,status:patch.paused?'paused':patch.status || zone.status}:zone)}:undefined});
+    }
+    for(const id of ids)this.revisions.set(id,(this.revisions.get(id)||0)+1);
+  }
   async request(account: DnsBinding, request: CfRequest, path: string, options: { background?: boolean; signal?: AbortSignal; revision?: string } = {}): Promise<CfEnvelope> {
     const revision = options.revision ?? this.epoch(account.id);
     const signature = await bindingSignature(account);

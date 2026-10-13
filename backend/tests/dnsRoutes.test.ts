@@ -121,3 +121,10 @@ describe('Docker DNS routes', () => {
   });
 });
 
+
+
+it('streams actual Zone checking, PATCH and confirmation progress while retaining JSON saves',async()=>{
+ let ssl='full';const calls:string[]=[];mocks.request.mockReturnValue(async(path:string,init:RequestInit={})=>{calls.push(init.method || 'GET');if(init.method==='PATCH')ssl=JSON.parse(String(init.body)).value;return {result:{id:'ssl',value:ssl,editable:true}};});
+ const response=await fetch(`${base}/dns/domains/example.test/settings?accountId=1&zoneId=zone-a`,{method:'PATCH',headers:{'Content-Type':'application/json',Accept:'text/event-stream'},body:JSON.stringify({changes:{ssl:'strict'},baseline:{ssl:'full'}})});
+ expect(response.headers.get('Content-Type')).toContain('text/event-stream');const events=(await response.text()).split('\n\n').filter(line=>line.startsWith('data:')).map(line=>JSON.parse(line.slice(6)));expect(events.map(event=>event.stage).filter(Boolean)).toEqual(['checking','saving','confirming','done']);expect(events.at(-2)).toMatchObject({completed:1,total:1,patchCount:1,status:'updated'});expect(events.at(-1)).toMatchObject({type:'done',result:{updated:['ssl']}});expect(calls).toEqual(['GET','PATCH','GET']);
+});

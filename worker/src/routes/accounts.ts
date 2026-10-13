@@ -11,10 +11,13 @@ import { updateCredential } from '../db/credentials';
 import { getQuotaSummary, invalidateAiCache } from '../services/quotaTracker';
 import { isDemoAccount, isDemoMode } from '../services/demo';
 import { getDnsDirectory } from '../services/dnsDirectory';
+import {getStorageResources} from '../services/storageRuntime';
+import { getZoneSettingsRuntime } from '../services/zoneSettingsRuntime';
 
 const app = new Hono<{ Bindings: Env }>();
 async function invalidateAccountCaches(env: Env) {
   getDnsDirectory(env.DB).invalidate();
+  getZoneSettingsRuntime(env.DB).invalidate();getStorageResources(env.DB).invalidate();
   await env.KV.delete('dns_zones_all');
   await invalidateAiCache(env);
 }

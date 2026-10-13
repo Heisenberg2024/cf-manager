@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
-const mock=vi.hoisted(()=>({getRecords:vi.fn(),getSettings:vi.fn(),getDomains:vi.fn(),getAccountDomains:vi.fn(),createDomains:vi.fn(),deleteDomains:vi.fn(),createRecord:vi.fn(),updateRecord:vi.fn(),deleteRecord:vi.fn(),updateProxy:vi.fn()}));
+const mock=vi.hoisted(()=>({getRecords:vi.fn(),getSettings:vi.fn(),updateSettings:vi.fn(),purgeCache:vi.fn(),updateStatus:vi.fn(),getDomains:vi.fn(),getAccountDomains:vi.fn(),createDomains:vi.fn(),deleteDomains:vi.fn(),createRecord:vi.fn(),updateRecord:vi.fn(),deleteRecord:vi.fn(),updateProxy:vi.fn()}));
 vi.mock('../src/api/dns',()=>({dnsApi:mock}));
 import { useDnsStore } from '../src/stores/dnsStore';
 function deferred<T>() {let resolve!: (value:T)=>void, reject!: (error:unknown)=>void;const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
@@ -196,5 +196,39 @@ describe('DNS adaptive server windows', () => {
  it('refuses a full page without total metadata rather than claiming it is the whole Zone', async()=>{
   mock.getRecords.mockResolvedValue({data:{records:Array.from({length:500},(_,i)=>({id:String(i)})),meta:{scope:'page'}}});
   const store=useDnsStore();await store.fetchRecords('large.test',target);expect(store.recordsError).toContain('total unavailable');expect(store.records).toHaveLength(0);
+ });
+});
+
+
+describe('Zone settings cache, drafts and operation identity',()=>{
+ const a={accountId:1,zoneId:'a'},b={accountId:2,zoneId:'b'};
+ const settings=(ssl='full')=>({data:{ssl,http2:'on',__meta:{ssl:{editable:true},http2:{editable:true}}}});
+ async function select(){mock.getRecords.mockResolvedValue({data:[]});const store=useDnsStore();await store.fetchRecords('same.test',a);return store;}
+ it('invalidates dirty computed dependencies after the UI first rendered an empty form',async()=>{
+  const store=await select();expect(store.settingsDirty).toEqual([]);mock.getSettings.mockResolvedValue(settings());await store.fetchZoneSettings('same.test');store.settingForm.ssl='strict';expect(store.settingsDirty).toEqual(['ssl']);await store.fetchZoneSettings('same.test');expect(store.settingsDirty).toEqual(['ssl']);
+ });
+ it('shares settings reads across tab visits and preserves failed refresh snapshots',async()=>{
+  const store=await select();mock.getSettings.mockResolvedValue(settings());await Promise.all([store.fetchZoneSettings('same.test'),store.fetchZoneSettings('same.test')]);await store.fetchZoneSettings('same.test');expect(mock.getSettings).toHaveBeenCalledTimes(1);
+  mock.getSettings.mockRejectedValueOnce(Error('offline'));await store.fetchZoneSettings('same.test',a,true);expect(store.zoneSettings.ssl).toBe('full');expect(store.settingsError).toBe('offline');
+ });
+ it('preserves drafts and conflicts during forced refresh and A→B→A',async()=>{
+  const store=await select();mock.getSettings.mockResolvedValue(settings());await store.fetchZoneSettings('same.test');store.settingForm.ssl='strict';mock.getSettings.mockResolvedValue(settings('flexible'));await store.fetchZoneSettings('same.test',a,true);
+  expect(store.settingForm.ssl).toBe('strict');expect(store.settingsConflicts).toEqual(['ssl']);await store.fetchRecords('same.test',b);expect(store.settingForm).toEqual({});await store.fetchRecords('same.test',a);expect(store.settingForm.ssl).toBe('strict');store.cancelSettings();expect(store.settingForm.ssl).toBe('flexible');
+ });
+ it('cancels and ignores late settings from an older Zone or session',async()=>{
+  const store=await select(),slow=deferred<any>();mock.getSettings.mockReturnValueOnce(slow.promise);const pending=store.fetchZoneSettings('same.test');await store.fetchRecords('same.test',b);mock.getSettings.mockResolvedValue(settings('off'));await store.fetchZoneSettings('same.test');slow.resolve(settings('strict'));await pending;expect(store.zoneSettings.ssl).toBe('off');store.resetSensitiveState();expect(store.settingForm).toEqual({});expect(store.zoneSettings).toEqual({});
+ });
+ it('empty saves do not call the API, partial saves clear only confirmed edits',async()=>{
+  const store=await select();mock.getSettings.mockResolvedValue(settings());await store.fetchZoneSettings('same.test');await store.updateZoneSettings('same.test',{});expect(mock.updateSettings).not.toHaveBeenCalled();store.settingForm.ssl='strict';store.settingForm.http2='off';
+  mock.updateSettings.mockResolvedValue({data:{updated:['ssl'],failed:['http2'],fields:{ssl:{status:'updated'},http2:{status:'failed'}},settings:{ssl:'strict',http2:'on',__meta:{ssl:{editable:true},http2:{editable:true}}}}});await store.updateZoneSettings('same.test',{ssl:'strict',http2:'off'});expect(store.settingsDirty).toEqual(['http2']);expect(store.settingsResults.http2.status).toBe('failed');expect(mock.updateSettings.mock.calls[0][1].baseline.ssl).toBe('full');
+ });
+ it('captures save target and blocks duplicates while another Zone remains usable',async()=>{
+  const store=await select();mock.getSettings.mockResolvedValue(settings());await store.fetchZoneSettings('same.test');store.settingForm.ssl='strict';const slow=deferred<any>();mock.updateSettings.mockReturnValue(slow.promise);const pending=store.updateZoneSettings('same.test',{ssl:'strict'});await expect(store.updateZoneSettings('same.test',{ssl:'strict'})).rejects.toThrow('already saving');await store.fetchRecords('same.test',b);slow.resolve({data:{updated:['ssl'],fields:{ssl:{status:'updated'}},settings:{ssl:'strict',__meta:{ssl:{editable:true}}}}});await pending;expect(mock.updateSettings.mock.calls[0][2]).toEqual(a);expect(store.zoneSettings.ssl).toBeUndefined();await store.fetchRecords('same.test',a);expect(store.settingForm.ssl).toBe('strict');expect(store.settingsDirty).toEqual([]);
+ });
+ it('updates only the captured Zone after a fast switch',async()=>{
+  const store=await select(),slow=deferred<any>();store.domains=[{id:'a',name:'same.test',cfAccountId:1,status:'active'},{id:'b',name:'same.test',cfAccountId:2,status:'active'}];mock.updateStatus.mockReturnValue(slow.promise);mock.getAccountDomains.mockResolvedValue({data:{zones:[],meta:{state:'fresh'}}});const pending=store.updateZoneStatus('same.test',true);await store.fetchRecords('same.test',b);slow.resolve({data:{id:'a',paused:true}});await pending;expect(store.domains.find(row=>row.id==='a')?.paused).toBe(true);expect(store.domains.find(row=>row.id==='b')?.status).toBe('active');expect(mock.getAccountDomains).not.toHaveBeenCalled();
+ });
+ it('purge is independent of settings caches and refuses missing receipts',async()=>{
+  const store=await select();mock.getSettings.mockResolvedValue(settings());await store.fetchZoneSettings('same.test');mock.purgeCache.mockResolvedValue({data:{id:'receipt'}});await store.purgeZoneCache('same.test',{purge_everything:true});await store.fetchZoneSettings('same.test');expect(mock.getSettings).toHaveBeenCalledTimes(1);mock.purgeCache.mockResolvedValue({data:{}});await expect(store.purgeZoneCache('same.test',{files:['https://same.test/a']})).rejects.toThrow('receipt missing');
  });
 });

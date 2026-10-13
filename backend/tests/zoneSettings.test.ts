@@ -17,26 +17,26 @@ describe('Zone settings remote confirmation', () => {
     const request: CfRequest = async (path, init) => {
       calls.push(init?.method || 'GET');
       if (init?.method === 'PATCH') { ssl = 'strict'; return { result: { value: ssl } }; }
-      return { result: [{ id: 'ssl', value: ssl, editable: true }] };
+      return { result: { id: 'ssl', value: ssl, editable: true } };
     };
     expect(await writeZoneSettings(request, 'zone-a', { ssl: 'strict' })).toMatchObject({ updated: ['ssl'], failed: [], settings: { ssl: 'strict' } });
     expect(calls).toEqual(['GET', 'PATCH', 'GET']);
   });
   it('reports a mismatch and updates the UI with what Cloudflare retained', async () => {
-    const request: CfRequest = async (_path, init) => init?.method ? { result: { value: 'strict' } } : { result: [{ id: 'ssl', value: 'full', editable: true }] };
+    const request: CfRequest = async (_path, init) => init?.method ? { result: { value: 'strict' } } : { result: { id: 'ssl', value: 'full', editable: true } };
     expect(await writeZoneSettings(request, 'zone-a', { ssl: 'strict' })).toMatchObject({ updated: [], failed: ['ssl'], settings: { ssl: 'full' } });
   });
   it('keeps partial results with Cloudflare codes and read-only reasons', async () => {
-    const request: CfRequest = async (_path, init) => {
+    const request: CfRequest = async (path, init) => {
       if (init?.method) throw new CloudflareError(403, 'Zone Settings Edit permission missing', [10000]);
-      return { result: [{ id: 'ssl', value: 'full', editable: true }, { id: 'cache_level', value: 'aggressive', editable: false }] };
+      return { result: path.endsWith('/ssl') ? {id:'ssl',value:'full',editable:true} : {id:'cache_level',value:'aggressive',editable:false} };
     };
     const result = await writeZoneSettings(request, 'zone-a', { ssl: 'strict', cache_level: 'basic' });
     expect(result.failed).toHaveLength(2); expect(result.errors.ssl).toContain('HTTP 403 Code 10000'); expect(result.errors.cache_level).toContain('read-only');
   });
   it('rejects a failed/invalid GET rather than generating a successful empty form', async () => {
     const request = vi.fn(async () => { throw new CloudflareError(403, 'Read denied'); });
-    await expect(writeZoneSettings(request, 'zone-a', { ssl: 'strict' })).rejects.toThrow('Read denied');
+    expect(await writeZoneSettings(request, 'zone-a', { ssl: 'strict' })).toMatchObject({updated:[],failed:['ssl'],fields:{ssl:{status:'unavailable'}}});
     expect(request).toHaveBeenCalledTimes(1); expect(() => normalizeSettings({})).toThrow();
   });
 });

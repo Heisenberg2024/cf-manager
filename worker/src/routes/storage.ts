@@ -3,27 +3,34 @@ import { errorDetails } from '../services/cfErrors';
 import { Hono } from 'hono';
 import type { Env } from '../types';
 import { getAccountById, addAuditLog } from '../db/models';
-import { cfFetch, cfFetchRaw, cfFetchAll } from '../services/cfApi';
+import { cfFetch, cfFetchRaw, cfFetchAll, accountRequest } from '../services/cfApi';
 import { isDemoAccount, demoDestructiveGuard } from '../services/demo';
 
+import {getStorageResources,getD1Resources} from '../services/storageRuntime';
+import {pageOptions,requireStorageBinding} from '../services/storageResources';
 const app = new Hono<{ Bindings: Env }>();
 
 // 演示账户：拦截所有销毁/删除类操作（DELETE、bulk-delete）
 app.use('/:accountId/*', demoDestructiveGuard());
+app.use('*',async(c,next)=>{
+  try{await next();}finally{
+    c.header('Cache-Control','no-store');
+    if(c.req.method!=='GET'){
+      const account=await getAccountById(c.env.DB,Number(c.req.param('accountId')));
+      if(account){if(c.req.path.includes('/d1')&&!c.req.path.endsWith('/query'))getD1Resources(c.env.DB).invalidate(account.id,account.account_id,c.req.param('dbId'));const kind=c.req.path.includes('/kv')?'kv':c.req.path.includes('/r2')?(c.req.param('bucket')?'objects':'buckets'):undefined;if(kind){getStorageResources(c.env.DB).invalidate(account.id,account.account_id,kind,c.req.param('nsId') || c.req.param('bucket') || '');if(kind==='objects'&&c.req.method==='DELETE'&&c.req.path.endsWith(`/r2/${c.req.param('bucket')}`))getStorageResources(c.env.DB).invalidate(account.id,account.account_id,'buckets','');}}
+    }
+  }
+});
 
 async function requireAccount(c: any) {
-  const id = parseInt(c.req.param('accountId'), 10);
+  const input=c.req.param('accountId');if(!/^\d+$/.test(input)||(!Number.isSafeInteger(Number(input))||Number(input)<=0))throw Object.assign(new Error('Invalid Account ID'),{statusCode:400});
+  const id = Number(input);
   const account = await getAccountById(c.env.DB, id);
   if (!account) throw Object.assign(new Error('Account not found'), { statusCode: 404 });
-  return account;
+  return requireStorageBinding(account);
 }
 
 const acctPath = (a: any) => `/accounts/${a.account_id}`;
-
-function extractD1QueryResult(data: any): any {
-  const firstResult = Array.isArray(data.result) ? data.result[0] : data;
-  return firstResult?.results ?? [];
-}
 
 // ============ KV Namespaces ============
 app.get('/:accountId/kv', async (c) => {
@@ -51,17 +58,8 @@ app.delete('/:accountId/kv/:nsId', async (c) => {
 
 app.get('/:accountId/kv/:nsId/keys', async (c) => {
   const account = await requireAccount(c);
-  const prefix = c.req.query('prefix') || '';
-  const cursor = c.req.query('cursor') || '';
-  const limit = c.req.query('limit') || '1000';
-  let url = `${acctPath(account)}/storage/kv/namespaces/${c.req.param('nsId')}/keys?limit=${limit}`;
-  if (prefix) url += `&prefix=${encodeURIComponent(prefix)}`;
-  if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
-  const data = await cfFetch<any>(account, url, c.env.ENCRYPTION_KEY);
-  return c.json({
-    keys: data.result || [],
-    cursor: data.result_info?.cursor || undefined,
-  });
+  const page=await getStorageResources(c.env.DB).page(account,await accountRequest(account,c.env.ENCRYPTION_KEY),'kv',c.req.param('nsId'),{...pageOptions(c.req.query()),signal:c.req.raw.signal});
+  return c.json({keys:page.items,cursor:page.cursor,is_truncated:page.is_truncated,meta:page.meta});
 });
 
 app.get('/:accountId/kv/:nsId/values/:key', async (c) => {
@@ -105,7 +103,7 @@ app.post('/:accountId/kv/:nsId/bulk-delete', async (c) => {
 // ============ D1 Databases ============
 app.get('/:accountId/d1', async (c) => {
   const account = await requireAccount(c);
-  return c.json(await cfFetchAll(account, `${acctPath(account)}/d1/database`, c.env.ENCRYPTION_KEY));
+  return c.json(await getD1Resources(c.env.DB).databases(account,await accountRequest(account,c.env.ENCRYPTION_KEY),{refresh:c.req.query('refresh')==='true',signal:c.req.raw.signal}));
 });
 
 app.post('/:accountId/d1', async (c) => {
@@ -128,33 +126,26 @@ app.delete('/:accountId/d1/:dbId', async (c) => {
 
 app.get('/:accountId/d1/:dbId/tables', async (c) => {
   const account = await requireAccount(c);
-  const data = await cfFetch(account, `${acctPath(account)}/d1/database/${c.req.param('dbId')}/query`, c.env.ENCRYPTION_KEY, {
-    method: 'POST', body: JSON.stringify({ sql: "SELECT name, type FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name" }),
-  });
-  return c.json(extractD1QueryResult(data));
+  return c.json(await getD1Resources(c.env.DB).tables(account,await accountRequest(account,c.env.ENCRYPTION_KEY),c.req.param('dbId'),{refresh:c.req.query('refresh')==='true',signal:c.req.raw.signal}));
 });
 
 app.get('/:accountId/d1/:dbId/tables/:tableName/schema', async (c) => {
   const account = await requireAccount(c);
-  const safeName = c.req.param('tableName').replace(/[^a-zA-Z0-9_]/g, '');
-  const data = await cfFetch(account, `${acctPath(account)}/d1/database/${c.req.param('dbId')}/query`, c.env.ENCRYPTION_KEY, {
-    method: 'POST', body: JSON.stringify({ sql: `PRAGMA table_info(${safeName})` }),
-  });
-  return c.json(extractD1QueryResult(data));
+  return c.json(await getD1Resources(c.env.DB).schema(account,await accountRequest(account,c.env.ENCRYPTION_KEY),c.req.param('dbId'),c.req.param('tableName'),{refresh:c.req.query('refresh')==='true',signal:c.req.raw.signal}));
 });
 
 app.post('/:accountId/d1/:dbId/query', async (c) => {
   const account = await requireAccount(c);
-  const { sql, params } = await c.req.json();
-  if (!sql) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'sql is required' } }, 400);
-  if (/^\s*(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE)\b/i.test(sql) && isDemoAccount(account.id, c.env.DEMO_ACCOUNT_IDS)) {
-    return c.json({ error: { code: 'DEMO_PROTECTED', message: '演示账户的 D1 数据库不可执行写操作（建/删/改）' } }, 403);
-  }
-  const data = await cfFetch(account, `${acctPath(account)}/d1/database/${c.req.param('dbId')}/query`, c.env.ENCRYPTION_KEY, {
-    method: 'POST', body: JSON.stringify({ sql, params: params || [] }),
-  });
-  const qr = Array.isArray(data.result) ? data.result[0] : data;
-  return c.json({ results: qr?.results ?? [], meta: qr?.meta ?? {} });
+  const body=await c.req.json();
+  try{
+    const {result,policy}=await getD1Resources(c.env.DB).execute(account,await accountRequest(account,c.env.ENCRYPTION_KEY),c.req.param('dbId'),body,isDemoAccount(account.id,c.env.DEMO_ACCOUNT_IDS),c.req.raw.signal);
+    await addAuditLog(c.env.DB,{account_id:account.id,action:'d1_query',target:c.req.param('dbId'),detail:JSON.stringify({operation:policy.operation,readOnly:policy.readOnly,outcome:'confirmed',returnedRows:result.results.length}),status:'success'});return c.json(result);
+  }catch(error:any){await addAuditLog(c.env.DB,{account_id:account.id,action:'d1_query',target:c.req.param('dbId'),detail:JSON.stringify({operation:error.operation || 'rejected',outcome:error.code==='D1_OUTCOME_UNCERTAIN'?'uncertain':'failed'}),status:'error'});throw error;}
+
+});
+
+app.get('/:accountId/d1/:dbId/tables/:tableName/data',async(c)=>{
+ const account=await requireAccount(c);return c.json(await getD1Resources(c.env.DB).tablePage(account,await accountRequest(account,c.env.ENCRYPTION_KEY),c.req.param('dbId'),c.req.param('tableName'),{limit:c.req.query('limit'),cursor:c.req.query('cursor'),signal:c.req.raw.signal}));
 });
 
 // ============ R2 Buckets ============
@@ -166,10 +157,11 @@ app.get('/:accountId/r2', async (c) => {
     return c.json({ success: false, error: { code: 'R2_NOT_ENABLED', message: 'R2 is not enabled for this account' } }, 403);
   }
   try {
-    const data = await cfFetch<{ result: any }>(account, `${acctPath(account)}/r2/buckets`, c.env.ENCRYPTION_KEY);
-    return c.json(data.result?.buckets || []);
+    const runtime=getStorageResources(c.env.DB),request=await accountRequest(account,c.env.ENCRYPTION_KEY),options={...pageOptions(c.req.query()),signal:c.req.raw.signal};
+    if(c.req.query('paged')==='true'||c.req.query('cursor')!==undefined){const page=await runtime.page(account,request,'buckets','',options);return c.json({buckets:page.items,cursor:page.cursor,is_truncated:page.is_truncated,meta:page.meta});}
+    return c.json(await runtime.allBuckets(account,request,options));
   } catch (e: any) {
-    if (e.body?.includes('10042') || e.body?.includes('enable R2')) {
+    if (/10042|enable R2/i.test(errorDetails(e).message)) {
       return c.json({ success: false, error: { code: 'R2_NOT_ENABLED', message: 'R2 is not enabled for this account' } }, 403);
     }
     throw e;
@@ -196,19 +188,8 @@ app.delete('/:accountId/r2/:bucket', async (c) => {
 
 app.get('/:accountId/r2/:bucket/objects', async (c) => {
   const account = await requireAccount(c);
-  const prefix = c.req.query('prefix') || '';
-  const delimiter = c.req.query('delimiter') || '/';
-  const cursor = c.req.query('cursor') || '';
-  let url = `${acctPath(account)}/r2/buckets/${c.req.param('bucket')}/objects?delimiter=${encodeURIComponent(delimiter)}`;
-  if (prefix) url += `&prefix=${encodeURIComponent(prefix)}`;
-  if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
-  const data = await cfFetch<any>(account, url, c.env.ENCRYPTION_KEY);
-  const raw = data.result || {};
-  return c.json({
-    objects: raw.objects || [],
-    delimited_prefixes: raw.delimited_prefixes || raw.delimited || [],
-    cursor: raw.cursor || data.result_info?.cursor || undefined,
-  });
+  const page=await getStorageResources(c.env.DB).page(account,await accountRequest(account,c.env.ENCRYPTION_KEY),'objects',c.req.param('bucket'),{...pageOptions({...c.req.query(),delimiter:c.req.query('delimiter') ?? '/'}),signal:c.req.raw.signal});
+  return c.json({objects:page.items,delimited_prefixes:page.prefixes,cursor:page.cursor,is_truncated:page.is_truncated,meta:page.meta});
 });
 
 app.delete('/:accountId/r2/:bucket/objects', async (c) => {

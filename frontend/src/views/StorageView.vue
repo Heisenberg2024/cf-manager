@@ -43,13 +43,16 @@
             <n-card content-class="storage-card-content" :title="selectedKvNs ? `Keys - ${selectedKvNs.title || selectedKvNs.id}` : 'Keys'" size="small" class="storage-right-card" content-style="display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 12px;">
               <template #header-extra>
                 <n-space>
-                  <n-input v-model:value="kvPrefix" :placeholder="t('storage.prefixFilter')" size="small" style="width: 200px" @keyup.enter="() => loadKvKeys()" clearable />
-                  <n-button size="small" type="primary" @click="showKvEditor = true" :disabled="!selectedKvNs">{{ t('storage.create') }}</n-button>
+                  <n-input v-model:value="kvPrefix" :placeholder="t('storage.prefixFilter')" size="small" style="width: 200px" @keyup.enter="() => loadKvKeys(undefined,true)" clearable />
+                  <n-button size="small" type="primary" @click="openKvCreate" :disabled="!selectedKvNs">{{ t('storage.create') }}</n-button>
                 </n-space>
               </template>
-              <AutoFitTable style="flex: 1 1 0%; min-height: 0; margin-top: 0;" :columns="kvColumns" :data="kvKeys" :loading="kvKeysLoading" :scroll-x="500" />
-              <n-space v-if="kvCursor" justify="center" style="margin-top: 12px">
-                <n-button size="small" @click="loadKvKeys(kvCursor)">{{ t('storage.loadMore') }}</n-button>
+              <n-button size="tiny" :loading="kvKeysLoading" @click="loadKvKeys(undefined,true)">{{ t('common.refresh') }}</n-button>
+              <AutoFitTable style="flex: 1 1 0%; min-height: 0; margin-top: 0;" :columns="kvColumns" :data="kvKeys" virtual-scroll :row-key="(row:any)=>row.name" :loading="kvKeysLoading && !kvKeys.length" :scroll-x="500" />
+              <n-alert v-if="kvError" type="warning">{{ kvError }}</n-alert>
+              <n-text depth="3">{{ t('storage.pageHint') }} {{ kvDropped ? t('storage.windowHint') : '' }}</n-text>
+              <n-space justify="center" style="margin-top: 12px">
+                <n-button v-if="kvCursor" size="small" :loading="kvKeysLoading" :disabled="kvKeysLoading" @click="loadKvKeys(kvCursor)">{{ t('storage.loadMore') }}</n-button>
               </n-space>
             </n-card>
           </n-gi>
@@ -120,9 +123,13 @@
                 <n-button type="primary" size="small" @click="executeD1" :loading="d1Loading" :disabled="!selectedD1Db || !d1Sql">{{ t('storage.execute') }}</n-button>
                 <n-checkbox v-model:checked="d1AllowWrite" size="small" :disabled="isDemoSelected">{{ t('storage.allowWrite') }}</n-checkbox>
               </n-space>
+              <n-alert v-if="d1Error" type="warning">{{ d1Error }}</n-alert>
+              <n-text depth="3">{{ t('storage.sqlHint') }}</n-text>
+              <n-space v-if="activeTableName" style="flex-shrink: 0"><n-text>{{ activeTableName }} · {{ d1PageNumber }}</n-text><n-button size="small" :loading="d1Loading" @click="browseD1Table()">{{ t('common.refresh') }}</n-button><n-button v-if="d1Cursor" size="small" :disabled="d1Loading" @click="browseD1Table(d1Cursor)">{{ t('storage.nextPage') }}</n-button></n-space>
+              <n-alert v-if="d1Result?.meta?.result_truncated" type="warning">{{ t('storage.resultLimit') }}</n-alert>
               <div v-if="d1Result" style="flex: 1 1 0%; min-height: 0; display: flex; flex-direction: column;">
                 <n-text depth="3" style="font-size: 12px; margin-bottom: 6px; flex-shrink: 0;">{{ t('storage.rowsRead', { count: d1Result.meta?.rows_read || 0 }) }} {{ t('storage.rowsWritten', { count: d1Result.meta?.rows_written || 0 }) }} {{ t('storage.duration', { ms: d1Result.meta?.duration || 0 }) }}</n-text>
-                <AutoFitTable v-if="d1ResultColumns.length" :columns="d1ResultColumns" :data="d1Result.results || []" style="flex: 1 1 0%; min-height: 0; margin-top: 0;" :scroll-x="d1ScrollX" />
+                <AutoFitTable v-if="d1ResultColumns.length" :columns="d1ResultColumns" :data="d1Result.results || []" virtual-scroll style="flex: 1 1 0%; min-height: 0; margin-top: 0;" :scroll-x="d1ScrollX" />
                 <n-empty v-else-if="!d1ResultColumns.length && !d1Result.error" :description="t('storage.executedNoResult')" style="margin: auto;" />
               </div>
             </n-card>
@@ -149,6 +156,8 @@
                   </n-list-item>
                 </n-list>
                 <n-empty v-if="!r2Buckets.length && !r2BucketLoading" :description="t('storage.noBucket')" />
+                <n-alert v-if="bucketError" type="warning">{{ bucketError }}</n-alert>
+                <n-button v-if="bucketCursor" size="small" :loading="r2BucketLoading" :disabled="r2BucketLoading" @click="loadR2Buckets(bucketCursor)">{{ t('storage.loadMore') }}</n-button>
               </n-spin>
             </n-card>
           </n-gi>
@@ -164,7 +173,10 @@
                   {{ part }}
                 </n-breadcrumb-item>
               </n-breadcrumb>
-              <AutoFitTable style="flex: 1 1 0%; min-height: 0; margin-top: 0;" :columns="r2Columns" :data="r2DisplayItems" :loading="r2Loading" :scroll-x="600" />
+              <AutoFitTable style="flex: 1 1 0%; min-height: 0; margin-top: 0;" :columns="r2Columns" :data="r2DisplayItems" virtual-scroll :row-key="(row:any)=>`${row.isFolder ? 'dir' : 'file'}:${row.key}`" :loading="r2Loading && !r2DisplayItems.length" :scroll-x="600" />
+              <n-alert v-if="r2Error" type="warning">{{ r2Error }}</n-alert>
+              <n-text depth="3">{{ t('storage.pageHint') }} {{ r2Dropped ? t('storage.windowHint') : '' }}</n-text>
+              <n-space><n-button size="small" :loading="r2Loading" @click="loadR2Objects(undefined,true)">{{ t('common.refresh') }}</n-button><n-button v-if="r2Cursor" size="small" :loading="r2Loading" :disabled="r2Loading" @click="loadR2Objects(r2Cursor)">{{ t('storage.loadMore') }}</n-button></n-space>
             </n-card>
           </n-gi>
         </n-grid>
@@ -313,6 +325,8 @@ import { accountsApi } from '../api/accounts';
 import { formatCN } from '../utils/dateFormat';
 import { loadDemoAccounts, isDemoAccount } from '../utils/demoAccounts';
 
+import {classifySql,quoteIdentifier} from '../shared/d1SqlPolicy';
+import {StorageReadCache,CursorWindow} from '../utils/storageReads';
 const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
@@ -332,6 +346,16 @@ function confirmAction(title: string, content: string): Promise<boolean> {
 }
 
 const selectedAccount = ref<number | null>(null);
+const storageReads=new StorageReadCache();
+const controllers=new Map<string,AbortController>();
+const pendingReads=new Map<string,string>();
+const kvPage=new CursorWindow(),r2Page=new CursorWindow(),bucketPage=new CursorWindow();
+const kvError=ref(''),r2Error=ref(''),bucketError=ref('');
+const r2Cursor=ref(''),bucketCursor=ref('');
+const kvDropped=ref(0),r2Dropped=ref(0);
+const storageKey=(accountId:number,kind:string,resource:string,prefix='',cursor='')=>JSON.stringify([accountId,JSON.stringify(allAccounts.value.find(a=>a.id===accountId)),kind,resource,prefix,'/',cursor,100]);
+function abortRead(channel:string){controllers.get(channel)?.abort();const controller=new AbortController();controllers.set(channel,controller);return controller;}
+function invalidateStorage(accountId:number,kind:string,resource=''){storageReads.invalidate(key=>{const parts=JSON.parse(key);return parts[0]===accountId&&parts[2]===kind&&(!resource||parts[3]===resource);});}
 const requests = createRequestScope(() => String(selectedAccount.value));
 const activeTab = ref('kv');
 const r2Available = ref(true);
@@ -386,7 +410,7 @@ async function checkR2Available() {
  * （旧资源在新账号下不存在）→ 报错或返回空数据。
  */
 function resetStorageCaches() {
-  requests.invalidate();
+  requests.invalidate();for(const controller of controllers.values())controller.abort();pendingReads.clear();kvError.value='';r2Error.value='';bucketError.value='';r2Cursor.value='';bucketCursor.value='';kvPrefix.value='';kvEditForm.value={key:'',value:'',ttl:null};kvEditorTarget.value=null;r2UploadPrefix.value='';r2UploadFile.value=null;d1AllowWrite.value=false;d1Sql.value='';d1Cursor.value='';d1Error.value='';clearR2PreviewUrl();
   kvNsLoading.value = false; kvKeysLoading.value = false; d1DbLoading.value = false;
   d1Loading.value = false; d1SchemaLoading.value = false; r2BucketLoading.value = false; r2Loading.value = false; r2PreviewLoading.value = false;
   selectedD1DbId.value = null;
@@ -434,6 +458,8 @@ const showKvEditor = ref(false);
 const kvEditKey = ref('');
 const kvEditForm = ref({ key: '', value: '', ttl: null as number | null });
 const kvSaving = ref(false);
+const kvEditorTarget=ref<{accountId:number;namespaceId:string}|null>(null);
+function openKvCreate(){if(!selectedAccount.value||!selectedKvNs.value)return;kvEditorTarget.value={accountId:selectedAccount.value,namespaceId:selectedKvNs.value.id};kvEditKey.value='';kvEditForm.value={key:'',value:'',ttl:null};showKvEditor.value=true;}
 
 // ============ 通用创建 Modal ============
 const showCreateModal = ref(false);
@@ -445,6 +471,7 @@ const createModalLoading = ref(false);
 let createModalCallback: ((name: string) => Promise<void>) | null = null;
 
 function openCreateModal(title: string, placeholder: string, callback: (name: string) => Promise<void>) {
+  requests.begin('createDialog');createModalLoading.value=false;
   createModalTitle.value = title;
   createModalPlaceholder.value = placeholder;
   createModalName.value = '';
@@ -453,12 +480,13 @@ function openCreateModal(title: string, placeholder: string, callback: (name: st
 }
 
 async function handleCreateConfirm() {
-  if (!createModalName.value.trim() || !createModalCallback) return;
+  if (!createModalName.value.trim() || !createModalCallback || createModalLoading.value) return;
+  const request=requests.begin('createDialog'),callback=createModalCallback,name=createModalName.value.trim();
   createModalLoading.value = true;
   try {
-    await createModalCallback(createModalName.value.trim());
-    showCreateModal.value = false;
-  } finally { createModalLoading.value = false; }
+    await callback(name);
+    if(request.current())showCreateModal.value = false;
+  } finally { if(request.current())createModalLoading.value = false; }
 }
 
 async function handleDeleteKvNs(ns: any) {
@@ -477,8 +505,10 @@ async function handleDeleteKvNs(ns: any) {
 
 function handleCreateKvNs() {
   if (!selectedAccount.value) return;
+  const accountId=selectedAccount.value;
   openCreateModal(t('storage.kvEditorTitle'), '', async (name) => {
-    await storageApi.createKvNamespace(selectedAccount.value!, name);
+    await storageApi.createKvNamespace(accountId,name);
+    if(accountId!==selectedAccount.value)return;
     message.success(t('storage.msg.namespaceCreated'));
     loadKvNamespaces();
   });
@@ -497,39 +527,36 @@ async function loadKvNamespaces() {
 }
 
 function selectKvNamespace(ns: any) {
+  showKvEditor.value=false;kvEditorTarget.value=null;
   selectedKvNs.value = ns;
   kvKeys.value = [];
   kvCursor.value = '';
   loadKvKeys();
 }
 
-async function loadKvKeys(cursor?: string) {
-  if (!selectedAccount.value || !selectedKvNs.value) return;
-  kvKeysLoading.value = true;
-  const request = requests.begin('loadKvKeys', () => `${selectedAccount.value}:${selectedKvNs.value?.id}:${kvPrefix.value}`);
-  try {
-    const { data } = await storageApi.getKvKeys(selectedAccount.value, selectedKvNs.value.id, {
-      prefix: kvPrefix.value || undefined,
-      cursor: cursor || undefined,
-      limit: 100,
-    });
-    if (!request.current()) return;
-    if (cursor) {
-      kvKeys.value.push(...(data.keys || []));
-    } else {
-      kvKeys.value = data.keys || [];
-    }
-    kvCursor.value = data.cursor || '';
-  } catch { if (!request.current()) return; kvKeys.value = []; }
-  finally { if (request.current()) kvKeysLoading.value = false; }
+async function loadKvKeys(cursor?: string,refresh=false) {
+ if(!selectedAccount.value||!selectedKvNs.value)return;
+ const accountId=selectedAccount.value,resource=selectedKvNs.value.id,prefix=kvPrefix.value,key=storageKey(accountId,'kv',resource,prefix,cursor);
+ if(pendingReads.get('kv')===key)return;
+ pendingReads.set('kv',key);const controller=abortRead('kv');kvKeysLoading.value=true;kvError.value='';
+ const request=requests.begin('loadKvKeys',()=>`${selectedAccount.value}:${selectedKvNs.value?.id}:${kvPrefix.value}`);
+ if(!cursor){kvKeys.value=[];kvCursor.value='';}
+ try{
+  const data=await storageReads.read(key,async()=>{const {data}=await storageApi.getKvKeys(accountId,resource,{prefix:prefix||undefined,cursor:cursor||undefined,limit:100,refresh},controller.signal);return data;},refresh);
+  if(!request.current()||controller.signal.aborted)return;
+  kvPage.apply({items:data.keys,cursor:data.cursor,is_truncated:data.is_truncated},cursor);kvKeys.value=kvPage.items;kvCursor.value=kvPage.cursor;kvDropped.value=kvPage.dropped;
+ }catch(error:any){if(request.current()&&!controller.signal.aborted){kvError.value=error.errorMessage || error.message;storageReads.invalidate(k=>k===key);}}
+ finally{if(request.current()){kvKeysLoading.value=false;pendingReads.delete('kv');}}
 }
 
 async function viewKvValue(row: any) {
   if (!selectedAccount.value || !selectedKvNs.value) return;
+  const target={accountId:selectedAccount.value,namespaceId:selectedKvNs.value.id};
   const request = requests.begin('viewKvValue', () => `${selectedAccount.value}:${selectedKvNs.value?.id}`);
   try {
     const { data } = await storageApi.getKvValue(selectedAccount.value, selectedKvNs.value.id, row.name);
     if (!request.current()) return;
+    kvEditorTarget.value=target;
     kvEditKey.value = row.name;
     kvEditForm.value = { key: row.name, value: data.value || '', ttl: null };
     showKvEditor.value = true;
@@ -539,16 +566,16 @@ async function viewKvValue(row: any) {
 }
 
 async function handleSaveKv() {
-  if (!selectedAccount.value || !selectedKvNs.value || !kvEditForm.value.key) return;
+  if (!kvEditorTarget.value || !kvEditForm.value.key || kvSaving.value) return;
+  const accountId=kvEditorTarget.value.accountId,resource=kvEditorTarget.value.namespaceId,form={...kvEditForm.value};
   kvSaving.value = true;
   try {
-    await storageApi.putKvValue(selectedAccount.value, selectedKvNs.value.id, kvEditForm.value.key, kvEditForm.value.value, {
-      expiration_ttl: kvEditForm.value.ttl || undefined,
-    });
+    try {await storageApi.putKvValue(accountId,resource,form.key,form.value,{expiration_ttl:form.ttl || undefined});}finally{invalidateStorage(accountId,'kv',resource);}
+    if(accountId!==selectedAccount.value||resource!==selectedKvNs.value?.id)return;
     message.success(t('storage.msg.kvSaved'));
     showKvEditor.value = false;
     kvEditKey.value = '';
-    loadKvKeys();
+    loadKvKeys(undefined,true);
   } finally { kvSaving.value = false; }
 }
 
@@ -557,9 +584,10 @@ async function handleDeleteKv(row: any) {
   const accountId = selectedAccount.value;
   const resource = selectedKvNs.value;
   if (!await confirmAction(t('common.delete'), `Account ${accountId} / ${resource.title || resource.name || resource.id}: ${row.name || row.key}`)) return;
-  await storageApi.deleteKvKey(accountId, resource.id, row.name);
+  try{await storageApi.deleteKvKey(accountId,resource.id,row.name);}finally{invalidateStorage(accountId,'kv',resource.id);}
+  if(accountId!==selectedAccount.value||resource.id!==selectedKvNs.value?.id)return;
   message.success(t('storage.msg.deleted'));
-  loadKvKeys();
+  loadKvKeys(undefined,true);
 }
 
 const kvColumns = computed<DataTableColumns<any>>(() => [
@@ -587,11 +615,12 @@ const d1AllowWrite = ref(false);
 const d1Loading = ref(false);
 const d1Result = ref<any>(null);
 const activeTableName = ref<string>('');
+const d1Cursor=ref(''),d1PageNumber=ref(1),d1Error=ref('');
 
 function handleTableClick(tableName: string) {
   activeTableName.value = tableName;
-  d1Sql.value = `SELECT * FROM ${tableName} LIMIT 100;`;
-  executeD1();
+  d1Sql.value = `SELECT * FROM ${quoteIdentifier(tableName)} LIMIT 100;`;
+  browseD1Table();
 }
 
 const d1DbSelectOptions = computed(() =>
@@ -621,7 +650,7 @@ async function handleDeleteD1Db(db: any) {
   if (!selectedAccount.value) return;
   const accountId = selectedAccount.value;
   if (!await confirmAction(t('storage.msg.deleteDatabaseTitle'), t('storage.msg.deleteDatabaseConfirm', { name: db.name }))) return;
-  await storageApi.deleteD1Database(accountId, db.uuid || db.id);
+  try{await storageApi.deleteD1Database(accountId,db.uuid || db.id);}finally{invalidateStorage(accountId,'d1');}
   if (accountId !== selectedAccount.value) return;
   message.success(t('storage.msg.databaseDeleted'));
   if (selectedD1Db.value?.uuid === db.uuid) {
@@ -629,24 +658,27 @@ async function handleDeleteD1Db(db: any) {
     d1Tables.value = [];
     d1Result.value = null;
   }
-  loadD1Databases();
+  loadD1Databases(true);
 }
 
 function handleCreateD1Db() {
   if (!selectedAccount.value) return;
+  const accountId=selectedAccount.value;
   openCreateModal(t('storage.d1'), '', async (name) => {
-    await storageApi.createD1Database(selectedAccount.value!, name);
+    try{await storageApi.createD1Database(accountId,name);}finally{invalidateStorage(accountId,'d1');}
+    if(accountId!==selectedAccount.value)return;
     message.success(t('storage.msg.databaseCreated'));
-    loadD1Databases();
+    loadD1Databases(true);
   });
 }
 
-async function loadD1Databases() {
+async function loadD1Databases(refresh=false) {
   if (!selectedAccount.value) return;
   d1DbLoading.value = true;
   const request = requests.begin('loadD1Databases');
   try {
-    const { data } = await storageApi.getD1Databases(selectedAccount.value);
+    const accountId=selectedAccount.value;const controller=abortRead('d1list');
+    const data=await storageReads.read(storageKey(accountId,'d1',''),async()=>{const {data}=await storageApi.getD1Databases(accountId,refresh,controller.signal);return data;},refresh);
     if (!request.current()) return;
     d1Databases.value = Array.isArray(data) ? data : [];
     if (d1Databases.value.length > 0 && !selectedD1Db.value) {
@@ -656,28 +688,40 @@ async function loadD1Databases() {
   finally { if (request.current()) d1DbLoading.value = false; }
 }
 
-async function selectD1Database(db: any) {
+async function selectD1Database(db: any,refresh=false) {
+  if((selectedD1Db.value?.uuid || selectedD1Db.value?.id)!==(db.uuid || db.id)){showD1Schema.value=false;showD1CreateTable.value=false;d1SchemaData.value=[];d1SchemaTable.value='';controllers.get('d1schema')?.abort();}
   selectedD1Db.value = db;
   selectedD1DbId.value = db.uuid || db.id;
-  activeTableName.value = '';
+  activeTableName.value = '';d1Sql.value='';d1Result.value=null;d1AllowWrite.value=false;d1Cursor.value='';d1Error.value='';d1Loading.value=false;controllers.get('d1data')?.abort();controllers.get('d1custom')?.abort();
   const request = requests.begin('selectD1Database', () => `${selectedAccount.value}:${selectedD1DbId.value}`);
   try {
-    const { data } = await storageApi.getD1Tables(selectedAccount.value!, db.uuid || db.id);
+    const accountId=selectedAccount.value!,databaseId=db.uuid || db.id,controller=abortRead('d1tables');
+    const data=await storageReads.read(storageKey(accountId,'d1',databaseId,'tables'),async()=>{const {data}=await storageApi.getD1Tables(accountId,databaseId,refresh,controller.signal);return data;},refresh);
     if (!request.current()) return;
     d1Tables.value = Array.isArray(data) ? data : [];
   } catch { if (!request.current()) return; d1Tables.value = []; }
 }
 
+async function browseD1Table(cursor?:string) {
+ if(!selectedAccount.value||!selectedD1DbId.value||!activeTableName.value)return;
+ const accountId=selectedAccount.value,db=selectedD1DbId.value,table=activeTableName.value,controller=abortRead('d1data');
+ const request=requests.begin('executeD1',()=>`${selectedAccount.value}:${selectedD1DbId.value}:${activeTableName.value}`);d1Loading.value=true;d1Error.value='';
+ try{const {data}=await storageApi.getD1TableData(accountId,db,table,cursor,100,controller.signal);if(!request.current()||controller.signal.aborted)return;d1Result.value=data;d1Cursor.value=data.meta?.cursor || '';d1PageNumber.value=cursor?d1PageNumber.value+1:1;}
+ catch(error:any){if(request.current()&&!controller.signal.aborted)d1Error.value=error.errorMessage || error.message;}
+ finally{if(request.current())d1Loading.value=false;}
+}
 async function executeD1() {
-  if (!selectedAccount.value || !selectedD1Db.value || !d1Sql.value) return;
-  d1Loading.value = true;
-  const request = requests.begin('executeD1', () => `${selectedAccount.value}:${selectedD1DbId.value}`);
-  try {
-    const { data } = await storageApi.executeD1Query(selectedAccount.value, selectedD1Db.value.uuid || selectedD1Db.value.id, d1Sql.value, d1AllowWrite.value);
-    if (!request.current()) return;
-    d1Result.value = data;
-  } catch { if (!request.current()) return; d1Result.value = null; }
-  finally { if (request.current()) d1Loading.value = false; }
+ if(!selectedAccount.value||!selectedD1DbId.value||!d1Sql.value||d1Loading.value)return;
+ const accountId=selectedAccount.value,db=selectedD1DbId.value,sql=d1Sql.value,allowWrite=d1AllowWrite.value;
+ const request=requests.begin('executeD1',()=>`${selectedAccount.value}:${selectedD1DbId.value}`);d1Loading.value=true;d1Error.value='';
+ try{
+  const policy=classifySql(sql);
+  if(!policy.readOnly&&(!allowWrite||isDemoSelected.value))throw Error(t('storage.allowWrite'));
+  if(!policy.readOnly&&!await confirmAction(t('storage.allowWrite'),`Account ${accountId} / ${selectedD1Db.value.name} (${db})\n${sql}`))return;
+  const controller=policy.readOnly?abortRead('d1custom'):undefined;let data;try{({data}=await storageApi.executeD1Query(accountId,db,sql,allowWrite,controller?.signal));}finally{if(!policy.readOnly)invalidateStorage(accountId,'d1',db);}
+  if(!request.current())return;d1Result.value={...data,results:(data.results || []).slice(0,1000)};d1Cursor.value='';activeTableName.value='';
+ }catch(error:any){if(request.current())d1Error.value=error.errorMessage || error.message;}
+ finally{if(request.current())d1Loading.value=false;}
 }
 
 // ============ D1 Table Schema ============
@@ -708,7 +752,7 @@ const d1SchemaColumns = computed<DataTableColumns<any>>(() => [
   { title: t('storage.primaryKey'), key: 'pk', width: 60, render: (row) => row.pk ? t('common.yes') : '' },
 ]);
 
-async function openD1TableSchema(tableName: string) {
+async function openD1TableSchema(tableName: string,refresh=false) {
   if (!selectedAccount.value || !selectedD1Db.value) return;
   d1SchemaTable.value = tableName;
   d1SchemaLoading.value = true;
@@ -718,7 +762,8 @@ async function openD1TableSchema(tableName: string) {
   showD1DropColumn.value = false;
   const request = requests.begin('openD1TableSchema', () => `${selectedAccount.value}:${selectedD1DbId.value}:${d1SchemaTable.value}`);
   try {
-    const { data } = await storageApi.getD1TableSchema(selectedAccount.value, selectedD1Db.value.uuid || selectedD1Db.value.id, tableName);
+    const accountId=selectedAccount.value,databaseId=selectedD1DbId.value!,controller=abortRead('d1schema');
+    const data=await storageReads.read(storageKey(accountId,'d1',databaseId,`schema:${tableName}`),async()=>{const {data}=await storageApi.getD1TableSchema(accountId,databaseId,tableName,refresh,controller.signal);return data;},refresh);
     if (!request.current()) return;
     d1SchemaData.value = Array.isArray(data) ? data : [];
   } catch { if (!request.current()) return; d1SchemaData.value = []; }
@@ -726,23 +771,30 @@ async function openD1TableSchema(tableName: string) {
 }
 
 async function runD1Alter(sql: string) {
-  if (!selectedAccount.value || !selectedD1Db.value) return;
-  await storageApi.executeD1Query(selectedAccount.value, selectedD1Db.value.uuid || selectedD1Db.value.id, sql, true);
-  openD1TableSchema(d1SchemaTable.value);
+ if(!selectedAccount.value||!selectedD1DbId.value||isDemoSelected.value||d1Loading.value)return false;
+ const accountId=selectedAccount.value,db=selectedD1DbId.value,table=d1SchemaTable.value,request=requests.begin('schemaWrite',()=>`${selectedAccount.value}:${selectedD1DbId.value}`);
+ d1Loading.value=true;
+ try{
+  if(!await confirmAction(t('storage.allowWrite'),`Account ${accountId} / ${selectedD1Db.value.name} (${db})\n${sql}`))return false;
+  try{await storageApi.executeD1Query(accountId,db,sql,true);}finally{invalidateStorage(accountId,'d1',db);}
+  if(!request.current())return false;
+  if(showD1Schema.value&&!sql.startsWith('DROP TABLE'))await openD1TableSchema(table,true);
+  await selectD1Database(selectedD1Db.value,true);return true;
+ }finally{if(request.current())d1Loading.value=false;}
 }
 
 async function handleD1AddColumn() {
-  let sql = `ALTER TABLE ${d1SchemaTable.value} ADD COLUMN ${d1AddColName.value} ${d1AddColType.value}`;
+  let sql = `ALTER TABLE ${quoteIdentifier(d1SchemaTable.value)} ADD COLUMN ${quoteIdentifier(d1AddColName.value)} ${d1AddColType.value}`;
   if (d1AddColNotNull.value && d1AddColDefault.value) sql += ` NOT NULL DEFAULT ${d1AddColDefault.value}`;
   else if (d1AddColDefault.value) sql += ` DEFAULT ${d1AddColDefault.value}`;
-  await runD1Alter(sql);
+  if(!await runD1Alter(sql))return;
   message.success(t('storage.msg.columnAdded', { name: d1AddColName.value }));
   d1AddColName.value = '';
   showD1AddColumn.value = false;
 }
 
 async function handleD1RenameColumn() {
-  await runD1Alter(`ALTER TABLE ${d1SchemaTable.value} RENAME COLUMN ${d1RenameOld.value} TO ${d1RenameNew.value}`);
+  if(!await runD1Alter(`ALTER TABLE ${quoteIdentifier(d1SchemaTable.value)} RENAME COLUMN ${quoteIdentifier(d1RenameOld.value)} TO ${quoteIdentifier(d1RenameNew.value)}`))return;
   message.success(t('storage.msg.columnRenamed'));
   d1RenameOld.value = '';
   d1RenameNew.value = '';
@@ -750,15 +802,14 @@ async function handleD1RenameColumn() {
 }
 
 async function handleD1DropColumn() {
-  await runD1Alter(`ALTER TABLE ${d1SchemaTable.value} DROP COLUMN ${d1DropColName.value}`);
+  if(!await runD1Alter(`ALTER TABLE ${quoteIdentifier(d1SchemaTable.value)} DROP COLUMN ${quoteIdentifier(d1DropColName.value)}`))return;
   message.success(t('storage.msg.columnDeleted', { name: d1DropColName.value }));
   d1DropColName.value = '';
   showD1DropColumn.value = false;
 }
 
 async function handleD1DropTable() {
-  if (!await confirmAction(t('storage.msg.deleteTableTitle'), t('storage.msg.deleteTableConfirm', { name: d1SchemaTable.value }))) return;
-  await runD1Alter(`DROP TABLE ${d1SchemaTable.value}`);
+  if(!await runD1Alter(`DROP TABLE ${quoteIdentifier(d1SchemaTable.value)}`))return;
   message.success(t('storage.msg.tableDeleted', { name: d1SchemaTable.value }));
   showD1Schema.value = false;
   selectD1Database(selectedD1Db.value);
@@ -844,12 +895,7 @@ async function handleD1CreateTable() {
   if (!selectedAccount.value || !selectedD1Db.value) return;
   d1Creating.value = true;
   try {
-    await storageApi.executeD1Query(
-      selectedAccount.value,
-      selectedD1Db.value.uuid || selectedD1Db.value.id,
-      d1CreateTableSql.value,
-      true,
-    );
+    if(!await runD1Alter(d1CreateTableSql.value))return;
     message.success(t('storage.msg.tableCreated', { name: d1NewTableName.value }));
     showD1CreateTable.value = false;
     d1NewTableName.value = '';
@@ -878,11 +924,11 @@ const r2PrefixParts = computed(() => r2Prefix.value.split('/').filter(Boolean));
 
 const r2DisplayItems = computed(() => {
   const folders = r2Prefixes.value.map(p => ({
-    name: p.replace(r2Prefix.value, '').replace(/\/$/, ''),
+    name: (p.startsWith(r2Prefix.value) ? p.slice(r2Prefix.value.length) : p).replace(/\/$/, ''),
     key: p, isFolder: true, size: 0, lastModified: '', contentType: '',
   }));
   const files = r2Objects.value.map(o => ({
-    name: o.key?.replace(r2Prefix.value, '') || o.key,
+    name: o.key?.startsWith(r2Prefix.value) ? o.key.slice(r2Prefix.value.length) : o.key,
     key: o.key, isFolder: false, size: o.size || 0,
     lastModified: o.last_modified || '',
     contentType: o.http_metadata?.contentType || '',
@@ -894,7 +940,7 @@ async function handleDeleteR2Bucket(b: any) {
   if (!selectedAccount.value) return;
   const accountId = selectedAccount.value;
   if (!await confirmAction(t('storage.msg.deleteBucketTitle'), t('storage.msg.deleteBucketConfirm', { name: b.name }))) return;
-  await storageApi.deleteR2Bucket(accountId, b.name);
+  try{await storageApi.deleteR2Bucket(accountId,b.name);}finally{invalidateStorage(accountId,'buckets');invalidateStorage(accountId,'objects',b.name);}
   if (accountId !== selectedAccount.value) return;
   message.success(t('storage.msg.bucketDeleted'));
   if (selectedR2Bucket.value?.name === b.name) {
@@ -902,28 +948,28 @@ async function handleDeleteR2Bucket(b: any) {
     r2Objects.value = [];
     r2Prefixes.value = [];
   }
-  loadR2Buckets();
+  loadR2Buckets(undefined,true);
 }
 
 function handleCreateR2Bucket() {
   if (!selectedAccount.value) return;
+  const accountId=selectedAccount.value;
   openCreateModal(t('storage.r2'), '', async (name) => {
-    await storageApi.createR2Bucket(selectedAccount.value!, name);
+    try{await storageApi.createR2Bucket(accountId,name);}finally{invalidateStorage(accountId,'buckets');}
+    if(accountId!==selectedAccount.value)return;
     message.success(t('storage.msg.bucketCreated'));
-    loadR2Buckets();
+    loadR2Buckets(undefined,true);
   });
 }
 
-async function loadR2Buckets() {
-  if (!selectedAccount.value) return;
-  r2BucketLoading.value = true;
-  const request = requests.begin('loadR2Buckets');
-  try {
-    const { data } = await storageApi.getR2Buckets(selectedAccount.value);
-    if (!request.current()) return;
-    r2Buckets.value = Array.isArray(data) ? data : [];
-  } catch { if (!request.current()) return; r2Buckets.value = []; }
-  finally { if (request.current()) r2BucketLoading.value = false; }
+async function loadR2Buckets(cursor?:string,refresh=false) {
+ if(!selectedAccount.value)return;
+ const accountId=selectedAccount.value,key=storageKey(accountId,'buckets','', '',cursor);
+ if(pendingReads.get('buckets')===key)return;pendingReads.set('buckets',key);const controller=abortRead('buckets');const request=requests.begin('loadR2Buckets');r2BucketLoading.value=true;bucketError.value='';
+ try{const data=await storageReads.read(key,async()=>{const {data}=await storageApi.getR2Buckets(accountId,{params:{paged:true,cursor,limit:100,refresh},signal:controller.signal,_silent:true});return data;},refresh);if(!request.current()||controller.signal.aborted)return;
+ bucketPage.apply({items:Array.isArray(data)?data:data.buckets,cursor:data.cursor,is_truncated:data.is_truncated},cursor);r2Buckets.value=bucketPage.items;bucketCursor.value=bucketPage.cursor;
+ }catch(error:any){if(request.current()&&!controller.signal.aborted)bucketError.value=error.errorMessage || error.message;}
+ finally{if(request.current()){r2BucketLoading.value=false;pendingReads.delete('buckets');}}
 }
 
 function selectR2Bucket(b: any) {
@@ -932,20 +978,17 @@ function selectR2Bucket(b: any) {
   loadR2Objects();
 }
 
-async function loadR2Objects() {
-  if (!selectedAccount.value || !selectedR2Bucket.value) return;
-  r2Loading.value = true;
-  const request = requests.begin('loadR2Objects', () => `${selectedAccount.value}:${selectedR2Bucket.value?.name}:${r2Prefix.value}`);
-  try {
-    const { data } = await storageApi.getR2Objects(selectedAccount.value, selectedR2Bucket.value.name, {
-      prefix: r2Prefix.value || undefined,
-      delimiter: '/',
-    });
-    if (!request.current()) return;
-    r2Objects.value = data.objects || [];
-    r2Prefixes.value = data.delimited_prefixes || [];
-  } catch { if (!request.current()) return; r2Objects.value = []; r2Prefixes.value = []; }
-  finally { if (request.current()) r2Loading.value = false; }
+async function loadR2Objects(cursor?:string,refresh=false) {
+ if(!selectedAccount.value||!selectedR2Bucket.value)return;
+ const accountId=selectedAccount.value,bucket=selectedR2Bucket.value.name,prefix=r2Prefix.value,key=storageKey(accountId,'objects',bucket,prefix,cursor);
+ if(pendingReads.get('objects')===key)return;pendingReads.set('objects',key);const controller=abortRead('objects');r2Loading.value=true;r2Error.value='';
+ const request=requests.begin('loadR2Objects',()=>`${selectedAccount.value}:${selectedR2Bucket.value?.name}:${r2Prefix.value}`);
+ if(!cursor){r2Objects.value=[];r2Prefixes.value=[];r2Cursor.value='';}
+ try{const data=await storageReads.read(key,async()=>{const {data}=await storageApi.getR2Objects(accountId,bucket,{prefix:prefix||undefined,delimiter:'/',cursor:cursor||undefined,limit:100,refresh},controller.signal);return data;},refresh);
+ if(!request.current()||controller.signal.aborted)return;
+ r2Page.apply({items:data.objects,prefixes:data.delimited_prefixes,cursor:data.cursor,is_truncated:data.is_truncated},cursor);r2Objects.value=r2Page.items;r2Prefixes.value=r2Page.prefixes;r2Cursor.value=r2Page.cursor;r2Dropped.value=r2Page.dropped;
+ }catch(error:any){if(request.current()&&!controller.signal.aborted){r2Error.value=error.errorMessage || error.message;storageReads.invalidate(k=>k===key);}}
+ finally{if(request.current()){r2Loading.value=false;pendingReads.delete('objects');}}
 }
 
 function navigateR2Folder(prefix: string) {
@@ -958,22 +1001,24 @@ async function handleDeleteR2(row: any) {
   const accountId = selectedAccount.value;
   const resource = selectedR2Bucket.value;
   if (!await confirmAction(t('common.delete'), `Account ${accountId} / ${resource.title || resource.name || resource.id}: ${row.name || row.key}`)) return;
-  await storageApi.deleteR2Object(accountId, resource.name, row.key);
+  try{await storageApi.deleteR2Object(accountId,resource.name,row.key);}finally{invalidateStorage(accountId,'objects',resource.name);}
+  if(accountId!==selectedAccount.value||resource.name!==selectedR2Bucket.value?.name)return;
   message.success(t('storage.msg.deleted'));
-  loadR2Objects();
+  loadR2Objects(undefined,true);
 }
 
 async function handleR2Upload() {
   if (!selectedAccount.value || !selectedR2Bucket.value || !r2UploadFile.value) return;
+  const accountId=selectedAccount.value,bucket=selectedR2Bucket.value.name,file=r2UploadFile.value,prefix=r2UploadPrefix.value || r2Prefix.value || '';
   r2Uploading.value = true;
   try {
-    const prefix = r2UploadPrefix.value || r2Prefix.value || '';
-    const key = prefix + r2UploadFile.value.name;
-    await storageApi.uploadR2Object(selectedAccount.value, selectedR2Bucket.value.name, key, r2UploadFile.value);
+    const key=prefix+file.name;
+    try{await storageApi.uploadR2Object(accountId,bucket,key,file);}finally{invalidateStorage(accountId,'objects',bucket);}
+    if(accountId!==selectedAccount.value||bucket!==selectedR2Bucket.value?.name)return;
     message.success(t('storage.msg.uploadSuccess'));
     showR2Upload.value = false;
     r2UploadFile.value = null;
-    loadR2Objects();
+    loadR2Objects(undefined,true);
   } finally { r2Uploading.value = false; }
 }
 
@@ -999,11 +1044,11 @@ function clearR2PreviewUrl() {
 }
 
 watch(showR2Preview, (isOpen) => {
-  if (!isOpen) clearR2PreviewUrl();
+  if (!isOpen) {controllers.get('preview')?.abort();clearR2PreviewUrl();}
 });
 
 onBeforeUnmount(() => {
-  requests.invalidate();
+  requests.invalidate();storageReads.invalidate();for(const controller of controllers.values())controller.abort();
   clearR2PreviewUrl();
 });
 
@@ -1020,8 +1065,9 @@ async function handlePreviewR2(row: any) {
   showR2Preview.value = true;
   const request = requests.begin('handlePreviewR2', () => `${selectedAccount.value}:${selectedR2Bucket.value?.name}:${r2PreviewKey.value}:${showR2Preview.value}`);
   try {
-    const resp = await storageApi.downloadR2Object(selectedAccount.value, selectedR2Bucket.value.name, row.key);
-    if (!request.current()) return;
+    const controller=abortRead('preview');
+    const resp = await storageApi.downloadR2Object(selectedAccount.value, selectedR2Bucket.value.name, row.key,controller.signal);
+    if (!request.current()||controller.signal.aborted) return;
     const blob = new Blob([resp.data], { type: row.contentType || 'image/png' });
     r2PreviewUrl.value = URL.createObjectURL(blob);
   } catch { if (!request.current()) return;

@@ -2,6 +2,8 @@ import NodeCache from 'node-cache';
 import { getActiveAccounts, getActiveAccountsByFeature, isPaidPlan, getAccountById, Account, AccountFeature } from '../models/account';
 import { accountRequest } from './cfFactory';
 import { dnsDirectory } from './dnsDirectory';
+import {storageResources} from './storageRuntime';
+import { zoneSettingsRuntime } from './zoneSettingsRuntime';
 import { requireDnsBinding, parseZoneContext, type ZoneSnapshot } from './zoneDirectory';
 import { isPaidModelName } from './aiService';
 import { getAccountQuota, ResourceType } from './quotaTracker';
@@ -230,6 +232,7 @@ export function clearCache(resource?: ResourceType): void {
   } else {
     // Clear all caches (backward compatibility)
     dnsDirectory.invalidate();
+    zoneSettingsRuntime.invalidate();storageResources.invalidate();
     quotaCache.flushAll();
   }
 }

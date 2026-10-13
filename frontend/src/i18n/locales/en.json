@@ -581,6 +581,26 @@
         "filter": "All filtered records (server preview)",
         "zone": "Entire Zone (server preview)"
       }
+    },
+    "settingsState": {
+      "cancel": "Discard changes",
+      "dirty": "{count} unsaved fields (draft retained per Zone)",
+      "saving": "Submitting {count} fields; awaiting confirmation",
+      "stale": "Last successful snapshot may be stale",
+      "conflict": "Remote values changed; refresh and discard changes before editing again",
+      "fields": "Field states and save receipts",
+      "nonAtomic": "Conflict detection is non-atomic; external edits can still occur after checking.",
+      "noChanges": "No changes",
+      "available": "Available",
+      "readonly": "Read-only",
+      "unavailable": "Unavailable",
+      "error": "Read failed",
+      "updated": "Updated",
+      "unchanged": "Unchanged",
+      "failed": "Failed",
+      "uncertain": "Unconfirmed",
+      "conflictField": "Conflict",
+      "draftLimit": "30 unsaved drafts are retained. Save or discard one before editing another Zone."
     }
   },
   "workers": {
@@ -931,7 +951,12 @@
       "deleteDatabaseTitle": "Delete Database",
       "deleteBucketTitle": "Delete Bucket",
       "deleteTableTitle": "Delete Table"
-    }
+    },
+    "pageHint": "Lists load on demand. KV changes may propagate later; refresh to verify.",
+    "windowHint": "Window retains the latest 2000 items; refresh to browse from the start.",
+    "sqlHint": "Table browsing uses stable keyset pages (not a fixed snapshot). Custom SQL runs separately; default read-only. Add LIMIT to control resources. Writes require confirmation and are never retried.",
+    "nextPage": "Next page",
+    "resultLimit": "Results are limited to 1000 rows / 4 MiB; narrow the query."
   },
   "browserRender": {
     "title": "Browser Rendering",

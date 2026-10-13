@@ -1,3 +1,4 @@
+import {normalizeAccountName} from '../shared/accountName';
 export interface DnsAccountIdentity {
   id: number;
   name?: string;
@@ -9,5 +10,5 @@ export interface DnsAccountIdentity {
 /** Use the name shown in Credential management, joined by ID rather than inferred from Account names. */
 export function dnsAccountLabel(account: DnsAccountIdentity, credentialNames: ReadonlyMap<number, string>, credentialLabel: string): string {
   const credential = credentialNames.get(account.credential_id ?? -1) || `${credentialLabel} #${account.credential_id ?? '?'}`;
-  return `${account.name || `Account #${account.id}`}｜${credential}`;
+  return `${normalizeAccountName(account.name || `Account #${account.id}`)}｜${credential}`;
 }

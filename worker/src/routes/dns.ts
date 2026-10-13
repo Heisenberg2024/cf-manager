@@ -9,7 +9,7 @@ import { listRules, createRule, updateRule, deleteRule } from '../services/rules
 import { isDemoAccount } from '../services/demo';
 
 import { mapConcurrent } from '../utils/concurrent';
-import { readZoneSettings, writeZoneSettings } from '../services/zoneSettings';
+import { getZoneSettingsRuntime } from '../services/zoneSettingsRuntime';
 
 import { streamSSE } from 'hono/streaming';
 import { previewBatch, verifyPreview, executeBatch, type BatchPreview } from '../services/dnsBatch';
@@ -34,7 +34,7 @@ async function getZoneSnapshots(db: D1Database, encryptionKey: string, refresh =
     catch { console.warn(`DNS Zone list failed for local Account ${account.id}`); return { zones: [], meta: { accountId: account.id, state: 'error' as const, error: 'Account Zone fetch failed' } }; }
   });
 }
-async function invalidateZonesCache(db: D1Database, accountId?: number, cloudflareAccountId?: string | null) { getDnsDirectory(db).invalidate(accountId, cloudflareAccountId); }
+async function invalidateZonesCache(db: D1Database, accountId?: number, cloudflareAccountId?: string | null) { getDnsDirectory(db).invalidate(accountId, cloudflareAccountId); getZoneSettingsRuntime(db).invalidate(accountId,cloudflareAccountId); }
 async function findAccountByDomain(db: D1Database, domain: string, encryptionKey: string, kv: KVNamespace, context: { accountId?: number; zoneId?: string } = {}) {
   context = parseZoneContext(context);
   const directory = getDnsDirectory(db);
@@ -130,7 +130,7 @@ app.delete('/domains/:domain/records/:id', async (c) => {
 
 app.get('/domains/:domain/settings', async (c) => {
   const { account, zoneId } = await findAccountByDomain(c.env.DB, c.req.param('domain'), c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
-  return c.json(await readZoneSettings(getDnsDirectory(c.env.DB).wrap(account, await accountRequest(account, c.env.ENCRYPTION_KEY)), zoneId));
+  return c.json(await getZoneSettingsRuntime(c.env.DB).read(account,await accountRequest(account,c.env.ENCRYPTION_KEY),zoneId,{refresh:c.req.query('refresh')==='true',signal:c.req.raw.signal,waitUntil:promise=>{try{c.executionCtx.waitUntil(promise);}catch{ /* Local adapters have no execution context. */ }}}));
 });
 
 app.patch('/domains/:domain/proxy', async (c) => {
@@ -260,7 +260,13 @@ app.patch('/domains/:domain/settings', async (c) => {
   const { account, zoneId } = await findAccountByDomain(c.env.DB, domain, c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
   const body = await c.req.json();
 
-  const result = await writeZoneSettings(await accountRequest(account, c.env.ENCRYPTION_KEY), zoneId, body);
+  if(isDemoAccount(account.id,c.env.DEMO_ACCOUNT_IDS)) return c.json({error:{code:'DEMO_PROTECTED',message:'演示账户不可修改 Zone 设置'}},403);
+  if(c.req.header('Accept')?.includes('text/event-stream'))return streamSSE(c,async stream=>{
+    const emit=async(event:unknown)=>{try{await stream.writeSSE({data:JSON.stringify(event)});}catch{/* The client may have changed views. */}};
+    try{const result=await getZoneSettingsRuntime(c.env.DB).write(account,getDnsDirectory(c.env.DB).wrap(account,await accountRequest(account,c.env.ENCRYPTION_KEY)),zoneId,body,emit);await addAuditLog(c.env.DB,{account_id:account.id,action:'update_zone_settings',target:domain,detail:`updated: ${result.updated.join(', ')}; failed: ${result.failed.join(', ')}`,status:result.failed.length?'error':'success'});await emit({type:'done',result});}
+    catch(error){await emit({type:'error',message:errorDetails(error).message});}
+  });
+  const result = await getZoneSettingsRuntime(c.env.DB).write(account,getDnsDirectory(c.env.DB).wrap(account,await accountRequest(account,c.env.ENCRYPTION_KEY)),zoneId,body);
   await addAuditLog(c.env.DB, { account_id: account.id, action: 'update_zone_settings', target: domain, detail: `updated: ${result.updated.join(', ')}; failed: ${result.failed.join(', ')}`, status: result.failed.length ? 'error' : 'success' });
   return c.json(result);
 });
@@ -270,11 +276,13 @@ app.post('/domains/:domain/purge-cache', async (c) => {
   const domain = c.req.param('domain');
   const { account, zoneId } = await findAccountByDomain(c.env.DB, domain, c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
   const body = await c.req.json();
+  if(isDemoAccount(account.id,c.env.DEMO_ACCOUNT_IDS)) return c.json({error:{code:'DEMO_PROTECTED',message:'演示账户不可清除缓存'}},403);
   const data = await cfFetch<any>(account, `/zones/${zoneId}/purge_cache`, c.env.ENCRYPTION_KEY, {
     method: 'POST', body: JSON.stringify(body),
   });
   await addAuditLog(c.env.DB, { account_id: account.id, action: 'purge_cache', target: domain, detail: body.purge_everything ? 'purge_everything' : `purge ${(body.files || []).length} URLs`, status: 'success' });
-  return c.json({ id: data.result?.id || '' });
+  if(!data.result?.id) return c.json({error:{code:'CF_OUTCOME_UNCERTAIN',message:'Cache purge receipt missing; execution result unknown'}},502);
+  return c.json({ id: data.result.id });
 });
 
 // 暂停/激活 Zone
@@ -285,11 +293,15 @@ app.patch('/domains/:domain/status', async (c) => {
   if (typeof body.paused !== 'boolean') {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'paused (boolean) is required' } }, 400);
   }
-  try { await cfFetch(account, `/zones/${zoneId}`, c.env.ENCRYPTION_KEY, {
+  if(isDemoAccount(account.id,c.env.DEMO_ACCOUNT_IDS)) return c.json({error:{code:'DEMO_PROTECTED',message:'演示账户不可修改 Zone 状态'}},403);
+  let receipt;
+  try { receipt=await cfFetch<any>(account, `/zones/${zoneId}`, c.env.ENCRYPTION_KEY, {
     method: 'PATCH', body: JSON.stringify({ paused: body.paused }),
-  }); } finally { await invalidateZonesCache(c.env.DB, account.id, account.account_id); }
+  }); } catch(error) { await invalidateZonesCache(c.env.DB, account.id, account.account_id); throw error; }
+  if(receipt.result?.id!==zoneId || receipt.result?.paused!==body.paused){await invalidateZonesCache(c.env.DB,account.id,account.account_id);return c.json({error:{code:'CF_OUTCOME_UNCERTAIN',message:'Zone status result not confirmed; refresh before retrying'}},502);}
+  getDnsDirectory(c.env.DB).updateZone(account,zoneId,receipt.result);
   await addAuditLog(c.env.DB, { account_id: account.id, action: 'update_zone_status', target: domain, detail: `paused=${body.paused}`, status: 'success' });
-  return c.json({ success: true });
+  return c.json({ success: true,id:receipt.result.id,paused:receipt.result.paused,status:receipt.result.status });
 });
 
 // ============ 通用规则引擎 ============

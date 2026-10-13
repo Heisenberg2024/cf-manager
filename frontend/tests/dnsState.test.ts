@@ -43,7 +43,7 @@ describe('DNS state ownership', () => {
     vi.mocked(dnsApi.updateSettings).mockResolvedValue({ data: { updated: [], failed: ['ssl'], settings: { ssl: 'full' } } } as any);
     const store = useDnsStore(); await store.fetchRecords('a.test', a); await store.updateZoneSettings('a.test', { ssl: 'strict' });
     expect(store.zoneSettings.ssl).toBe('full');
-    expect(dnsApi.updateSettings).toHaveBeenCalledWith('a.test', { ssl: 'strict' }, a);
+    expect(dnsApi.updateSettings).toHaveBeenCalledWith('a.test', {changes:{ ssl: 'strict' },baseline:{}}, a,expect.any(Function));
   });
   it('protects the newer Zone while a previous save completes', async () => {
     vi.mocked(dnsApi.getRecords).mockResolvedValue({ data: [] } as any);

@@ -581,6 +581,26 @@
         "filter": "全部筛选结果（服务端预览）",
         "zone": "整个 Zone（服务端预览）"
       }
+    },
+    "settingsState": {
+      "cancel": "取消修改",
+      "dirty": "未保存 {count} 项（草稿按域名保留）",
+      "saving": "正在提交 {count} 项，等待逐项确认",
+      "stale": "上次成功快照可能过期",
+      "conflict": "远端配置已变化，请刷新并取消修改后重新编辑",
+      "fields": "字段状态与保存回执",
+      "nonAtomic": "冲突检查不是原子事务；检查后仍可能发生外部修改。",
+      "noChanges": "配置无变化",
+      "available": "可用",
+      "readonly": "只读",
+      "unavailable": "不可用",
+      "error": "读取失败",
+      "updated": "已更新",
+      "unchanged": "未变化",
+      "failed": "更新失败",
+      "uncertain": "结果未确认",
+      "conflictField": "冲突",
+      "draftLimit": "已保留 30 个未保存草稿，请先保存或取消其中一个，再编辑其他域名。"
     }
   },
   "workers": {
@@ -931,7 +951,12 @@
       "deleteDatabaseTitle": "删除数据库",
       "deleteBucketTitle": "删除存储桶",
       "deleteTableTitle": "删除表"
-    }
+    },
+    "pageHint": "按需加载列表；KV 可能延迟反映远端写入，刷新后核实。",
+    "windowHint": "当前仅保留最近 2000 项，刷新可从头浏览。",
+    "sqlHint": "表浏览使用稳定键分页（非固定快照）；自定义 SQL 单独执行，默认只读，请手动限制扫描/结果。写入需确认，失败或未知不会重试。",
+    "nextPage": "下一页",
+    "resultLimit": "结果已限制为最多 1000 行 / 4 MiB；请缩小查询。"
   },
   "browserRender": {
     "title": "浏览器渲染",

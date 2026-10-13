@@ -1,6 +1,9 @@
 import { Hono } from 'hono';
 import type { Env } from '../types';
 import { VERSION, GIT_COMMIT } from '../version';
+import { getDnsDirectory } from '../services/dnsDirectory';
+import {getStorageResources} from '../services/storageRuntime';
+import { getZoneSettingsRuntime } from '../services/zoneSettingsRuntime';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -17,7 +20,8 @@ app.get('/', async (c) => {
 });
 
 app.post('/cache/clear', async (c) => {
-  return c.json({ message: 'Worker is stateless — no persistent cache to clear' });
+  getDnsDirectory(c.env.DB).invalidate();getZoneSettingsRuntime(c.env.DB).invalidate();getStorageResources(c.env.DB).invalidate();
+  return c.json({ message: 'Current isolate display snapshots cleared' });
 });
 
 export default app;

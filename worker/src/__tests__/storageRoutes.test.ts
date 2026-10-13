@@ -1,0 +1,15 @@
+import {describe,it,expect,vi,beforeEach} from 'vitest';
+import {Hono} from 'hono';
+const mock=vi.hoisted(()=>({account:vi.fn(),request:vi.fn(),audit:vi.fn()}));
+vi.mock('../db/models',()=>({getAccountById:mock.account,addAuditLog:mock.audit}));
+vi.mock('../services/cfApi',()=>({accountRequest:mock.request,cfFetch:vi.fn(),cfFetchRaw:vi.fn(),cfFetchAll:vi.fn()}));
+import router from '../routes/storage';
+import {responseWrapper} from '../middleware/responseWrapper';
+import {errorDetails} from '../services/cfErrors';
+import {getStorageResources} from '../services/storageRuntime';
+import {storageRoutesContract,storageHttpFixture} from '../../../shared/tests/storageRoutes.contract';
+const env={DB:{} as D1Database,ENCRYPTION_KEY:'fixture',DEMO_ACCOUNT_IDS:''};
+const app=new Hono<any>();app.use('*',responseWrapper);app.route('/storage',router);app.onError((err,c)=>{const detail=errorDetails(err);return c.json({error:{code:detail.code,message:detail.message}},detail.statusCode as any);});
+let fixture:ReturnType<typeof storageHttpFixture>;
+beforeEach(()=>{vi.clearAllMocks();getStorageResources(env.DB).invalidate();env.DEMO_ACCOUNT_IDS='';fixture=storageHttpFixture();mock.account.mockResolvedValue({id:1,name:'fixture',account_id:'cf-a',credential_id:10,api_token:'synthetic',is_active:1,is_enabled:1,enabled_features:'storage',available_features:'r2'});mock.request.mockResolvedValue(fixture.request);});
+storageRoutesContract('Worker',{send:async(method,path,body)=>{const result=await app.request('/storage'+path,{method,...(body?{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})},env);const json:any=await result.json();return {status:result.status,data:json.data || json,cache:result.headers.get('Cache-Control')};},demo:value=>{env.DEMO_ACCOUNT_IDS=value?'1':'';},denyR2:()=>fixture.denyR2(),calls:()=>fixture.calls,audits:()=>mock.audit.mock.calls},{describe,it,expect,vi});

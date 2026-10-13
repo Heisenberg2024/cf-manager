@@ -1,3 +1,4 @@
+import type {ZoneSaveProgress} from '../shared/zoneSettingsEvents';
 import apiClient, { API_BASE_URL } from './client';
 import { readBatchStream } from '../utils/batchStream';
 import type { BatchSpec, BatchPreview, BatchEvent } from '../shared/dnsBatch';
@@ -28,7 +29,7 @@ export const dnsApi = {
   createRecord: (domain: string, data: any, context: ZoneContext = {}) => apiClient.post(`${domainPath(domain)}/records`, data, { params: context }),
   updateRecord: (domain: string, id: string, data: any, context: ZoneContext = {}) => apiClient.put(`${domainPath(domain)}/records/${id}`, data, { params: context }),
   deleteRecord: (domain: string, id: string, context: ZoneContext = {}) => apiClient.delete(`${domainPath(domain)}/records/${id}`, { params: context }),
-  getSettings: (domain: string, context: ZoneContext = {}, signal?: AbortSignal) => apiClient.get(`${domainPath(domain)}/settings`, { params: context, signal, _silent: true }),
+  getSettings: (domain: string, context: ZoneContext = {}, signal?: AbortSignal, refresh=false) => apiClient.get(`${domainPath(domain)}/settings`, { params: {...context,refresh}, signal, _silent: true }),
   updateProxy: (domain: string, recordId: string, proxied: boolean, context: ZoneContext = {}) => apiClient.patch(`${domainPath(domain)}/proxy`, { record_id: recordId, proxied }, { params: context }),
 
   // Zone 管理
@@ -39,8 +40,15 @@ export const dnsApi = {
     apiClient.post<{ total: number; results: CreateZoneResult[] }>('/dns/domains', data, { timeout: 0, _silent: true }),
   deleteDomains: (domains: Array<string | ZoneSelection>) =>
     apiClient.delete<DeleteZonesResult>('/dns/domains', { data: { domains }, timeout: 0, _silent: true }),
-  updateSettings: (domain: string, settings: Record<string, any>, context: ZoneContext = {}) =>
-    apiClient.patch(`${domainPath(domain)}/settings`, settings, { params: context }),
+  async updateSettings(domain:string,settings:Record<string,unknown>,context:ZoneContext={},progress?:(event:ZoneSaveProgress)=>void){
+    const query=new URLSearchParams(Object.entries(context).filter(([,value])=>value!==undefined).map(([key,value])=>[key,String(value)]));
+    const response=await fetch(`${API_BASE_URL.replace(/\/$/,'')}${domainPath(domain)}/settings?${query}`,{method:'PATCH',headers:{'Content-Type':'application/json',Accept:'text/event-stream',Authorization:`Bearer ${localStorage.getItem('api_token') || ''}`},body:JSON.stringify(settings)});
+    if(!response.ok||!response.headers.get('Content-Type')?.includes('text/event-stream')){const body=await response.json();if(!response.ok||body.success===false){if(response.status===401&&body.error?.code==='UNAUTHORIZED'){localStorage.removeItem('api_token');window.dispatchEvent(new Event('auth-expired'));}throw Error(body.error?.message || `HTTP ${response.status}`);}return {data:body.data ?? body};}
+    let result:any;
+    try{await readBatchStream(response,event=>{const packet=event as unknown as {type:'done';result:unknown}|ZoneSaveProgress;if(packet.type==='progress')progress?.(packet);if(packet.type==='done')result=packet.result;});}
+    catch(error){if(result===undefined&&/connection interrupted|No batch response stream/.test(String(error)))throw Error('配置保存连接中断，结果未确认。刷新后核实，不要重复提交。',{cause:error});throw error;}
+    if(result===undefined)throw Error('Zone save result unconfirmed');return {data:result};
+  },
   purgeCache: (domain: string, data: { purge_everything?: boolean; files?: string[] }, context: ZoneContext = {}) =>
     apiClient.post(`${domainPath(domain)}/purge-cache`, data, { params: context }),
   updateStatus: (domain: string, paused: boolean, context: ZoneContext = {}) =>

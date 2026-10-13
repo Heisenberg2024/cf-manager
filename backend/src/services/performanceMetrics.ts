@@ -7,9 +7,9 @@ export function recordPerformance(metric: ReadMetric & { scope?: string; proxy?:
   const summary = performanceContext.getStore();
   if (summary) {
     if (metric.event.startsWith('cf_')) summary.upstreamCalls++;
-    if (['zone_lookup', 'resource_lookup'].includes(metric.event)) summary.cacheLookups++;
-    if (['zone_hit', 'resource_hit'].includes(metric.event)) summary.cacheHits++;
-    if (metric.event === 'zone_stale') summary.staleHits++;
+    if (['zone_lookup', 'resource_lookup', 'snapshot_lookup'].includes(metric.event)) summary.cacheLookups++;
+    if (['zone_hit', 'resource_hit', 'snapshot_hit'].includes(metric.event)) summary.cacheHits++;
+    if (metric.event === 'zone_stale' || metric.event === 'snapshot_stale') summary.staleHits++;
     if (metric.event.endsWith('_merged')) summary.merged++;
     if (metric.event === 'cf_rate_limited' || (metric.event === 'write_failed' && metric.status === 429)) summary.rateLimited++;
     if (metric.event.includes('timeout') || (['cf_attempt', 'write_failed'].includes(metric.event) && metric.status === 504)) summary.timeouts++;

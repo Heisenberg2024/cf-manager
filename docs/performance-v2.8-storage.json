@@ -1,0 +1,98 @@
+{
+  "simulated": true,
+  "baseline": "79978a9a2f5e22571f4a3856f28432d4bc52fae7",
+  "runtime": "v24.21.0",
+  "fixture": "Actual v2.7 Docker service; synthetic 2ms transport; 10 cold samples; P95=max; R2 fixture default=1000; v2.8 UI limit=100; no production data",
+  "before": [
+    {
+      "accounts": 20,
+      "metadataColdCalls": 40,
+      "p50Ms": 2.721541000000002,
+      "p95Ms": 2.8789580000000115,
+      "metadataRevisit": {
+        "calls": 40,
+        "durationMs": 2.8425419999999804
+      },
+      "firstObjects": {
+        "calls": 1,
+        "rows": 1000
+      },
+      "kvRevisitCalls": 1,
+      "kv10000": {
+        "calls": 100,
+        "visibleRows": 10000,
+        "serializedVisibleBytes": 617782
+      },
+      "serverCacheEntries": 0,
+      "serverCacheEstimatedBytes": 0
+    },
+    {
+      "accounts": 60,
+      "metadataColdCalls": 120,
+      "p50Ms": 4.511166999999887,
+      "p95Ms": 6.078125,
+      "metadataRevisit": {
+        "calls": 120,
+        "durationMs": 3.1057919999998376
+      },
+      "firstObjects": {
+        "calls": 1,
+        "rows": 1000
+      },
+      "kvRevisitCalls": 1,
+      "kv10000": {
+        "calls": 100,
+        "visibleRows": 10000,
+        "serializedVisibleBytes": 617782
+      },
+      "serverCacheEntries": 0,
+      "serverCacheEstimatedBytes": 0
+    }
+  ],
+  "after": [
+    {
+      "accounts": 20,
+      "metadataColdCalls": 40,
+      "p50Ms": 20.234500000000025,
+      "p95Ms": 22.26491699999997,
+      "metadataRevisit": {
+        "calls": 0,
+        "durationMs": 1.2669590000000426
+      },
+      "firstObjects": {
+        "calls": 1,
+        "rows": 100
+      },
+      "kvRevisitCalls": 0,
+      "kv10000": {
+        "calls": 100,
+        "visibleRows": 2000,
+        "serializedVisibleBytes": 124002
+      },
+      "serverCacheEntries": 142,
+      "serverCacheEstimatedBytes": 648852
+    },
+    {
+      "accounts": 60,
+      "metadataColdCalls": 120,
+      "p50Ms": 54.219125000000076,
+      "p95Ms": 62.734042000000045,
+      "metadataRevisit": {
+        "calls": 0,
+        "durationMs": 3.9054170000001704
+      },
+      "firstObjects": {
+        "calls": 1,
+        "rows": 100
+      },
+      "kvRevisitCalls": 0,
+      "kv10000": {
+        "calls": 100,
+        "visibleRows": 2000,
+        "serializedVisibleBytes": 124002
+      },
+      "serverCacheEntries": 222,
+      "serverCacheEstimatedBytes": 663892
+    }
+  ]
+}

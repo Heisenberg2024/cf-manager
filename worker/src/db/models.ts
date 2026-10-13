@@ -1,3 +1,4 @@
+import {displayAccount,normalizeAccountName} from '../services/accountName';
 import { ACCOUNT_SELECT, ensureCredential, getCredential, updateCredential } from './credentials';
 import { redact } from '../services/cfErrors';
 export interface Account {
@@ -72,7 +73,7 @@ export interface AuditLogRow {
 
 export async function getActiveAccounts(db: D1Database): Promise<Account[]> {
   const { results } = await db.prepare(`${ACCOUNT_SELECT} WHERE accounts.is_active = 1 AND accounts.is_enabled = 1 ORDER BY accounts.name`).all<Account>();
-  return results;
+  return results.map(displayAccount);
 }
 
 export async function getActiveAccountsByFeature(db: D1Database, feature: AccountFeature): Promise<Account[]> {
@@ -91,7 +92,7 @@ export async function hasPaidAccountByFeature(db: D1Database, feature: AccountFe
 
 export async function getAllAccounts(db: D1Database): Promise<Account[]> {
   const { results } = await db.prepare(`${ACCOUNT_SELECT} ORDER BY accounts.created_at DESC`).all<Account>();
-  return results;
+  return results.map(displayAccount);
 }
 
 export type AccountListFilter = 'all' | 'active' | 'unverified';
@@ -144,7 +145,7 @@ export async function listAccountsPaged(db: D1Database, opts: {
   ]);
 
   return {
-    accounts: results,
+    accounts: results.map(displayAccount),
     total,
     counts: {
       all: allRow?.c ?? 0,
@@ -155,7 +156,7 @@ export async function listAccountsPaged(db: D1Database, opts: {
 }
 
 export async function getAccountById(db: D1Database, id: number): Promise<Account | null> {
-  return db.prepare(`${ACCOUNT_SELECT} WHERE accounts.id = ?`).bind(id).first<Account>();
+  const row=await db.prepare(`${ACCOUNT_SELECT} WHERE accounts.id = ?`).bind(id).first<Account>();return row?displayAccount(row):null;
 }
 
 export async function createAccount(db: D1Database, data: {
@@ -163,6 +164,7 @@ export async function createAccount(db: D1Database, data: {
   email?: string; account_id?: string; enabled_features?: string; worker_plan?: string;
   proxy_url?: string; proxy_enabled?: number; credential_id?: number;
 }, encryptionKey?: string): Promise<number> {
+  data={...data,name:normalizeAccountName(data.name)};
   const credentialId = data.credential_id ?? await ensureCredential(db, data, encryptionKey!);
   const credential = await getCredential(db, credentialId);
   if (!credential) throw new Error('Credential not found');
@@ -176,6 +178,7 @@ export async function createAccount(db: D1Database, data: {
 }
 
 export async function updateAccount(db: D1Database, id: number, data: Partial<Account>, encryptionKey?: string): Promise<void> {
+  if(data.name!==undefined)data={...data,name:normalizeAccountName(data.name)};
   const existing = await getAccountById(db, id);
   const authPatch = Object.fromEntries(Object.entries(data).filter(([k, v]) => v !== undefined && ['auth_type', 'api_token', 'api_key', 'email'].includes(k)));
   if (existing?.credential_id && Object.keys(authPatch).length) await updateCredential(db, existing.credential_id, authPatch, encryptionKey!);

@@ -1,0 +1,88 @@
+{
+  "source": "Local isolated Chromium simulation, not production latency or P95",
+  "baseline": false,
+  "dns": [
+    {
+      "width": 1440,
+      "records": 100,
+      "firstScreenMs": 124,
+      "interactionMs": 61,
+      "firstPayloadRows": 100,
+      "jsHeapUsedBytes": 18967748,
+      "recordRequests": 1
+    },
+    {
+      "width": 1440,
+      "records": 1000,
+      "firstScreenMs": 129,
+      "interactionMs": 61,
+      "firstPayloadRows": 500,
+      "jsHeapUsedBytes": 19003176,
+      "recordRequests": 1
+    },
+    {
+      "width": 1440,
+      "records": 10000,
+      "firstScreenMs": 124,
+      "interactionMs": 69,
+      "firstPayloadRows": 500,
+      "jsHeapUsedBytes": 19020352,
+      "recordRequests": 3
+    },
+    {
+      "width": 390,
+      "records": 100,
+      "firstScreenMs": 122,
+      "interactionMs": 65,
+      "firstPayloadRows": 100,
+      "jsHeapUsedBytes": 17421192,
+      "recordRequests": 1
+    },
+    {
+      "width": 390,
+      "records": 1000,
+      "firstScreenMs": 135,
+      "interactionMs": 63,
+      "firstPayloadRows": 500,
+      "jsHeapUsedBytes": 17460488,
+      "recordRequests": 1
+    },
+    {
+      "width": 390,
+      "records": 10000,
+      "firstScreenMs": 117,
+      "interactionMs": 68,
+      "firstPayloadRows": 500,
+      "jsHeapUsedBytes": 17472560,
+      "recordRequests": 3
+    }
+  ],
+  "workers": [
+    {
+      "accounts": 20,
+      "firstScreenMs": 202,
+      "initialDrawerReads": [
+        "/workers/1/workers/worker-0/settings",
+        "/workers/1/workers/worker-0/secrets"
+      ],
+      "initialPagesReads": [
+        "/workers/1/pages/project-0/project"
+      ],
+      "upstreamCallsAtCapture": 60
+    },
+    {
+      "accounts": 60,
+      "firstScreenMs": 236,
+      "initialDrawerReads": [
+        "/workers/1/workers/worker-0/settings",
+        "/workers/1/workers/worker-0/secrets",
+        "/workers/summary",
+        "/workers/summary"
+      ],
+      "initialPagesReads": [
+        "/workers/1/pages/project-0/project"
+      ],
+      "upstreamCallsAtCapture": 76
+    }
+  ]
+}

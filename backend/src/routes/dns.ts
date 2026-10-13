@@ -139,7 +139,8 @@ router.delete('/domains/:domain/records/:id', async (req: Request, res: Response
 router.get('/domains/:domain/settings', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { account, zoneId } = await findAccountByDomain(req.params.domain as string, zoneContext(req));
-    const settings = await getZoneSettings(account, zoneId);
+    const controller=new AbortController();res.on('close',()=>{if(!res.writableEnded)controller.abort();});
+    const settings = await getZoneSettings(account, zoneId,{refresh:req.query.refresh==='true',signal:controller.signal});
     res.json(settings);
   } catch (err) { next(err); }
 });
@@ -250,6 +251,15 @@ router.patch('/domains/:domain/settings', async (req: Request, res: Response, ne
   try {
     const domain = req.params.domain as string;
     const { account, zoneId } = await findAccountByDomain(domain, zoneContext(req));
+    if(isDemoAccountId(account.id)){res.status(403).json({error:{code:'DEMO_PROTECTED',message:'演示账户不可修改 Zone 设置'}});return;}
+    if(req.headers.accept?.includes('text/event-stream')){
+      res.set({'Content-Type':'text/event-stream','Cache-Control':'no-store, no-transform','X-Accel-Buffering':'no'});res.flushHeaders();
+      const emit=(event:unknown)=>{if(!res.destroyed)res.write(`data: ${JSON.stringify(event)}\n\n`);};
+      const heartbeat=setInterval(()=>{if(!res.destroyed)res.write(': heartbeat\n\n');},10000);
+      try{const result=await updateZoneSettings(account,zoneId,req.body,emit);createAuditLog(account.id,'update_zone_settings',domain,`updated: ${result.updated.join(', ')}; failed: ${result.failed.join(', ')}`,result.failed.length?'error':'success');emit({type:'done',result});}
+      catch(error){emit({type:'error',message:errorDetails(error).message});}
+      finally{clearInterval(heartbeat);res.end();}return;
+    }
     const result = await updateZoneSettings(account, zoneId, req.body);
     createAuditLog(account.id, 'update_zone_settings', domain, `updated: ${result.updated.join(', ') || 'none'}${result.failed.length ? `, failed: ${result.failed.join(', ')}` : ''}`, result.failed.length ? 'error' : 'success');
     res.json(result);
@@ -261,6 +271,7 @@ router.post('/domains/:domain/purge-cache', async (req: Request, res: Response, 
   try {
     const domain = req.params.domain as string;
     const { account, zoneId } = await findAccountByDomain(domain, zoneContext(req));
+    if(isDemoAccountId(account.id)){res.status(403).json({error:{code:'DEMO_PROTECTED',message:'演示账户不可清除缓存'}});return;}
     const result = await purgeZoneCache(account, zoneId, req.body);
     createAuditLog(account.id, 'purge_cache', domain, req.body.purge_everything ? 'purge_everything' : `purge ${(req.body.files || []).length} URLs`, 'success');
     res.json(result);
@@ -276,9 +287,11 @@ router.patch('/domains/:domain/status', async (req: Request, res: Response, next
       res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'paused (boolean) is required' } });
       return;
     }
-    try { await setZoneStatus(account, zoneId, req.body.paused); } finally { invalidateZonesCache(account.id, account.account_id); }
+    if(isDemoAccountId(account.id)){res.status(403).json({error:{code:'DEMO_PROTECTED',message:'演示账户不可修改 Zone 状态'}});return;}
+    let receipt;
+    try { receipt=await setZoneStatus(account, zoneId, req.body.paused); dnsDirectory.updateZone(account,zoneId,receipt); } catch(error) { invalidateZonesCache(account.id, account.account_id); throw error; }
     createAuditLog(account.id, 'update_zone_status', domain, `paused=${req.body.paused}`, 'success');
-    res.json({ success: true });
+    res.json({ success: true, ...receipt });
   } catch (err) { next(err); }
 });
 

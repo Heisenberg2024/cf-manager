@@ -1,0 +1,268 @@
+{
+  "simulated": true,
+  "baseline": "79978a9a2f5e22571f4a3856f28432d4bc52fae7",
+  "runtime": "v24.21.0",
+  "fixture": "2ms per request; same v2.7 ReadScheduler on both sides; 10 cold samples; P95=max; excludes common live ownership GET; no production accounts",
+  "before": [
+    {
+      "accounts": 20,
+      "coldCalls": 20,
+      "p50Ms": 9.513416000000007,
+      "p95Ms": 11.710915999999997,
+      "revisit": {
+        "calls": 20,
+        "durationMs": 9.602666999999997
+      },
+      "concurrentCalls": 1,
+      "noChanges": {
+        "calls": 2,
+        "patches": 0
+      },
+      "cacheEntries": 0
+    },
+    {
+      "accounts": 60,
+      "coldCalls": 60,
+      "p50Ms": 22.759041000000025,
+      "p95Ms": 23.97791699999999,
+      "revisit": {
+        "calls": 60,
+        "durationMs": 23.511875000000032
+      },
+      "concurrentCalls": 1,
+      "noChanges": {
+        "calls": 2,
+        "patches": 0
+      },
+      "cacheEntries": 0
+    }
+  ],
+  "after": [
+    {
+      "accounts": 20,
+      "coldCalls": 20,
+      "p50Ms": 9.822625000000016,
+      "p95Ms": 9.995374999999967,
+      "revisit": {
+        "calls": 0,
+        "durationMs": 0.45108300000003965
+      },
+      "concurrentCalls": 1,
+      "noChanges": {
+        "calls": 0,
+        "patches": 0
+      },
+      "cacheEntries": 1
+    },
+    {
+      "accounts": 60,
+      "coldCalls": 60,
+      "p50Ms": 25.726667000000134,
+      "p95Ms": 29.82654100000002,
+      "revisit": {
+        "calls": 0,
+        "durationMs": 1.9984580000000278
+      },
+      "concurrentCalls": 1,
+      "noChanges": {
+        "calls": 0,
+        "patches": 0
+      },
+      "cacheEntries": 1
+    }
+  ],
+  "zoneMatrix": [
+    {
+      "before": {
+        "accounts": 20,
+        "zones": 100,
+        "mixed": false,
+        "coldCalls": 100,
+        "failedZones": 0,
+        "p50Ms": 39.65208399999983,
+        "p95Ms": 46.373582999999826,
+        "revisit": {
+          "calls": 100,
+          "durationMs": 41.637541000000056
+        },
+        "cacheEntries": 0,
+        "cacheEstimatedBytes": 0
+      },
+      "after": {
+        "accounts": 20,
+        "zones": 100,
+        "mixed": false,
+        "coldCalls": 100,
+        "failedZones": 0,
+        "p50Ms": 43.453166999999894,
+        "p95Ms": 53.166165999999976,
+        "revisit": {
+          "calls": 0,
+          "durationMs": 6.602374999999938
+        },
+        "cacheEntries": 100,
+        "cacheEstimatedBytes": 229200
+      }
+    },
+    {
+      "before": {
+        "accounts": 20,
+        "zones": 1000,
+        "mixed": false,
+        "coldCalls": 1000,
+        "failedZones": 0,
+        "p50Ms": 446.13174999999956,
+        "p95Ms": 467.34262499999977,
+        "revisit": {
+          "calls": 1000,
+          "durationMs": 409.2267919999995
+        },
+        "cacheEntries": 0,
+        "cacheEstimatedBytes": 0
+      },
+      "after": {
+        "accounts": 20,
+        "zones": 1000,
+        "mixed": false,
+        "coldCalls": 1000,
+        "failedZones": 0,
+        "p50Ms": 480.33916599999975,
+        "p95Ms": 521.1493750000009,
+        "revisit": {
+          "calls": 500,
+          "durationMs": 234.76866700000028
+        },
+        "cacheEntries": 500,
+        "cacheEstimatedBytes": 1146000
+      }
+    },
+    {
+      "before": {
+        "accounts": 20,
+        "zones": 20,
+        "mixed": true,
+        "coldCalls": 20,
+        "failedZones": 2,
+        "p50Ms": 30.074500000000626,
+        "p95Ms": 36.170124999998734,
+        "revisit": {
+          "calls": 20,
+          "durationMs": 29.12304199999926
+        },
+        "cacheEntries": 0,
+        "cacheEstimatedBytes": 0
+      },
+      "after": {
+        "accounts": 20,
+        "zones": 20,
+        "mixed": true,
+        "coldCalls": 20,
+        "failedZones": 2,
+        "p50Ms": 30.66058299999895,
+        "p95Ms": 36.31962499999827,
+        "revisit": {
+          "calls": 2,
+          "durationMs": 4.56683300000077
+        },
+        "cacheEntries": 18,
+        "cacheEstimatedBytes": 41256
+      }
+    },
+    {
+      "before": {
+        "accounts": 60,
+        "zones": 100,
+        "mixed": false,
+        "coldCalls": 100,
+        "failedZones": 0,
+        "p50Ms": 41.1450420000001,
+        "p95Ms": 48.91058300000077,
+        "revisit": {
+          "calls": 100,
+          "durationMs": 43.342749999999796
+        },
+        "cacheEntries": 0,
+        "cacheEstimatedBytes": 0
+      },
+      "after": {
+        "accounts": 60,
+        "zones": 100,
+        "mixed": false,
+        "coldCalls": 100,
+        "failedZones": 0,
+        "p50Ms": 46.73462500000096,
+        "p95Ms": 48.5096250000006,
+        "revisit": {
+          "calls": 0,
+          "durationMs": 8.837333999999828
+        },
+        "cacheEntries": 100,
+        "cacheEstimatedBytes": 229200
+      }
+    },
+    {
+      "before": {
+        "accounts": 60,
+        "zones": 1000,
+        "mixed": false,
+        "coldCalls": 1000,
+        "failedZones": 0,
+        "p50Ms": 437.51066699999865,
+        "p95Ms": 446.56600000000253,
+        "revisit": {
+          "calls": 1000,
+          "durationMs": 450.4011250000003
+        },
+        "cacheEntries": 0,
+        "cacheEstimatedBytes": 0
+      },
+      "after": {
+        "accounts": 60,
+        "zones": 1000,
+        "mixed": false,
+        "coldCalls": 1000,
+        "failedZones": 0,
+        "p50Ms": 415.2479999999996,
+        "p95Ms": 442.6018330000006,
+        "revisit": {
+          "calls": 500,
+          "durationMs": 210.07837499999732
+        },
+        "cacheEntries": 500,
+        "cacheEstimatedBytes": 1146000
+      }
+    },
+    {
+      "before": {
+        "accounts": 60,
+        "zones": 60,
+        "mixed": true,
+        "coldCalls": 60,
+        "failedZones": 8,
+        "p50Ms": 70.47333300000173,
+        "p95Ms": 71.72887499999706,
+        "revisit": {
+          "calls": 60,
+          "durationMs": 70.30487500000163
+        },
+        "cacheEntries": 0,
+        "cacheEstimatedBytes": 0
+      },
+      "after": {
+        "accounts": 60,
+        "zones": 60,
+        "mixed": true,
+        "coldCalls": 60,
+        "failedZones": 8,
+        "p50Ms": 70.93887499999983,
+        "p95Ms": 73.52958300000319,
+        "revisit": {
+          "calls": 8,
+          "durationMs": 21.957875000000058
+        },
+        "cacheEntries": 52,
+        "cacheEstimatedBytes": 119184
+      }
+    }
+  ]
+}

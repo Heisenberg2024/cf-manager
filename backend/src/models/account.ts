@@ -1,3 +1,4 @@
+import {displayAccount,normalizeAccountName} from '../services/accountName';
 import { getDb } from '../db';
 import { ACCOUNT_SELECT, ensureCredential, getCredential, updateCredential } from './credential';
 
@@ -85,7 +86,7 @@ export function hasPaidAccountByFeature(feature: AccountFeature): boolean {
 }
 
 export function getAllAccounts(): Account[] {
-  return getDb().prepare(`${ACCOUNT_SELECT} ORDER BY accounts.created_at DESC`).all() as Account[];
+  return (getDb().prepare(`${ACCOUNT_SELECT} ORDER BY accounts.created_at DESC`).all() as Account[]).map(displayAccount);
 }
 
 export type AccountListFilter = 'all' | 'active' | 'unverified';
@@ -136,18 +137,19 @@ export function listAccountsPaged(opts: {
     unverified: (getDb().prepare('SELECT COUNT(*) as c FROM accounts WHERE is_active = 0').get() as { c: number }).c,
   };
 
-  return { accounts, total, counts };
+  return { accounts:accounts.map(displayAccount), total, counts };
 }
 
 export function getActiveAccounts(): Account[] {
-  return getDb().prepare(`${ACCOUNT_SELECT} WHERE accounts.is_active = 1 AND accounts.is_enabled = 1 ORDER BY accounts.created_at DESC`).all() as Account[];
+  return (getDb().prepare(`${ACCOUNT_SELECT} WHERE accounts.is_active = 1 AND accounts.is_enabled = 1 ORDER BY accounts.created_at DESC`).all() as Account[]).map(displayAccount);
 }
 
 export function getAccountById(id: number): Account | undefined {
-  return getDb().prepare(`${ACCOUNT_SELECT} WHERE accounts.id = ?`).get(id) as Account | undefined;
+  const row=getDb().prepare(`${ACCOUNT_SELECT} WHERE accounts.id = ?`).get(id) as Account | undefined;return row?displayAccount(row):undefined;
 }
 
 export function createAccount(input: AccountInput): number {
+  input={...input,name:normalizeAccountName(input.name)};
   return getDb().transaction(() => {
     const credentialId = input.credential_id ?? ensureCredential(input);
     const credential = getCredential(credentialId);
@@ -164,6 +166,7 @@ export function createAccount(input: AccountInput): number {
 }
 
 export function updateAccount(id: number, input: Partial<AccountInput>): void {
+  if(input.name!==undefined)input={...input,name:normalizeAccountName(input.name)};
   const existing = getAccountById(id);
   const authPatch = Object.fromEntries(Object.entries(input).filter(([k, v]) => v !== undefined && ['auth_type', 'api_token', 'api_key', 'email'].includes(k)));
   if (existing?.credential_id && Object.keys(authPatch).length) updateCredential(existing.credential_id, authPatch);

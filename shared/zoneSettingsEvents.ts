@@ -1,0 +1,1 @@
+export interface ZoneSaveProgress {type:'progress';key:string;stage:'checking'|'saving'|'confirming'|'done';status?:string;actual?:unknown;reason?:string;completed:number;total:number;patchCount:number}

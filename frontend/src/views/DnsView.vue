@@ -151,8 +151,7 @@
 
             <!-- Tab 2: Zone 设置 -->
             <n-tab-pane name="settings" :tab="t('dns.zoneSettings')">
-              <n-alert v-if="dnsStore.settingsError" type="error" :bordered="false">{{ dnsStore.settingsError }}</n-alert>
-              <n-spin :show="dnsStore.settingsLoading">
+              <ZoneSettingsFeedback :saving="savingSettings" />
                 <div class="dns-tab-form-scroll">
                   <n-grid :cols="24" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
                     <!-- 左列：SSL/TLS 安全配置 -->
@@ -162,7 +161,7 @@
                           <span class="group-card-icon">🔒</span>
                           <span class="group-card-title">{{ t('dns.sslTls') }}</span>
                         </div>
-                        <n-form label-placement="left" label-width="120" size="small" :disabled="dnsStore.settingsLoading">
+                        <n-form label-placement="left" label-width="120" size="small" :disabled="savingSettings">
                           <n-form-item :label="t('dns.sslMode')">
                             <n-select v-model:value="zoneForm.ssl" :disabled="!settingEditable('ssl')" :options="sslOptions" />
                           </n-form-item>
@@ -186,7 +185,7 @@
                           <span class="group-card-icon">⚡</span>
                           <span class="group-card-title">{{ t('dns.performance') }}</span>
                         </div>
-                        <n-form label-placement="left" label-width="120" size="small" :disabled="dnsStore.settingsLoading">
+                        <n-form label-placement="left" label-width="120" size="small" :disabled="savingSettings">
                           <n-form-item v-if="dnsStore.zoneSettings.minify !== undefined" :label="`${t('dns.autoMinify')} (deprecated)`">
                             <n-space :size="12">
                               <n-checkbox v-model:checked="minifyJs" disabled>JS</n-checkbox>
@@ -216,14 +215,14 @@
 
                   <div class="settings-action-bar">
                     <n-text depth="3" style="font-size: 12px">{{ t('dns.saveSettingsHint', '修改配置后点击右侧保存即时生效') }}</n-text>
-                    <n-button type="primary" :loading="savingSettings" @click="handleSaveSettings">{{ t('dns.saveSettings') }}</n-button>
+                    <n-button type="primary" :loading="savingSettings" :disabled="!dnsStore.settingsDirty.length || !!dnsStore.settingsConflicts.length || savingSettings" @click="handleSaveSettings">{{ t('dns.saveSettings') }}</n-button>
                   </div>
                 </div>
-              </n-spin>
             </n-tab-pane>
 
             <!-- Tab 3: 缓存与状态 -->
             <n-tab-pane name="cache" :tab="t('dns.cacheAndStatus')">
+              <ZoneSettingsFeedback :saving="savingSettings" />
               <div class="dns-tab-form-scroll">
                 <n-grid :cols="24" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
                   <!-- 左列：缓存策略设置 -->
@@ -262,7 +261,7 @@
                           <n-space align="center">
                             <n-popconfirm @positive-click="handlePurgeAll">
                               <template #trigger>
-                                <n-button size="small" type="warning">{{ t('dns.purgeAll') }}</n-button>
+                                <n-button size="small" type="warning" :loading="purging" :disabled="purging">{{ t('dns.purgeAll') }}</n-button>
                               </template>
                               {{ t('dns.purgeAllConfirm') }}
                             </n-popconfirm>
@@ -312,7 +311,7 @@
 
                 <div class="settings-action-bar" style="margin-top: 16px;">
                   <n-text depth="3" style="font-size: 12px">{{ t('dns.saveSettingsHint', '修改配置后点击右侧保存即时生效') }}</n-text>
-                  <n-button type="primary" :loading="savingSettings" @click="handleSaveSettings">{{ t('dns.saveSettings') }}</n-button>
+                  <n-button type="primary" :loading="savingSettings" :disabled="!dnsStore.settingsDirty.length || !!dnsStore.settingsConflicts.length || savingSettings" @click="handleSaveSettings">{{ t('dns.saveSettings') }}</n-button>
                 </div>
               </div>
             </n-tab-pane>
@@ -381,7 +380,7 @@
 
 <script setup lang="ts">
 import DnsZoneList from '../components/DnsZoneList.vue';
-import { ref, h, computed, onMounted, onUnmounted, watch, reactive } from 'vue';
+import { ref, h, computed, onMounted, onUnmounted, watch } from 'vue';
 import { NButton, NSwitch, NTag, NText, NCheckbox, useMessage, useDialog } from 'naive-ui';
 import type { DataTableColumns, FormInst, FormRules, SelectNodeProps } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
@@ -401,6 +400,7 @@ import { buildDnsRecord, DNS_TYPES } from '../utils/dnsRecord';
 import type { DeleteZonesResult, PlanChangeTarget, ZoneContext } from '../api/dns';
 import { setDemoAccounts, isDemoAccount } from '../utils/demoAccounts';
 import { dnsAccountLabel, type DnsAccountIdentity } from '../utils/dnsAccountLabel';
+import ZoneSettingsFeedback from '../components/ZoneSettingsFeedback.vue';
 import { zonePlan, type CreateZoneResult, type ZonePlanId, type ZonePlanOption } from '../shared/zonePlans';
 
 const { t } = useI18n();
@@ -592,9 +592,8 @@ watch(() => dnsStore.domains, () => {
 const activeTab = ref('records');
 
 async function onTabChange(tab: string) {
-  if (tab === 'settings' && dnsStore.currentDomain) {
+  if ((tab === 'settings' || tab === 'cache') && dnsStore.currentDomain) {
     await dnsStore.fetchZoneSettings(dnsStore.currentDomain);
-    syncZoneForm();
   }
 }
 
@@ -796,8 +795,8 @@ function handleEditRecord(row: any) {
 }
 
 // ===== Zone 设置 =====
-const savingSettings = ref(false);
-const zoneForm = reactive<Record<string, any>>({});
+const savingSettings = computed(()=>dnsStore.settingsPending.has(dnsStore.settingsKey(dnsStore.currentDomain,dnsStore.currentContext)));
+const zoneForm = computed(()=>dnsStore.settingForm);
 const minifyJs = ref(false);
 const minifyCss = ref(false);
 const minifyHtml = ref(false);
@@ -830,25 +829,20 @@ const browserTtlOptions = [
   { label: '1d', value: 86400 },
 ];
 
-function syncZoneForm() {
-  for (const key of Object.keys(zoneForm)) delete zoneForm[key];
-  for (const [key, value] of Object.entries(dnsStore.zoneSettings)) if (key !== '__meta') zoneForm[key] = value;
-  minifyJs.value = dnsStore.zoneSettings.minify?.js === 'on';
-  minifyCss.value = dnsStore.zoneSettings.minify?.css === 'on';
-  minifyHtml.value = dnsStore.zoneSettings.minify?.html === 'on';
-}
-function settingEditable(key: string): boolean { return !dnsStore.settingsLoading && !dnsStore.settingsError && dnsStore.zoneSettings.__meta?.[key]?.editable === true; }
-watch(() => dnsStore.zoneSettings, syncZoneForm);
+function settingEditable(key: string): boolean { return !savingSettings.value && !dnsStore.settingsDraftLocked && dnsStore.zoneSettings.__meta?.[key]?.editable === true; }
+watch(() => dnsStore.zoneSettings, () => {minifyJs.value=dnsStore.zoneSettings.minify?.js==='on';minifyCss.value=dnsStore.zoneSettings.minify?.css==='on';minifyHtml.value=dnsStore.zoneSettings.minify?.html==='on';});
+watch([activeTab,()=>`${dnsStore.currentDomain}:${dnsStore.currentContext.accountId}:${dnsStore.currentContext.zoneId}`],()=>{if(activeTab.value==='settings'||activeTab.value==='cache')void onTabChange(activeTab.value);});
 async function handleSaveSettings() {
-  if (!dnsStore.currentDomain) return;
-  const domain = dnsStore.currentDomain;
-  savingSettings.value = true;
+  if (!dnsStore.currentDomain || savingSettings.value) return;
+  if(!dnsStore.settingsDirty.length){message.info(t('dns.settingsState.noChanges'));return;}
+  const domain=dnsStore.currentDomain;
   try {
-    const settings = Object.fromEntries(Object.entries(zoneForm).filter(([key, value]) => settingEditable(key) && JSON.stringify(value) !== JSON.stringify(dnsStore.zoneSettings[key])));
-    const result = await dnsStore.updateZoneSettings(domain, settings);
-    if (result.failed?.length) message.warning(Object.entries(result.errors || {}).map(([key, error]) => `${key}: ${error}`).join('; '));
+    const settings=Object.fromEntries(dnsStore.settingsDirty.map(key=>[key,zoneForm.value[key]]));
+    const result=await dnsStore.updateZoneSettings(domain,settings);
+    if(result.failed?.length)message.warning(Object.entries(result.errors || {}).map(([key,error])=>`${key}: ${error}`).join('; '));
+    else if(!result.updated?.length)message.info(t('dns.settingsState.noChanges'));
     else message.success(t('dns.msg.settingsUpdated'));
-  } finally { savingSettings.value = false; }
+  }catch(error:any){message.error(error.errorMessage || error.message);}
 }
 
 // ===== 缓存清除 =====
@@ -857,7 +851,7 @@ const purgeUrls = ref('');
 const purging = ref(false);
 
 async function handlePurgeAll() {
-  if (!dnsStore.currentDomain) return;
+  if (!dnsStore.currentDomain || purging.value) return;
   purging.value = true;
   try {
     await dnsStore.purgeZoneCache(dnsStore.currentDomain, { purge_everything: true });
@@ -870,7 +864,7 @@ async function handlePurgeAll() {
 }
 
 async function handlePurgeUrls() {
-  if (!dnsStore.currentDomain) return;
+  if (!dnsStore.currentDomain || purging.value) return;
   const files = purgeUrls.value.split('\n').map(s => s.trim()).filter(Boolean);
   if (!files.length) {
     message.warning(t('dns.msg.urlRequired'));
@@ -893,8 +887,8 @@ async function handlePurgeUrls() {
 const togglingStatus = ref(false);
 
 async function handleToggleZoneStatus() {
-  if (!dnsStore.currentDomain || !currentDomainInfo.value) return;
-  const isPaused = currentDomainInfo.value.status === 'paused';
+  if (!dnsStore.currentDomain || !currentDomainInfo.value || togglingStatus.value) return;
+  const isPaused = currentDomainInfo.value.paused === true || currentDomainInfo.value.status === 'paused';
   togglingStatus.value = true;
   try {
     await dnsStore.updateZoneStatus(dnsStore.currentDomain, !isPaused);

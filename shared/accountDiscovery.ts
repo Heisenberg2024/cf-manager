@@ -1,11 +1,13 @@
 import { CloudflareError, errorDetails, rememberSecret, type CfFailureKind } from './cfErrors';
+import {normalizeAccountName} from './accountName';
 
 export interface AuthInput { auth_type: 'token' | 'global_key'; api_token?: string; api_key?: string; email?: string }
 export interface DiscoveredAccount { id: string; name: string }
-export interface CfEnvelope { success?: boolean; result?: unknown; errors?: Array<{ code: number; message: string }>; result_info?: { total_pages?: number; total_count?: number; per_page?: number } }
-export interface HttpResponse { ok: boolean; status: number; headers: { get(name: string): string | null }; json(): Promise<unknown> }
+export interface CfEnvelope { success?: boolean; result?: unknown; errors?: Array<{ code: number; message: string }>; result_info?: { total_pages?: number; total_count?: number; per_page?: number;cursor?:string;is_truncated?:boolean;delimited?:string[] } }
+export interface HttpResponse { ok: boolean; status: number; headers: { get(name: string): string | null }; json(): Promise<unknown>;body?:Uint8Array|ReadableStream<Uint8Array>|(AsyncIterable<Uint8Array>&{destroy?():void})|null }
 export type Transport = (path: string, init: RequestInit) => Promise<HttpResponse>;
-export type CfRequest = (path: string, init?: RequestInit) => Promise<CfEnvelope>;
+export type CfRequestInit=RequestInit & {retry?:boolean;maxResponseBytes?:number};
+export type CfRequest = (path: string, init?: CfRequestInit) => Promise<CfEnvelope>;
 export interface DiscoveryResult {
   status: 'discovered' | 'manual_required' | CfFailureKind;
   credentialStatus: 'active' | 'invalid' | 'unknown';
@@ -35,10 +37,11 @@ export function createCfRequest(transport: Transport, headers: Record<string, st
       init.signal?.throwIfAborted();
       const started = Date.now();
       let response: HttpResponse;
-      try { response = await transport(path, { ...init, headers: { 'Content-Type': 'application/json', ...headers, ...init.headers } }); }
+      const {retry:_retry,maxResponseBytes:_maxResponseBytes,...transportInit}=init;
+      try { response = await transport(path, { ...transportInit, headers: { 'Content-Type': 'application/json', ...headers, ...init.headers } }); }
       catch (error) { metric({ event: `cf_${errorDetails(error).kind}`, attempt, durationMs: Date.now() - started }); throw error; }
       metric({ event: response.status === 429 ? 'cf_rate_limited' : 'cf_attempt', attempt, status: response.status, durationMs: Date.now() - started });
-      if (response.status === 429 && attempt < 2) {
+      if (response.status === 429 && attempt < 2 && init.retry!==false) {
         const retry = response.headers.get('retry-after');
         const seconds = retry && /^\d+(\.\d+)?$/.test(retry) ? Number(retry) : retry ? Math.max(0, (Date.parse(retry) - Date.now()) / 1000) : NaN;
         // Long limits are returned to the caller rather than retried earlier than CF requested.
@@ -48,8 +51,18 @@ export function createCfRequest(transport: Transport, headers: Record<string, st
       }
       if (response.status === 204) return { success: true, result: null };
       let body: CfEnvelope;
-      try { body = await response.json() as CfEnvelope; }
+      try {
+        if(init.maxResponseBytes&&response.body){
+          const chunks:Uint8Array[]=[];let size=0;
+          const accept=(chunk:Uint8Array)=>{size+=chunk.length;if(size>init.maxResponseBytes!)throw Object.assign(new Error('D1 result exceeds response limit; add an explicit LIMIT'),{code:'D1_RESULT_LIMIT',statusCode:502});chunks.push(chunk);};
+          if(response.body instanceof Uint8Array)accept(response.body);
+          else if('getReader' in response.body){const reader=response.body.getReader();try{for(;;){const part=await reader.read();if(part.done)break;accept(part.value);}}catch(error){await reader.cancel().catch(()=>{});throw error;}finally{reader.releaseLock();}}
+          else {try{for await(const chunk of response.body)accept(chunk);}catch(error){response.body.destroy?.();throw error;}}
+          const bytes=new Uint8Array(size);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}body=JSON.parse(new TextDecoder().decode(bytes));
+        }else body = await response.json() as CfEnvelope;
+      }
       catch (error) {
+        if((error as {code?:string}).code==='D1_RESULT_LIMIT')throw error;
         if (['timeout', 'network'].includes(errorDetails(error).kind)) throw error;
         if (response.ok) throw new CloudflareError(502, 'Invalid JSON response', [], context);
         body = {};
@@ -69,7 +82,7 @@ export async function listAccessibleAccounts(request: CfRequest): Promise<Discov
     if (!Array.isArray(data.result)) throw new CloudflareError(502, 'Unexpected accounts response');
     const before = accounts.size;
     for (const row of data.result as DiscoveredAccount[]) {
-      if (/^[a-f\d]{32}$/i.test(row.id) && typeof row.name === 'string') accounts.set(row.id, { id: row.id, name: row.name });
+      if (/^[a-f\d]{32}$/i.test(row.id) && typeof row.name === 'string') accounts.set(row.id, { id: row.id, name: normalizeAccountName(row.name) });
     }
     const info = data.result_info;
     if (data.result.length === 0 || (info?.total_pages !== undefined && page >= info.total_pages) || (info?.total_count !== undefined && accounts.size >= info.total_count) || (!info?.total_pages && info?.total_count === undefined && data.result.length < (info?.per_page || 50))) return [...accounts.values()];
@@ -86,7 +99,7 @@ export async function validateManualAccount(request: CfRequest, accountId: strin
     const data = await request(`/accounts/${accountId}`);
     const account = data.result as DiscoveredAccount;
     if (account?.id !== accountId) throw new CloudflareError(502, 'Unexpected Account ID');
-    return { id: account.id, name: account.name || account.id };
+    return { id: account.id, name: normalizeAccountName(account.name || account.id) };
   } catch (error) {
     if (!['permission', 'invalid'].includes(errorDetails(error).kind)) throw error;
     // Scoped DNS/Workers/KV tokens may lack Account Settings:Read. Verify an actual scoped read.
@@ -95,7 +108,7 @@ export async function validateManualAccount(request: CfRequest, accountId: strin
         const data = await request(path);
         if (path.startsWith('/zones')) {
           const zone = (Array.isArray(data.result) ? data.result : []).find((z: { account?: DiscoveredAccount }) => z.account?.id === accountId);
-          if (zone) return { id: accountId, name: zone.account.name || accountId };
+          if (zone) return { id: accountId, name: normalizeAccountName(zone.account.name || accountId) };
         } else if (Array.isArray(data.result)) return { id: accountId, name: accountId };
       } catch (e) {
         if (!['permission', 'invalid'].includes(errorDetails(e).kind)) throw e;

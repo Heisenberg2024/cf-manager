@@ -1,5 +1,7 @@
 import { defineStore } from 'pinia';
-import { ref, shallowRef } from 'vue';
+import type {ZoneSaveProgress} from '../shared/zoneSettingsEvents';
+import { ZoneSettingsState } from '../utils/zoneSettingsState';
+import { computed, ref, shallowRef } from 'vue';
 import type { BatchZone } from '../shared/dnsBatch';
 import type { CreateZoneResult, ZonePlanId } from '../shared/zonePlans';
 import type { ApiError } from '../api/client';
@@ -14,6 +16,15 @@ export const useDnsStore = defineStore('dns', () => {
   const domainsLoading = ref(false);
   const zoneSettings = ref<Record<string, any>>({});
   const settingsLoading = ref(false);
+  const settingsState = new ZoneSettingsState();
+  const settingForm = ref<Record<string,any>>({});
+  const settingBaseline = ref<Record<string,any>>({});
+  const settingsPending = ref(new Set<string>());
+  const settingsResults = ref<Record<string,any>>({});
+  const settingsProgress=ref<Record<string,ZoneSaveProgress>>({});
+  let settingsFlight: {key:string;promise:Promise<void>} | undefined;
+  const settingsDirty = computed(()=>settingsState.dirty({form:settingForm.value,baseline:settingBaseline.value}));
+  const settingsConflicts = computed(()=>settingsState.conflicts({form:settingForm.value,baseline:settingBaseline.value},zoneSettings.value));
   const recordsError = ref('');
   const settingsError = ref('');
   const domainErrors = ref<Record<number, string>>({});
@@ -43,6 +54,15 @@ export const useDnsStore = defineStore('dns', () => {
   let recordFlight: { key: string; promise: Promise<void> } | undefined;
   const key = (domain: string, context: ZoneContext) => `${context.accountId || ''}:${context.zoneId || ''}:${domain}`;
   const isCurrent = (domain: string, context: ZoneContext) => key(domain, context) === key(currentDomain.value, currentContext.value);
+  const settingsKey=(domain:string,context:ZoneContext)=>`${key(domain,context)}:${sessionRevision}:${accountVersions.get(context.accountId!) || ''}`;
+  function activateSettings(domain=currentDomain.value,context=currentContext.value) {
+    const cacheKey=settingsKey(domain,context),cached=settingsState.get(cacheKey),draft=settingsState.draft(cacheKey);
+    zoneSettings.value=cached?.settings || {};
+    // Raw cache fills must invalidate computed dirty state even if the form was empty at first render.
+    settingForm.value={...draft.form};settingBaseline.value={...draft.baseline};draft.form=settingForm.value;draft.baseline=settingBaseline.value;
+  }
+  const settingsDraftLocked=computed(()=>!settingsState.canEdit(settingsKey(currentDomain.value,currentContext.value)));
+  function cancelSettings(){const draft=settingsState.cancel(settingsKey(currentDomain.value,currentContext.value),zoneSettings.value);settingForm.value=draft.form;settingBaseline.value=draft.baseline;draft.form=settingForm.value;draft.baseline=settingBaseline.value;settingsResults.value={};}
   function cacheRecords(cacheKey: string, rows: any[], fetchedAt = Date.now()) {
     recordCache.delete(cacheKey);
     if (rows.length <= 20000) recordCache.set(cacheKey, { rows, fetchedAt });
@@ -53,6 +73,7 @@ export const useDnsStore = defineStore('dns', () => {
     for (const [id, version] of accountVersions) if (next.get(id) !== version) {
       for (const cacheKey of recordCache.keys()) if (cacheKey.startsWith(`${id}:`)) { recordCache.delete(cacheKey); revisions.set(cacheKey, (revisions.get(cacheKey) || 0) + 1); }
       for (const cacheKey of pageCache.keys()) if (cacheKey.startsWith(`${id}:`)) pageCache.delete(cacheKey);
+      settingsState.invalidate(id);
       domains.value = domains.value.filter(zone => zone.cfAccountId !== id);
       if (currentContext.value.accountId === id) clearSelection();
     }
@@ -62,7 +83,7 @@ export const useDnsStore = defineStore('dns', () => {
     recordController?.abort(); settingsController?.abort();
     ++recordIdentity; ++settingsIdentity;
     currentDomain.value = ''; currentContext.value = {};
-    records.value = []; zoneSettings.value = {};
+    records.value = []; zoneSettings.value = {}; settingForm.value={};settingBaseline.value={};settingsFlight=undefined;settingsResults.value={};
     activeRecordsComplete = false; recordMode.value = 'all'; recordTotal.value = 0; zoneRecordTotal.value = 0; recordWindow.value = 1; recordFilter.value = {};
     loading.value = false; settingsLoading.value = false;
     recordsError.value = ''; settingsError.value = '';
@@ -71,6 +92,7 @@ export const useDnsStore = defineStore('dns', () => {
     sessionRevision++;
     clearSelection(); domainController?.abort(); ++domainIdentity;
     domains.value = []; domainErrors.value = {}; domainStates.value = {}; domainsLoading.value = false;
+    settingsState.clear();settingForm.value={};settingBaseline.value={};settingsPending.value=new Set();settingsResults.value={};settingsProgress.value={};
     recordCache.clear(); clearPageCache(); revisions.clear(); accountVersions.clear(); accountIds = undefined; domainScope = undefined;
   }
   function setDomainScope(scope: number[]) { domainScope = scope; }
@@ -135,6 +157,7 @@ export const useDnsStore = defineStore('dns', () => {
     recordFlight = undefined;
     if (changed) { recordMode.value = 'all'; recordTotal.value = 0; zoneRecordTotal.value = 0; recordWindow.value = 1; recordFilter.value = {}; records.value = []; activeRecordsComplete = false; zoneSettings.value = {}; ++settingsIdentity; settingsController?.abort(); settingsLoading.value = false; settingsError.value = ''; }
     currentDomain.value = domain; currentContext.value = context;
+    if(changed) {activateSettings(domain,context);settingsResults.value={};}
     const identity = ++recordIdentity;
     const revision = revisions.get(cacheKey) || 0;
     const cacheable = !!context.accountId && !!context.zoneId;
@@ -271,16 +294,26 @@ export const useDnsStore = defineStore('dns', () => {
     } catch (error) { if (valid()) { applyRecord(domain, context, recordId, old); recordCache.delete(key(domain, context)); clearPageCache(context.zoneId); } throw error; }
     finally { const next = new Set(proxyPending.value); next.delete(pendingKey); proxyPending.value = next; }
   }
-  async function fetchZoneSettings(domain: string, context: ZoneContext = currentContext.value) {
-    settingsController?.abort(); const controller = settingsController = new AbortController();
-    const identity = ++settingsIdentity;
-    settingsLoading.value = true; settingsError.value = '';
-    try {
-      const { data } = await dnsApi.getSettings(domain, { ...context }, controller.signal);
-      if (identity === settingsIdentity && isCurrent(domain, context)) zoneSettings.value = data;
-    } catch (error: any) {
-      if (identity === settingsIdentity) { settingsError.value = error.errorMessage || error.message; zoneSettings.value = {}; }
-    } finally { if (identity === settingsIdentity) settingsLoading.value = false; }
+  function fetchZoneSettings(domain: string, context: ZoneContext = currentContext.value, refresh=false): Promise<void> {
+    context={...context};const cacheKey=settingsKey(domain,context),session=sessionRevision;
+    if(settingsFlight?.key===cacheKey)return settingsFlight.promise;
+    const cached=settingsState.get(cacheKey);
+    if(cached&&isCurrent(domain,context)){activateSettings(domain,context);if(!refresh&&Date.now()-cached.fetchedAt<30000&&cached.settings.__cache?.state!=='stale'){settingsError.value='';return Promise.resolve();}}
+    settingsController?.abort(); const controller=settingsController=new AbortController();const identity=++settingsIdentity;
+    settingsLoading.value=true;settingsError.value='';
+    const promise=(async()=>{
+      try {
+        let {data}=await dnsApi.getSettings(domain,context,controller.signal,refresh);
+        const valid=()=>session===sessionRevision&&cacheKey===settingsKey(domain,context)&&!controller.signal.aborted&&identity===settingsIdentity&&isCurrent(domain,context);
+        if(!valid())return;
+        settingsState.accept(cacheKey,data,data.__cache?.fetchedAt || Date.now());activateSettings(domain,context);settingsError.value=data.__cache?.error || '';
+        if(data.__cache?.state==='stale'){
+          ({data}=await dnsApi.getSettings(domain,context,controller.signal,true));
+          if(!valid())return;settingsState.accept(cacheKey,data,data.__cache?.fetchedAt || Date.now());activateSettings(domain,context);settingsError.value='';
+        }
+      }catch(error:any){if(identity===settingsIdentity&&!controller.signal.aborted)settingsError.value=error.errorMessage || error.message;}
+      finally{if(identity===settingsIdentity){settingsLoading.value=false;settingsFlight=undefined;}}
+    })();settingsFlight={key:cacheKey,promise};return promise;
   }
   async function createDomains(data: { names: string[]; account_id: number; type: 'full' | 'partial'; plan?: ZonePlanId }, onProgress?: (name: string, result?: CreateZoneResult) => void) {
     const input = { ...data };
@@ -331,18 +364,36 @@ export const useDnsStore = defineStore('dns', () => {
     if (deleted.has(currentContext.value.zoneId)) clearSelection();
   }
   async function updateZoneSettings(domain: string, settings: Record<string, any>) {
-    const context = { ...currentContext.value };
-    const identity = ++settingsIdentity;
-    const { data } = await dnsApi.updateSettings(domain, settings, context);
-    if (identity === settingsIdentity && isCurrent(domain, context)) zoneSettings.value = data.settings;
-    return data;
+    const context={...currentContext.value},session=sessionRevision,cacheKey=settingsKey(domain,context);
+    if(settingsPending.value.has(cacheKey))throw new Error('This Zone is already saving');
+    if(!Object.keys(settings).length)return {updated:[],failed:[],fields:{},patchCount:0};
+    const submitted=JSON.parse(JSON.stringify(settings)),baseline=JSON.parse(JSON.stringify(settingBaseline.value));
+    const remote=JSON.parse(JSON.stringify(zoneSettings.value));
+    settingsProgress.value={...settingsProgress.value,[cacheKey]:{type:'progress',key:'',stage:'checking',completed:0,total:Object.keys(submitted).length,patchCount:0}};settingsPending.value=new Set([...settingsPending.value,cacheKey]);settingsController?.abort();++settingsIdentity;settingsFlight=undefined;settingsLoading.value=false;
+    try {
+      const {data}=await dnsApi.updateSettings(domain,{changes:submitted,baseline},context,event=>{if(session!==sessionRevision||cacheKey!==settingsKey(domain,context))return;settingsProgress.value={...settingsProgress.value,[cacheKey]:event};if(isCurrent(domain,context)&&event.stage==='done')settingsResults.value={...settingsResults.value,[event.key]:event};});
+      if(session!==sessionRevision||cacheKey!==settingsKey(domain,context))return data;
+      const merged={...remote,...data.settings,__meta:{...remote.__meta,...data.settings?.__meta}};
+      settingsState.invalidate(undefined,context.zoneId);
+      const confirmed=[...(data.updated || []),...Object.entries(data.fields || {}).filter(([field,value]:[string,any])=>value.status==='unchanged'&&Object.hasOwn(data.settings || {},field)).map(([field])=>field)];
+      settingsState.confirmed(cacheKey,merged,confirmed,submitted);
+      if(isCurrent(domain,context)){zoneSettings.value=merged;const draft=settingsState.draft(cacheKey);settingForm.value=draft.form;settingBaseline.value=draft.baseline;settingsResults.value=data.fields || {};}
+      return data;
+    }catch(error:any){if(session===sessionRevision){settingsState.invalidate(undefined,context.zoneId);if(isCurrent(domain,context))settingsError.value=error.errorMessage || error.message;}throw error;
+    }finally{if(session===sessionRevision){const next=new Set(settingsPending.value);next.delete(cacheKey);settingsPending.value=next;const progress={...settingsProgress.value};delete progress[cacheKey];settingsProgress.value=progress;}}
   }
+  const operationPending=new Set<string>();
   async function purgeZoneCache(domain: string, options: { purge_everything?: boolean; files?: string[] }) {
-    const { data } = await dnsApi.purgeCache(domain, options, { ...currentContext.value }); return data;
+    const context={...currentContext.value},pending=`purge:${key(domain,context)}`;
+    if(operationPending.has(pending))throw new Error('Cache purge already pending');operationPending.add(pending);
+    try {const {data}=await dnsApi.purgeCache(domain,options,context);if(!data.id)throw new Error('Cache purge result unknown: receipt missing');return data;}
+    finally{operationPending.delete(pending);}
   }
   async function updateZoneStatus(domain: string, paused: boolean) {
-    await dnsApi.updateStatus(domain, paused, { ...currentContext.value });
-    await fetchDomains(true, currentContext.value.accountId ? [currentContext.value.accountId] : accountIds);
+    const context={...currentContext.value},session=sessionRevision,pending=`status:${key(domain,context)}`;
+    if(operationPending.has(pending))throw new Error('Zone status change already pending');operationPending.add(pending);
+    try {const {data}=await dnsApi.updateStatus(domain,paused,context);if(data.paused!==paused||data.id!==context.zoneId)throw new Error('Zone status result not confirmed');if(session===sessionRevision)domains.value=domains.value.map(zone=>zone.id===context.zoneId?{...zone,paused:data.paused,status:data.paused?'paused':data.status || zone.status}:zone);return data;}
+    finally{operationPending.delete(pending);}
   }
   async function invalidateRecords(zones: BatchZone[]) {
     for (const zone of zones) {
@@ -352,7 +403,7 @@ export const useDnsStore = defineStore('dns', () => {
     }
     if (zones.some(z => z.zoneId === currentContext.value.zoneId)) await fetchRecords(currentDomain.value, { ...currentContext.value }, true);
   }
-  return { zoneRecordTotal, recordMode, recordTotal, recordWindow, recordFilter, fetchRecordWindow, forgetDeletedZones, resetSensitiveState, setDomainScope, configureAccounts, domainErrors, domainStates, saveRecord, removeRecord, toggleProxy, proxyPending, invalidateRecords, domains, records, currentDomain, currentContext, loading, domainsLoading, recordsError,
+  return { settingsDraftLocked, settingsProgress, settingsKey, settingForm, settingBaseline, settingsDirty, settingsConflicts, settingsPending, settingsResults, cancelSettings, zoneRecordTotal, recordMode, recordTotal, recordWindow, recordFilter, fetchRecordWindow, forgetDeletedZones, resetSensitiveState, setDomainScope, configureAccounts, domainErrors, domainStates, saveRecord, removeRecord, toggleProxy, proxyPending, invalidateRecords, domains, records, currentDomain, currentContext, loading, domainsLoading, recordsError,
     zoneSettings, settingsLoading, settingsError, fetchDomains, fetchRecords, clearSelection, isCurrent,
     createDomains, deleteDomains, fetchZoneSettings, updateZoneSettings, purgeZoneCache, updateZoneStatus };
 });

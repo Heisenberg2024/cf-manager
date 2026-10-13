@@ -1,6 +1,7 @@
 import { Account } from '../models/account';
 import { getCfClient, accountRequest } from './cfFactory';
-import { readZoneSettings, writeZoneSettings } from './zoneSettings';
+import { zoneSettingsRuntime } from './zoneSettingsRuntime';
+import type {ZoneSaveProgress} from './zoneSettingsEvents';
 import { dnsDirectory } from './dnsDirectory';
 import { measureDnsWrite } from './performanceMetrics';
 import { dnsRecordId } from './dnsRecord';
@@ -10,8 +11,8 @@ async function cfZoneApi(account: Account, method: string, path: string, body?: 
   return data.result ?? data;
 }
 
-export async function getZoneSettings(account: Account, zoneId: string) {
-  return readZoneSettings(dnsDirectory.wrap(account, accountRequest(account)), zoneId);
+export async function getZoneSettings(account: Account, zoneId: string, options: {refresh?:boolean;signal?:AbortSignal} = {}) {
+  return zoneSettingsRuntime.read(account, accountRequest(account), zoneId,options);
 }
 
 /** 创建 Zone */
@@ -41,8 +42,8 @@ export async function deleteZone(account: Account, zoneId: string): Promise<void
   await measureDnsWrite(account.id, () => cf.zones.delete({ zone_id: zoneId } as any));
 }
 
-export async function updateZoneSettings(account: Account, zoneId: string, settings: Record<string, unknown>) {
-  return writeZoneSettings(accountRequest(account), zoneId, settings);
+export async function updateZoneSettings(account: Account, zoneId: string, settings: Record<string, unknown>,progress?:(event:ZoneSaveProgress)=>Promise<void>|void) {
+  return zoneSettingsRuntime.write(account, dnsDirectory.wrap(account,accountRequest(account)), zoneId, settings,progress);
 }
 
 /** 清除 Zone 缓存 */
@@ -52,7 +53,8 @@ export async function purgeZoneCache(
   options: { purge_everything?: boolean; files?: string[] }
 ): Promise<{ id: string }> {
   const result = await cfZoneApi(account, 'POST', `/zones/${zoneId}/purge_cache`, options);
-  return { id: result?.id || '' };
+  if(!result?.id) throw Object.assign(new Error('Cache purge receipt missing; execution result unknown'),{statusCode:502,code:'CF_OUTCOME_UNCERTAIN'});
+  return { id: result.id };
 }
 
 /** 暂停/激活 Zone */
@@ -60,14 +62,17 @@ export async function setZoneStatus(
   account: Account,
   zoneId: string,
   paused: boolean
-): Promise<void> {
+): Promise<any> {
   const cf = getCfClient(account, 0);
-  await measureDnsWrite(account.id, () => cf.zones.edit({ zone_id: zoneId, paused } as any));
+  const receipt=await measureDnsWrite(account.id, () => cf.zones.edit({ zone_id: zoneId, paused } as any));
+  if(receipt.id !== zoneId || receipt.paused !== paused) throw Object.assign(new Error('Zone status result not confirmed; refresh before retrying'),{statusCode:502,code:'CF_OUTCOME_UNCERTAIN'});
+  return {id:receipt.id,paused:receipt.paused,status:receipt.status};
 }
 
 /** 清除 zones 缓存（创建/删除后调用） */
 export function invalidateZonesCache(accountId?: number, cloudflareAccountId?: string | null): void {
   dnsDirectory.invalidate(accountId, cloudflareAccountId);
+  zoneSettingsRuntime.invalidate(accountId, cloudflareAccountId);
 }
 
 /** 更新 DNS 记录代理状态（保留现有功能） */
