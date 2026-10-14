@@ -300,34 +300,36 @@ router.patch('/domains/:domain/status', async (req: Request, res: Response, next
 router.get('/domains/:domain/rules/:phase', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { account, zoneId } = await findAccountByDomain(req.params.domain as string, zoneContext(req));
-    res.json(await listRules(account, zoneId, req.params.phase as string));
+    res.json(await listRules(account, zoneId, req.params.phase as string, req.query.refresh === 'true'));
   } catch (err) { next(err); }
 });
 
 router.post('/domains/:domain/rules/:phase', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { description, expression, action, action_parameters, enabled, ratelimit } = req.body;
+    const { expression, action } = req.body;
     if (!expression || !action) {
       res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'expression and action are required' } });
       return;
     }
     const { account, zoneId } = await findAccountByDomain(req.params.domain as string, zoneContext(req));
-    const rule = await createRule(account, zoneId, req.params.phase as string, { description, expression, action, action_parameters, enabled, ratelimit });
-    createAuditLog(account.id, 'create_rule', req.params.domain as string, `phase=${req.params.phase} action=${action}`, 'success');
+    if (isDemoAccountId(account.id)) { res.status(403).json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可修改规则' } }); return; }
+    const rule = await createRule(account, zoneId, req.params.phase as string, req.body);
+    createAuditLog(account.id, 'create_rule', req.params.domain as string, `phase=${req.params.phase} action=${action}`, rule.status === 'success' ? 'success' : 'error');
     res.status(201).json(rule);
   } catch (err) { next(err); }
 });
 
 router.put('/domains/:domain/rules/:phase/:ruleId', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { description, expression, action, action_parameters, enabled, ratelimit } = req.body;
+    const { expression, action } = req.body;
     if (!expression || !action) {
       res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'expression and action are required' } });
       return;
     }
     const { account, zoneId } = await findAccountByDomain(req.params.domain as string, zoneContext(req));
-    const rule = await updateRule(account, zoneId, req.params.phase as string, req.params.ruleId as string, { description, expression, action, action_parameters, enabled, ratelimit });
-    createAuditLog(account.id, 'update_rule', req.params.domain as string, `phase=${req.params.phase} rule_id=${req.params.ruleId}`, 'success');
+    if (isDemoAccountId(account.id)) { res.status(403).json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可修改规则' } }); return; }
+    const rule = await updateRule(account, zoneId, req.params.phase as string, req.params.ruleId as string, req.body);
+    createAuditLog(account.id, 'update_rule', req.params.domain as string, `phase=${req.params.phase} rule_id=${req.params.ruleId}`, rule.status === 'success' ? 'success' : 'error');
     res.json(rule);
   } catch (err) { next(err); }
 });
@@ -339,9 +341,9 @@ router.delete('/domains/:domain/rules/:phase/:ruleId', async (req: Request, res:
       res.status(403).json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可删除规则' } });
       return;
     }
-    await deleteRule(account, zoneId, req.params.phase as string, req.params.ruleId as string);
-    createAuditLog(account.id, 'delete_rule', req.params.domain as string, `phase=${req.params.phase} rule_id=${req.params.ruleId}`, 'success');
-    res.json({ success: true });
+    const result = await deleteRule(account, zoneId, req.params.phase as string, req.params.ruleId as string, req.body?.baseline);
+    createAuditLog(account.id, 'delete_rule', req.params.domain as string, `phase=${req.params.phase} rule_id=${req.params.ruleId}`, result.status === 'success' ? 'success' : 'error');
+    res.json(result);
   } catch (err) { next(err); }
 });
 

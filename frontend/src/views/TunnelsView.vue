@@ -1,28 +1,30 @@
 <template>
   <div class="page-view">
-    <n-tabs type="line" animated>
+    <n-tabs v-model:value="activeTab" type="line" @update:value="onTabChange">
       <!-- ============ 隧道管理 ============ -->
       <n-tab-pane name="tunnels" :tab="t('tunnels.tunnelManagement')">
         <div class="tunnel-tab-content">
           <n-space align="center">
             <n-select
-              v-model:value="selectedAccountId"
+              :value="selectedAccountId"
               :options="accountOptions"
               :render-label="renderAccountOption"
               :placeholder="t('tunnels.selectAccount')"
               filterable
               style="width: 480px; max-width: 100%"
-              @update:value="onAccountChange"
+              @update:value="selectAccount"
             />
             <n-button type="primary" size="small" :disabled="!selectedAccountId" @click="showCreateModal = true">{{ t('tunnels.createTunnel') }}</n-button>
             <n-button size="small" :disabled="!selectedAccountId" @click="openWizard">{{ t('tunnels.wizard') }}</n-button>
-            <n-button size="small" @click="loadAccounts" :loading="loadingAccounts">{{ t('tunnels.refresh') }}</n-button>
+            <n-button size="small" @click="refreshTunnels" :loading="loadingAccounts || loadingTunnels">{{ t('tunnels.refresh') }}</n-button>
           </n-space>
 
+          <n-alert v-if="tunnelError" type="error">{{ tunnelError }} <n-button size="small" @click="loadTunnels(true)">重试</n-button></n-alert>
+          <n-text v-if="tunnelsFetchedAt" depth="3">读取时间：{{ new Date(tunnelsFetchedAt).toLocaleTimeString() }}</n-text>
           <AutoFitTable
             :columns="tunnelColumns"
             :data="tunnels"
-            :loading="loadingTunnels"
+            :loading="loadingTunnels && tunnels.length === 0"
             :scroll-x="600"
           />
         </div>
@@ -32,8 +34,9 @@
       <n-tab-pane name="rules-engine" :tab="t('tunnels.rulesEngine')">
         <div class="tunnel-tab-content">
           <n-space align="center">
-            <n-select
-              v-model:value="selectedDomain"
+            <n-select :value="selectedRuleAccountId" :options="accountOptions" :render-label="renderAccountOption" filterable style="width: 380px; max-width: 100%" @update:value="changeRuleAccount" />
+            <n-select v-if="!isAccountLevelPhase"
+              :value="selectedDomain"
               :options="domainOptions"
               :placeholder="t('tunnels.selectDomain')"
               filterable
@@ -41,23 +44,26 @@
               @update:value="onDomainChange"
             />
             <n-select
-              v-model:value="selectedRulePhase"
+              :value="selectedRulePhase"
               :options="rulePhaseOptions"
               :placeholder="t('tunnels.rulePhase')"
               style="width: 180px"
-              @update:value="loadRules"
+              @update:value="changeRulePhase"
             />
-            <n-button type="primary" size="small" :disabled="!selectedDomain || !selectedRulePhase" @click="openAddRule">{{ t('tunnels.addRule') }}</n-button>
-            <n-button size="small" @click="loadDomains">{{ t('tunnels.refreshDomains') }}</n-button>
+            <n-button type="primary" size="small" :disabled="!ruleTargetReady || !!ruleError || loadingRules" @click="openAddRule">{{ t('tunnels.addRule') }}</n-button>
+            <n-button size="small" @click="loadDomains(true)">{{ t('tunnels.refreshDomains') }}</n-button>
           </n-space>
 
+          <n-button size="small" :disabled="!ruleTargetReady" @click="loadRules(true)">刷新规则</n-button>
+          <n-alert v-if="ruleError || domainsError" type="error">{{ ruleError || domainsError }} <n-button size="small" @click="loadRules(true)">重试规则</n-button></n-alert>
+          <n-text depth="3">{{ ruleError && !rulesFetchedAt ? '数量未确认' : rules.length + ' 条规则' }}{{ loadingRules ? ' · 刷新中' : '' }} · {{ isAccountLevelPhase ? 'Account' : 'Zone' }} · {{ rulesFetchedAt ? new Date(rulesFetchedAt).toLocaleTimeString() : '未加载' }}</n-text>
           <n-alert v-if="isAccountLevelPhase" type="info" :bordered="false" style="margin-top: 4px">
             <span v-html="DOMPurify.sanitize(t('tunnels.accountLevelHint'))"></span>
           </n-alert>
           <AutoFitTable
             :columns="ruleColumns"
             :data="rules"
-            :loading="loadingRules"
+            :loading="loadingRules && rules.length === 0"
             :scroll-x="600"
           />
         </div>
@@ -80,7 +86,8 @@
     </n-modal>
 
     <!-- ============ 一键回源向导 Modal ============ -->
-    <n-modal v-model:show="showWizardModal" preset="dialog" :title="t('tunnels.wizardTitle')" style="width: 520px; max-width: 95vw">
+    <n-modal v-model:show="showWizardModal" preset="dialog" :mask-closable="false" :close-on-esc="false" :closable="!wizardLoading" :title="t('tunnels.wizardTitle')" style="width: 520px; max-width: 95vw">
+      <n-alert v-if="zonesError" type="error">{{ zonesError }} <n-button @click="readWizardZones">重试域名列表</n-button></n-alert>
       <n-form label-placement="left" label-width="100">
         <n-form-item :label="t('tunnels.mode')">
           <n-radio-group v-model:value="wizard.mode">
@@ -124,8 +131,8 @@
       </n-alert>
       <template #action>
         <n-space>
-          <n-button @click="showWizardModal = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="wizardLoading" @click="submitWizard">{{ t('tunnels.execute') }}</n-button>
+          <n-button :disabled="wizardLoading" @click="showWizardModal = false">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" :loading="wizardLoading" :disabled="!wizard.domain || !wizard.port" @click="submitWizard">{{ t('tunnels.execute') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -149,82 +156,54 @@
 
     <!-- ============ 连接信息 Modal ============ -->
     <n-modal v-model:show="showConnectionsModal" preset="dialog" :title="t('tunnels.connectionsTitle')" style="width: 600px; max-width: 95vw">
+      <n-button size="small" @click="showConnections(connectionsTunnelId, true)">刷新连接</n-button>
+      <n-text depth="3">读取时间：{{ new Date(connectionsFetchedAt).toLocaleTimeString() }}</n-text>
       <n-data-table :columns="connectionColumns" :data="connections" size="small" :bordered="false" />
       <template #action>
         <n-button @click="showConnectionsModal = false">{{ t('common.close') }}</n-button>
       </template>
     </n-modal>
 
-    <!-- ============ Ingress 配置 Modal ============ -->
-    <n-modal v-model:show="showConfigModal" preset="dialog" :title="t('tunnels.configTitle', { name: configTunnelName })" style="width: 900px; max-width: 95vw">
-      <n-spin :show="loadingConfig">
+    <!-- Full baseline and immutable unknown fields survive visual edits. -->
+    <n-modal :show="showConfigModal" preset="dialog" :mask-closable="false" :close-on-esc="false" :closable="!savingConfig" :title="t('tunnels.configTitle', { name: configTunnelName })" style="width: 900px; max-width: 95vw" @update:show="closeConfig">
+      <div style="max-height: 65vh; overflow: auto">
         <n-space vertical>
-          <n-alert type="info" :bordered="false" style="margin-bottom: 8px">
-            {{ t('tunnels.configHint') }}
-          </n-alert>
-          <div v-for="(entry, idx) in ingressEntries" :key="idx" style="display: flex; gap: 6px; align-items: center; width: 100%; flex-wrap: wrap">
-            <n-input
-              v-model:value="entry.subdomain"
-              :placeholder="t('tunnels.subdomainPlaceholder2')"
-              style="flex: 0.5; min-width: 80px"
-              :disabled="idx === ingressEntries.length - 1 && !entry.domain"
-            />
-            <n-select
-              v-model:value="entry.domain"
-              :options="zoneOptions"
-              :placeholder="t('tunnels.domainPlaceholder')"
-              filterable
-              style="flex: 0.7; min-width: 100px"
-              :disabled="idx === ingressEntries.length - 1 && !entry.domain"
-            />
-            <n-input
-              v-model:value="entry.path"
-              :placeholder="t('tunnels.pathPlaceholder2')"
-              style="flex: 0.5; min-width: 80px"
-            />
-            <n-select
-              v-model:value="entry.protocol"
-              :options="protocolOptions"
-              style="flex: 0.4; min-width: 80px"
-            />
-            <n-input-number
-              v-if="entry.protocol !== 'custom'"
-              v-model:value="entry.port"
-              :min="1"
-              :max="65535"
-              :placeholder="t('tunnels.port')"
-              style="flex: 0.4; min-width: 70px"
-            />
-            <n-input
-              v-else
-              v-model:value="entry.customService"
-              :placeholder="t('tunnels.customService')"
-              style="flex: 0.6; min-width: 100px"
-            />
-            <n-button
-              v-if="idx < ingressEntries.length - 1"
-              size="small"
-              quaternary
-              type="error"
-              @click="removeIngressEntry(idx)"
-            >{{ t('common.delete') }}</n-button>
-          </div>
+          <n-alert :type="configError ? 'error' : 'info'">{{ configStatus }}{{ configDirty ? ' · 有未保存修改' : '' }}{{ configError ? ' · ' + configError : '' }}</n-alert>
           <n-space>
-            <n-button size="small" @click="addIngressEntry">{{ t('tunnels.addRule') }}</n-button>
+            <n-button size="small" :loading="loadingConfig" :disabled="savingConfig" @click="readConfig">重新读取配置</n-button>
+            <n-button size="small" :disabled="savingConfig" @click="readConfigZones">重试域名列表</n-button>
+            <n-button size="small" :disabled="!configBaseline || savingConfig" @click="discardConfig">放弃草稿 / 使用远程配置</n-button>
           </n-space>
+          <n-alert v-if="zonesError" type="warning">{{ zonesError }}（域名选择不可用，已读取配置保留）</n-alert>
+          <n-alert type="info">保留全部高级字段。保存会重新检查远程基线；检查与 PUT 之间仍可能发生并发变化。</n-alert>
+          <div v-for="(entry, idx) in ingressEntries" :key="entry.key" class="ingress-row">
+            <n-text>{{ idx + 1 }}{{ idx === ingressEntries.length - 1 ? ' · Catch-all' : '' }}</n-text>
+            <n-input v-model:value="entry.hostname" placeholder="完整 hostname（路径规则可为空）" :disabled="!configBaseline || savingConfig || idx === ingressEntries.length - 1" />
+            <n-select v-if="idx < ingressEntries.length - 1" :options="zoneOptions" :disabled="!!zonesError || savingConfig" placeholder="选择域名（可选，填入 hostname）" clearable @update:value="(value: string | null) => { if (value) entry.hostname = value }" />
+            <n-input v-model:value="entry.path" placeholder="Path / 正则" :disabled="!configBaseline || savingConfig || idx === ingressEntries.length - 1" />
+            <n-input v-model:value="entry.service" placeholder="原始 service，例如 tcp://host:22、http_status:404" :disabled="!configBaseline || savingConfig" />
+            <n-space v-if="idx < ingressEntries.length - 1">
+              <n-button size="tiny" :disabled="idx === 0 || savingConfig" @click="moveIngress(idx, -1)">上移</n-button>
+              <n-button size="tiny" :disabled="idx >= ingressEntries.length - 2 || savingConfig" @click="moveIngress(idx, 1)">下移</n-button>
+              <n-button size="tiny" type="error" :disabled="savingConfig" @click="removeIngressEntry(idx)">删除</n-button>
+            </n-space>
+            <details><summary>完整规则 / 高级字段</summary><pre>{{ JSON.stringify(entry.original, null, 2) }}</pre></details>
+          </div>
+          <n-button v-if="configBaseline && !ingressEntries.length" size="small" :disabled="savingConfig" @click="initializeIngress">为已确认空配置添加 Catch-all</n-button>
+          <n-button v-else size="small" :disabled="!configBaseline || savingConfig" @click="addIngressEntry">添加规则</n-button>
+          <details v-if="configBaseline" :open="configDirty"><summary>保存前后完整配置 Diff</summary><div class="config-diff"><pre>{{ JSON.stringify(configBaseline.config, null, 2) }}</pre><pre>{{ JSON.stringify(configDraft, null, 2) }}</pre></div></details>
+          <details v-if="configRemote"><summary>最新 Cloudflare 配置</summary><pre>{{ JSON.stringify(configRemote.config, null, 2) }}</pre></details>
         </n-space>
-      </n-spin>
-      <template #action>
-        <n-space>
-          <n-button @click="showConfigModal = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="savingConfig" @click="saveConfig">{{ t('tunnels.saveConfig') }}</n-button>
-        </n-space>
-      </template>
+      </div>
+      <template #action><n-space>
+        <n-button :disabled="savingConfig" @click="closeConfig">取消</n-button>
+        <n-button type="primary" :loading="savingConfig" :disabled="!canSaveConfig" @click="confirmSaveConfig">保存配置</n-button>
+      </n-space></template>
     </n-modal>
 
     <!-- ============ 规则 Modal ============ -->
-    <n-modal v-model:show="showRuleModal" preset="dialog" :title="editingRuleId ? t('tunnels.ruleModalTitleEdit') : t('tunnels.ruleModalTitleAdd')" style="width: 520px; max-width: 95vw">
-      <n-form label-placement="left" label-width="100">
+    <n-modal :show="showRuleModal" @update:show="closeRule" :mask-closable="false" :close-on-esc="false" :closable="!ruleSubmitting" preset="dialog" :title="editingRuleId ? t('tunnels.ruleModalTitleEdit') : t('tunnels.ruleModalTitleAdd')" style="width: 520px; max-width: 95vw">
+      <n-form v-if="!editingRuleId" label-placement="left" label-width="100">
         <n-form-item :label="t('tunnels.matchType')">
           <n-select
             v-model:value="ruleForm.matchType"
@@ -246,11 +225,14 @@
         <n-form-item v-if="selectedRulePhase === 'http_request_origin'" :label="t('tunnels.originPort')">
           <n-input-number v-model:value="ruleForm.port" :min="1" :max="65535" style="width: 100%" />
         </n-form-item>
-        <n-form-item v-if="selectedRulePhase === 'http_request_redirect'" :label="t('tunnels.redirectUrl')">
+        <n-form-item v-if="selectedRulePhase === 'http_request_dynamic_redirect'" :label="t('tunnels.redirectUrl')">
           <n-input v-model:value="ruleForm.redirectUrl" :placeholder="t('tunnels.redirectUrlPlaceholder')" />
         </n-form-item>
-        <n-form-item v-if="selectedRulePhase === 'http_request_redirect'" :label="t('tunnels.statusCode')">
+        <n-form-item v-if="selectedRulePhase === 'http_request_dynamic_redirect'" :label="t('tunnels.statusCode')">
           <n-select v-model:value="ruleForm.redirectStatus" :options="statusCodeOptions" />
+        </n-form-item>
+        <n-form-item v-if="isAccountLevelPhase" label="Bulk Redirect List">
+          <n-input v-model:value="ruleForm.redirectListName" placeholder="已有 redirect list 名称" />
         </n-form-item>
         <!-- URL 重写 -->
         <template v-if="selectedRulePhase === 'http_request_transform'">
@@ -304,11 +286,11 @@
           </n-form-item>
         </template>
         <!-- 高级模式：原始 JSON -->
-        <n-form-item v-if="needsAdvancedJson" :label="t('tunnels.advancedMode')">
+        <n-form-item  :label="t('tunnels.advancedMode')">
           <n-switch v-model:value="ruleForm.showAdvancedJson" />
           <n-text depth="3" style="font-size: 12px; margin-left: 8px">{{ t('tunnels.advancedModeHint') }}</n-text>
         </n-form-item>
-        <n-form-item v-if="ruleForm.showAdvancedJson && needsAdvancedJson" :label="t('tunnels.actionJson')">
+        <n-form-item v-if="ruleForm.showAdvancedJson" :label="t('tunnels.actionJson')">
           <n-input v-model:value="ruleForm.actionJson" :placeholder="actionJsonPlaceholder" type="textarea" :rows="3" />
         </n-form-item>
         <n-form-item :label="t('tunnels.ruleDescription')">
@@ -318,10 +300,21 @@
           <n-input :value="ruleExpressionPreview" readonly type="textarea" :rows="2" />
         </n-form-item>
       </n-form>
+      <n-space v-if="editingRuleId" vertical>
+        <n-alert type="info">完整 JSON 编辑保留未修改的高级字段，保存前会检查远程冲突。</n-alert>
+        <n-input v-model:value="ruleDraftJson" type="textarea" :autosize="{ minRows: 8, maxRows: 20 }" :disabled="ruleSubmitting" />
+        <details><summary>原始规则</summary><pre>{{ JSON.stringify(originalRule, null, 2) }}</pre></details>
+      </n-space>
+      <n-space>
+        <n-button size="small" :disabled="ruleSubmitting" @click="loadRules(true)">读取实际规则（保留草稿）</n-button>
+        <n-button size="small" :disabled="ruleSubmitting || !!ruleError" @click="discardRuleDraft">放弃草稿 / 使用最新规则</n-button>
+      </n-space>
+      <details><summary>最新 Cloudflare 规则</summary><pre>{{ JSON.stringify(editingRuleId ? rules.find(row => row.id === editingRuleId) : rules, null, 2) }}</pre></details>
+      <n-alert v-if="ruleSaveError" type="error">{{ ruleSaveError }}</n-alert>
       <template #action>
         <n-space>
-          <n-button @click="showRuleModal = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="ruleSubmitting" @click="submitRule">{{ editingRuleId ? t('common.save') : t('common.create') }}</n-button>
+          <n-button @click="closeRule">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" :loading="ruleSubmitting" :disabled="ruleSaveBlocked || (editingRuleId !== null && !ruleDirty)" @click="submitRule">{{ editingRuleId ? t('common.save') : t('common.create') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -337,9 +330,11 @@
       <n-alert v-if="wizardResult?.mode === 'reuse'" type="info" :bordered="false" style="margin-top: 8px">
         {{ t('tunnels.wizardReuseHint') }}
       </n-alert>
+      <n-alert v-if="wizardResult?.status !== 'success'" type="warning">{{ wizardResult?.status }} · {{ wizardResult?.message }}<pre>{{ wizardResult?.residuals }}</pre>请核实远程资源后再执行。</n-alert>
       <n-alert v-else type="success" :bordered="false" style="margin-top: 8px">
         {{ t('tunnels.wizardCreateHint') }}
       </n-alert>
+      <details v-if="wizardResult?.baseline"><summary>复用 Tunnel 原始配置 / 待核实配置</summary><pre>{{ JSON.stringify({ baseline: wizardResult.baseline, attempted: wizardResult.attemptedConfig }, null, 2) }}</pre></details>
       <template #action>
         <n-button @click="showWizardResult = false">{{ t('common.close') }}</n-button>
       </template>
@@ -351,6 +346,7 @@
 import { useAccountLabels } from '../utils/useAccountLabels';
 import { ref, reactive, computed, h, onMounted, watch, onBeforeUnmount } from 'vue';
 import AutoFitTable from '../components/AutoFitTable.vue';
+import { onBeforeRouteLeave } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import DOMPurify from 'dompurify';
 import { NButton, NSpace, NTag, NPopconfirm } from 'naive-ui';
@@ -358,9 +354,16 @@ import { cacheRuleParameters, headerRuleParameters } from '../utils/rulePayload'
 import { createRequestScope } from '../utils/requestScope';
 import { tunnelsApi } from '../api/tunnels';
 import { dnsApi } from '../api/dns';
-import { message } from '../utils/discreteApi';
+import { canonical, validateConfig, type Ingress, type TunnelConfig, type TunnelSnapshot } from '../shared/tunnelConfig';
+import { tunnelDraft, tunnelDirty, tunnelCanSave } from '../utils/tunnelDraft';
+import { message, dialog } from '../utils/discreteApi';
 
 const { t } = useI18n();
+const activeTab = ref('tunnels');
+const errorText = (error: any) => error?.response?.data?.error?.message || error?.message || '读取失败';
+function guardDiscard(run: () => void) { if (configDirty.value || ruleDirty.value) dialog.warning({ title: '有未保存修改', content: '继续将丢弃当前草稿。', positiveText: '丢弃并继续', negativeText: '保留草稿', onPositiveClick: run }); else run(); }
+function selectAccount(id: number) { guardDiscard(() => { selectedAccountId.value = id; void onAccountChange(); }); }
+function onTabChange() { if (activeTab.value === 'rules-engine' && !domains.value.length) { selectedRuleAccountId.value ||= selectedAccountId.value; void loadDomains(); } }
 const { accountLabel, renderAccountOption } = useAccountLabels();
 
 // ============ 隧道管理 ============
@@ -370,6 +373,8 @@ const accounts = ref<Array<{ id: number; name: string; account_id: string; crede
 const tunnels = ref<any[]>([]);
 const loadingAccounts = ref(false);
 const loadingTunnels = ref(false);
+const tunnelError = ref('');
+const tunnelsFetchedAt = ref(0);
 
 const accountOptions = computed(() =>
   accounts.value.map((a) => ({ label: accountLabel(a), value: a.id }))
@@ -391,26 +396,28 @@ async function loadAccounts() {
   }
 }
 
-async function loadTunnels() {
+async function refreshTunnels() { await loadAccounts(); await loadTunnels(true); }
+async function loadTunnels(refresh = false) {
   if (!selectedAccountId.value) { tunnels.value = []; return; }
   loadingTunnels.value = true;
   const request = requests.begin('loadTunnels');
   try {
-    const { data } = await tunnelsApi.listTunnels(selectedAccountId.value);
+    const { data } = await tunnelsApi.listTunnels(selectedAccountId.value, refresh);
     if (!request.current()) return;
-    tunnels.value = data;
-  } catch {
+    tunnels.value = data; tunnelError.value = ''; tunnelsFetchedAt.value = Date.now();
+  } catch (error) {
     if (!request.current()) return;
-    tunnels.value = [];
+    tunnelError.value = errorText(error);
   } finally {
     if (request.current()) loadingTunnels.value = false;
   }
 }
 
 async function onAccountChange() {
-  requests.invalidate(); tunnels.value = []; loadingTunnels.value = false;
+  configBaseline.value = null; configRemote.value = null; ingressEntries.value = [];
+  requests.invalidate(); tunnels.value = []; loadingTunnels.value = false; tunnelError.value = ''; tunnelsFetchedAt.value = 0;
   showConfigModal.value = false; showTokenModal.value = false; showConnectionsModal.value = false;
-  showWizardModal.value = false; showCreateModal.value = false; tokenValue.value = ''; tunnelZones.value = [];
+  showWizardModal.value = false; wizardLoading.value = false; showCreateModal.value = false; tokenValue.value = ''; tunnelZones.value = [];
 
   await loadTunnels();
 }
@@ -423,8 +430,10 @@ const creating = ref(false);
 async function submitCreateTunnel() {
   if (!newTunnelName.value || !selectedAccountId.value) return;
   creating.value = true;
+  const request = requests.begin('createTunnel');
   try {
     await tunnelsApi.createTunnel(selectedAccountId.value, newTunnelName.value);
+    if (!request.current()) return;
     message.success(t('tunnels.msg.tunnelCreated'));
     showCreateModal.value = false;
     newTunnelName.value = '';
@@ -442,7 +451,8 @@ const tokenValue = ref('');
 
 async function showToken(tunnelId: string) {
   if (!selectedAccountId.value) return;
-  const request = requests.begin('showToken');
+  showTokenModal.value = true; tokenValue.value = '';
+  const request = requests.begin('showToken', () => `${showTokenModal.value}:${selectedAccountId.value}`);
   try {
     const { data } = await tunnelsApi.getToken(selectedAccountId.value, tunnelId);
     if (!request.current()) return;
@@ -461,6 +471,7 @@ function copyToken() {
 // 连接信息
 const showConnectionsModal = ref(false);
 const connections = ref<any[]>([]);
+const connectionsFetchedAt = ref(0), connectionsTunnelId = ref('');
 
 const connectionColumns = computed(() => [
   { title: 'ID', key: 'id', ellipsis: { tooltip: true } },
@@ -469,13 +480,15 @@ const connectionColumns = computed(() => [
   { title: t('tunnels.table.ip'), key: 'ip' },
 ]);
 
-async function showConnections(tunnelId: string) {
+async function showConnections(tunnelId: string, refresh = false) {
   if (!selectedAccountId.value) return;
-  const request = requests.begin('showConnections');
+  if (connectionsTunnelId.value !== tunnelId) { connections.value = []; connectionsFetchedAt.value = 0; }
+  connectionsTunnelId.value = tunnelId; showConnectionsModal.value = true;
+  const request = requests.begin('showConnections', () => `${showConnectionsModal.value}:${selectedAccountId.value}:${connectionsTunnelId.value}`);
   try {
-    const { data } = await tunnelsApi.getConnections(selectedAccountId.value, tunnelId);
+    const { data } = await tunnelsApi.getConnections(selectedAccountId.value, tunnelId, refresh);
     if (!request.current()) return;
-    connections.value = data;
+    connectionsTunnelId.value = tunnelId; connections.value = data.value; connectionsFetchedAt.value = data.cache.fetchedAt;
     showConnectionsModal.value = true;
   } catch {
     if (!request.current()) return;
@@ -486,8 +499,10 @@ async function showConnections(tunnelId: string) {
 // 删除隧道
 async function deleteTunnel(tunnelId: string) {
   if (!selectedAccountId.value) return;
+  const request = requests.begin('deleteTunnel');
   try {
     await tunnelsApi.deleteTunnel(selectedAccountId.value, tunnelId);
+    if (!request.current()) return;
     message.success(t('tunnels.msg.tunnelDeleted'));
     await loadTunnels();
   } catch {
@@ -495,112 +510,75 @@ async function deleteTunnel(tunnelId: string) {
   }
 }
 
-// Ingress 配置管理
+// Config and Zone reads have independent state and a modal-bound response fence.
 const showConfigModal = ref(false);
-const configTunnelId = ref('');
-const configTunnelName = ref('');
-const loadingConfig = ref(false);
-const savingConfig = ref(false);
-const ingressEntries = ref<Array<{ domain: string; subdomain: string; path: string; protocol: string; port: number; customService: string }>>([]);
+const configTunnelId = ref(''), configTunnelName = ref('');
+const loadingConfig = ref(false), savingConfig = ref(false);
+const configBaseline = ref<TunnelSnapshot | null>(null), configRemote = ref<TunnelSnapshot | null>(null);
+const configError = ref(''), zonesError = ref('');
+const configBlocked = ref(false), clock = ref(Date.now());
+const configTimer = setInterval(() => { clock.value = Date.now(); }, 1000);
+const configRequests = createRequestScope(() => `${showConfigModal.value}:${selectedAccountId.value}:${configTunnelId.value}`);
+let entrySerial = 0;
+const ingressEntries = ref<Array<{ key: number; original: Ingress; hostname: string; path: string; service: string }>>([]);
 const tunnelZones = ref<Array<{ id: string; name: string }>>([]);
-const zoneOptions = computed(() => tunnelZones.value.map((z) => ({ label: z.name, value: z.name })));
-
-const protocolOptions = computed(() => [
-  { label: 'HTTP', value: 'http' },
-  { label: 'HTTPS', value: 'https' },
-  { label: 'TCP', value: 'tcp' },
-  { label: t('common.custom'), value: 'custom' },
-]);
-
-async function openConfig(tunnelId: string, name: string) {
-  if (!selectedAccountId.value) return;
-  configTunnelId.value = tunnelId;
-  configTunnelName.value = name;
+const zoneOptions = computed(() => tunnelZones.value.map(z => ({ label: z.name, value: z.name })));
+const configDraft = computed<TunnelConfig | null>(() => tunnelDraft(configBaseline.value, ingressEntries.value));
+const configDirty = computed(() => showConfigModal.value && tunnelDirty(configBaseline.value, configDraft.value));
+const configStatus = computed(() => loadingConfig.value ? '加载中' : configError.value ? '加载失败 / 需核实' : !configBaseline.value ? '配置未加载' : clock.value - configBaseline.value.fetchedAt > 30000 ? '已过期（请重新读取）' : '已加载');
+const canSaveConfig = computed(() => tunnelCanSave({ baseline: configBaseline.value, dirty: configDirty.value, blocked: configBlocked.value, loading: loadingConfig.value, saving: savingConfig.value, now: clock.value }));
+function fillConfig(data: TunnelSnapshot) {
+  configBaseline.value = JSON.parse(JSON.stringify(data));
+  ingressEntries.value = data.config.ingress.map(original => ({ key: ++entrySerial, original: JSON.parse(JSON.stringify(original)), hostname: original.hostname || '', path: original.path || '', service: original.service }));
+}
+async function openConfig(id: string, name: string) {
+  configRequests.invalidate(); configTunnelId.value = id; configTunnelName.value = name;
+  configBaseline.value = null; configRemote.value = null; ingressEntries.value = []; configError.value = ''; configBlocked.value = true;
   showConfigModal.value = true;
-  loadingConfig.value = true;
-  const request = requests.begin('openConfig');
-  try {
-    const [configRes, zonesRes] = await Promise.all([
-      tunnelsApi.getConfig(selectedAccountId.value, tunnelId),
-      tunnelsApi.getZones(selectedAccountId.value),
-    ]);
-    if (!request.current()) return;
-    tunnelZones.value = zonesRes.data || [];
-    const ingress = configRes.data || [];
-    ingressEntries.value = ingress.map((e: any) => {
-      const hostname = e.hostname || '';
-      const service = e.service || '';
-      // 尝试从 service 解析出 protocol + port
-      const m = service.match(/^(https?|tcp):\/\/localhost:(\d+)$/);
-      const proto = m ? m[1] : 'custom';
-      const port = m ? parseInt(m[2], 10) : 0;
-      const customService = m ? '' : service;
-      const path = e.path || '';
-      // 从 hostname 中拆分出 domain (zone apex) 和 subdomain
-      if (!hostname) return { domain: '', subdomain: '', path, protocol: proto, port, customService };
-      const zone = tunnelZones.value.find((z) => hostname === z.name || hostname.endsWith('.' + z.name));
-      if (zone) {
-        const subdomain = hostname === zone.name ? '' : hostname.slice(0, -(zone.name.length + 1));
-        return { domain: zone.name, subdomain, path, protocol: proto, port, customService };
-      }
-      // 未找到匹配的 zone，将整个 hostname 放入 subdomain
-      return { domain: '', subdomain: hostname, path, protocol: proto, port, customService };
-    });
-    if (ingressEntries.value.length === 0) {
-      ingressEntries.value = [{ domain: '', subdomain: '', path: '', protocol: 'custom', port: 0, customService: 'http_status:404' }];
-    }
-  } catch {
-    if (!request.current()) return;
-    ingressEntries.value = [{ domain: '', subdomain: '', path: '', protocol: 'custom', port: 0, customService: 'http_status:404' }];
-    tunnelZones.value = [];
-  } finally {
-    if (request.current()) loadingConfig.value = false;
-  }
+  await Promise.allSettled([readConfig(), readConfigZones()]);
 }
-
-function addIngressEntry() {
-  // 在 catch-all 之前插入新规则
-  const catchAll = ingressEntries.value[ingressEntries.value.length - 1];
-  if (catchAll && !catchAll.domain) {
-    ingressEntries.value.splice(ingressEntries.value.length - 1, 0, { domain: '', subdomain: '', path: '', protocol: 'http', port: 8080, customService: '' });
-  } else {
-    ingressEntries.value.push({ domain: '', subdomain: '', path: '', protocol: 'http', port: 8080, customService: '' });
-  }
-}
-
-function removeIngressEntry(idx: number) {
-  ingressEntries.value.splice(idx, 1);
-}
-
-async function saveConfig() {
+async function readConfig() {
   if (!selectedAccountId.value) return;
-  savingConfig.value = true;
+  const request = configRequests.begin('config'); loadingConfig.value = true;
   try {
-    // 确保最后一条是 catch-all
-    const last = ingressEntries.value[ingressEntries.value.length - 1];
-    if (last && last.domain) {
-      ingressEntries.value.push({ domain: '', subdomain: '', path: '', protocol: 'custom', port: 0, customService: 'http_status:404' });
-    }
-    const ingress = ingressEntries.value.map((e) => {
-      const entry: any = {};
-      // 组合 domain + subdomain 为 hostname
-      if (e.domain) {
-        entry.hostname = e.subdomain ? `${e.subdomain}.${e.domain}` : e.domain;
-      }
-      if (e.path) entry.path = e.path;
-      // 组合 service
-      entry.service = e.protocol === 'custom' ? e.customService : `${e.protocol}://localhost:${e.port}`;
-      return entry;
-    });
-    await tunnelsApi.updateConfig(selectedAccountId.value, configTunnelId.value, ingress);
-    message.success(t('tunnels.msg.configSaved'));
-    showConfigModal.value = false;
-  } catch {
-    // error handled by interceptor
-  } finally {
-    savingConfig.value = false;
-  }
+    const { data } = await tunnelsApi.getConfig(selectedAccountId.value, configTunnelId.value);
+    if (!request.current()) return;
+    validateConfig(data.config, true); configRemote.value = data;
+    if (configDirty.value && canonical(data.config) !== canonical(configBaseline.value?.config)) { configError.value = '远程配置已变化，草稿保留；请比较最新配置后放弃或重新编辑'; configBlocked.value = true; }
+    else { if (configDirty.value) configBaseline.value = data; else fillConfig(data); configError.value = ''; configBlocked.value = false; }
+    clock.value = Date.now();
+  } catch (error) { if (request.current()) { configError.value = errorText(error); configBlocked.value = true; } }
+  finally { if (request.current()) loadingConfig.value = false; }
 }
+async function readConfigZones() {
+  if (!selectedAccountId.value) return;
+  const request = configRequests.begin('zones');
+  try { const { data } = await tunnelsApi.getZones(selectedAccountId.value); if (request.current()) { tunnelZones.value = data; zonesError.value = ''; } }
+  catch (error) { if (request.current()) { zonesError.value = errorText(error); tunnelZones.value = []; } }
+}
+function discardConfig() { if (configRemote.value) { fillConfig(configRemote.value); configError.value = ''; configBlocked.value = false; } }
+function closeConfig() { if (savingConfig.value) return; guardDiscard(() => { showConfigModal.value = false; configRequests.invalidate(); }); }
+function initializeIngress() { ingressEntries.value = [{ key: ++entrySerial, original: { service: 'http_status:404' }, hostname: '', path: '', service: 'http_status:404' }]; }
+function addIngressEntry() { ingressEntries.value.splice(Math.max(0, ingressEntries.value.length - 1), 0, { key: ++entrySerial, original: { service: 'http://localhost:8080' }, hostname: '', path: '', service: 'http://localhost:8080' }); }
+function removeIngressEntry(idx: number) { if (idx < ingressEntries.value.length - 1) ingressEntries.value.splice(idx, 1); }
+function moveIngress(idx: number, direction: number) { const next = idx + direction; if (next < 0 || next >= ingressEntries.value.length - 1) return; const [entry] = ingressEntries.value.splice(idx, 1); if (entry) ingressEntries.value.splice(next, 0, entry); }
+function confirmSaveConfig() { if (!canSaveConfig.value) return; dialog.warning({ title: '确认完整配置差异', content: '将保存上方 Diff 中的完整配置，并在保存前检查远程基线。', positiveText: '保存', negativeText: '取消', onPositiveClick: saveConfig }); }
+async function saveConfig() {
+  if (!canSaveConfig.value || !selectedAccountId.value || !configBaseline.value || !configDraft.value) return;
+  const accountId = selectedAccountId.value, id = configTunnelId.value;
+  const request = configRequests.begin('save'); savingConfig.value = true;
+  try {
+    validateConfig(configDraft.value);
+    const { data } = await tunnelsApi.updateConfig(accountId, id, configDraft.value, configBaseline.value);
+    if (!request.current()) return;
+    if (data.snapshot) configRemote.value = data.snapshot;
+    if (data.status !== 'success') { configBlocked.value = true; configError.value = data.message || '写入结果未确认，请重新读取'; return; }
+    fillConfig(data.snapshot); configError.value = ''; message.success(t('tunnels.msg.configSaved')); clock.value = Date.now();
+  } catch (error) { if (request.current()) { configError.value = errorText(error); configBlocked.value = true; } }
+  finally { if (request.current()) savingConfig.value = false; }
+}
+watch(showConfigModal, show => { if (!show) { configRequests.invalidate(); loadingConfig.value = false; savingConfig.value = false; } });
+watch(showTokenModal, show => { if (!show) tokenValue.value = ''; });
 
 // 隧道表格列
 const tunnelColumns = computed(() => [
@@ -640,7 +618,7 @@ const wizard = reactive({
 });
 
 const showWizardResult = ref(false);
-const wizardResult = ref<{ tunnelId: string; hostname: string; cnameTarget: string; mode: string } | null>(null);
+const wizardResult = ref<any>(null);
 
 const tunnelSelectOptions = computed(() =>
   tunnels.value.map((t_val) => ({ label: `${t_val.name} (${t_val.id})`, value: t_val.id }))
@@ -655,21 +633,25 @@ function openWizard() {
   wizard.protocol = 'http';
   wizard.port = 8080;
   wizard.path = '';
-  showWizardModal.value = true;
-  // 加载 zones 供域名选择
-  if (selectedAccountId.value) {
-    tunnelsApi.getZones(selectedAccountId.value).then(({ data }) => {
-      tunnelZones.value = data || [];
-    }).catch(() => { tunnelZones.value = []; });
-  }
+  showWizardModal.value = true; zonesError.value = ''; tunnelZones.value = [];
+  void readWizardZones();
+}
+async function readWizardZones() {
+  if (!selectedAccountId.value) return;
+  const request = requests.begin('wizardZones', () => `${showWizardModal.value}:${selectedAccountId.value}`);
+  try { const { data } = await tunnelsApi.getZones(selectedAccountId.value); if (request.current()) { tunnelZones.value = data || []; zonesError.value = ''; } }
+  catch (error) { if (request.current()) { tunnelZones.value = []; zonesError.value = errorText(error); } }
 }
 
 async function submitWizard() {
-  if (!selectedAccountId.value || !wizard.domain || !wizard.port) return;
+  if (!selectedAccountId.value || !wizard.domain || !wizard.port || wizardLoading.value) return;
   wizardLoading.value = true;
+  const request = requests.begin('wizard', () => `${selectedAccountId.value}`);
+  const accountId = selectedAccountId.value;
   try {
     const hostname = wizard.subdomain ? `${wizard.subdomain}.${wizard.domain}` : wizard.domain;
     const payload: any = {
+      zoneId: tunnelZones.value.find(z => z.name === wizard.domain)?.id,
       mode: wizard.mode,
       hostname,
       port: wizard.port,
@@ -681,25 +663,29 @@ async function submitWizard() {
     } else if (wizard.tunnelName) {
       payload.tunnelName = wizard.tunnelName;
     }
-    const { data } = await tunnelsApi.runWizard(selectedAccountId.value, payload);
+    const { data } = await tunnelsApi.runWizard(accountId, payload);
+    if (!request.current()) return;
     wizardResult.value = data;
     showWizardModal.value = false;
     showWizardResult.value = true;
     await loadTunnels();
-    message.success(t('tunnels.msg.wizardSuccess'));
+    if (data.status === 'success') message.success(t('tunnels.msg.wizardSuccess'));
   } catch {
     // error handled by interceptor
   } finally {
-    wizardLoading.value = false;
+    if (request.current()) wizardLoading.value = false;
   }
 }
 
 // ============ 回源规则 ============
 const selectedDomain = ref<string | null>(null);
+const selectedRuleAccountId = ref<number | null>(null);
+const domainsError = ref(''), ruleError = ref(''), rulesFetchedAt = ref(0);
 const selectedRulePhase = ref<string>('http_request_origin');
 const rulePhaseOptions = computed(() => [
   { label: t('tunnels.rulePhases.origin'), value: 'http_request_origin' },
-  { label: t('tunnels.rulePhases.redirect'), value: 'http_request_redirect' },
+  { label: t('tunnels.rulePhases.redirect') + ' (Account)', value: 'http_request_redirect' },
+  { label: 'Single Redirect (Zone)', value: 'http_request_dynamic_redirect' },
   { label: t('tunnels.rulePhases.transform'), value: 'http_request_transform' },
   { label: t('tunnels.rulePhases.requestHeaders'), value: 'http_request_late_transform' },
   { label: t('tunnels.rulePhases.responseHeaders'), value: 'http_response_headers_transform' },
@@ -710,7 +696,8 @@ const rulePhaseOptions = computed(() => [
 const domains = ref<any[]>([]);
 const selectedZone = computed(() => domains.value.find(d => `${d.cfAccountId}:${d.id}` === selectedDomain.value));
 const selectedDomainName = computed<string>(() => selectedZone.value?.name || '');
-const ruleContext = computed(() => ({ accountId: selectedZone.value?.cfAccountId, zoneId: selectedZone.value?.id }));
+const ruleContext = computed(() => ({ accountId: selectedRuleAccountId.value || undefined, zoneId: isAccountLevelPhase.value ? undefined : selectedZone.value?.id }));
+const ruleTargetReady = computed(() => !!selectedRuleAccountId.value && (isAccountLevelPhase.value || !!selectedZone.value));
 const rules = ref<any[]>([]);
 const loadingRules = ref(false);
 
@@ -719,36 +706,36 @@ const domainOptions = computed(() =>
 );
 
 // 账户级 Phase 检测
-const ACCOUNT_LEVEL_PHASES = new Set(['http_request_redirect', 'http_request_dynamic_redirect']);
+const ACCOUNT_LEVEL_PHASES = new Set(['http_request_redirect']);
 const isAccountLevelPhase = computed(() => ACCOUNT_LEVEL_PHASES.has(selectedRulePhase.value));
 
-async function loadDomains() {
+async function changeRuleAccount(id: number) { guardDiscard(() => { selectedRuleAccountId.value = id; selectedDomain.value = null; domains.value = []; rules.value = []; showRuleModal.value = false; void loadDomains(); }); }
+function changeRulePhase(phase: string) { guardDiscard(() => { selectedRulePhase.value = phase; rules.value = []; showRuleModal.value = false; if (isAccountLevelPhase.value) void loadRules(); else if (!domains.value.length) void loadDomains(); else void loadRules(); }); }
+async function loadDomains(refresh = false) {
+  if (!selectedRuleAccountId.value || activeTab.value !== 'rules-engine') return;
+  if (isAccountLevelPhase.value) { await loadRules(refresh); return; }
+  const accountId = selectedRuleAccountId.value;
+  const request = requests.begin('ruleZones', () => `${activeTab.value}:${selectedRuleAccountId.value}`);
   try {
-    const { data } = await dnsApi.getDomains();
-    domains.value = data;
-  } catch {
-    domains.value = [];
-  }
+    const { data } = await dnsApi.getAccountDomains(accountId, refresh);
+    if (!request.current()) return;
+    if (data.meta?.state === 'error') throw Error(data.meta.error || 'Zone 读取失败');
+    domains.value = data.zones; domainsError.value = '';
+    if (!domains.value.some(d => `${d.cfAccountId}:${d.id}` === selectedDomain.value)) selectedDomain.value = domains.value[0] ? `${accountId}:${domains.value[0].id}` : null;
+    await loadRules(refresh);
+  } catch (error) { if (request.current()) domainsError.value = errorText(error); }
 }
-
-async function onDomainChange() {
-  await loadRules();
-}
-
-async function loadRules() {
-  if (!selectedDomainName.value || !selectedRulePhase.value) { rules.value = []; return; }
+function onDomainChange(domain: string) { guardDiscard(() => { selectedDomain.value = domain; rules.value = []; showRuleModal.value = false; void loadRules(); }); }
+async function loadRules(refresh = false) {
+  if (!ruleTargetReady.value) { rules.value = []; return; }
   loadingRules.value = true;
-  const request = requests.begin('loadRules', () => `${selectedDomain.value}:${selectedRulePhase.value}`);
+  const request = requests.begin('loadRules', () => `${selectedRuleAccountId.value}:${selectedDomain.value}:${selectedRulePhase.value}`);
   try {
-    const { data } = await tunnelsApi.listRules(selectedDomainName.value, selectedRulePhase.value, ruleContext.value);
+    const { data } = await tunnelsApi.listRules(selectedDomainName.value, selectedRulePhase.value, ruleContext.value, refresh);
     if (!request.current()) return;
-    rules.value = data;
-  } catch {
-    if (!request.current()) return;
-    rules.value = [];
-  } finally {
-    if (request.current()) loadingRules.value = false;
-  }
+    rules.value = data; ruleError.value = ''; rulesFetchedAt.value = Date.now();
+  } catch (error) { if (request.current()) ruleError.value = errorText(error); }
+  finally { if (request.current()) loadingRules.value = false; }
 }
 
 // 规则表单
@@ -757,6 +744,12 @@ const editingRuleId = ref<string | null>(null);
 const originalRuleParams = ref<Record<string, unknown>>({});
 const originalRuleEnabled = ref(true);
 const ruleSubmitting = ref(false);
+const originalRule = ref<any>(null), ruleDraftJson = ref(''), ruleSaveError = ref('');
+const ruleSaveBlocked = ref(false), ruleNewBaseline = ref('');
+const ruleDirty = computed(() => showRuleModal.value && (editingRuleId.value ? canonical(originalRule.value) !== (() => { try { return canonical(JSON.parse(ruleDraftJson.value)); } catch { return ruleDraftJson.value; } })() : canonical(ruleForm) !== ruleNewBaseline.value));
+function discardRuleDraft() { if (editingRuleId.value) { const actual = rules.value.find(row => row.id === editingRuleId.value); if (actual) openEditRule(actual); } else openAddRule(); }
+function closeRule() { if (!ruleSubmitting.value) guardDiscard(() => { showRuleModal.value = false; }); }
+
 const ruleForm = reactive({
   matchType: 'hostname' as 'hostname' | 'pathPrefix' | 'pathRegex' | 'hostAndPath' | 'custom',
   subdomain: '',
@@ -765,6 +758,7 @@ const ruleForm = reactive({
   port: 80,
   description: '',
   redirectUrl: '',
+  redirectListName: '',
   redirectStatus: 301,
   actionJson: '',
   showAdvancedJson: false,
@@ -830,15 +824,6 @@ const ratelimitDimensionOptions = computed(() => [
   { label: t('tunnels.ratelimitHost'), value: 'http.host' },
 ]);
 
-// 需要结构化表单的 Phase
-const needsAdvancedJson = computed(() => [
-  'http_request_transform',
-  'http_request_late_transform',
-  'http_response_headers_transform',
-  'http_request_cache_settings',
-  'http_ratelimit',
-].includes(selectedRulePhase.value));
-
 // 根据 phase 提供 action JSON 的占位提示
 const actionJsonPlaceholder = computed(() => {
   switch (selectedRulePhase.value) {
@@ -878,16 +863,19 @@ const ruleExpressionPreview = computed(() => {
       if (!ruleHostname.value || !ruleForm.pathValue) return '';
       return `(http.host eq "${ruleHostname.value}" and http.request.uri.path matches "^${ruleForm.pathValue}.*")`;
     case 'custom':
-      return ruleForm.expression;
+      return ruleForm.expression || (isAccountLevelPhase.value && !ruleForm.showAdvancedJson && /^[a-z][a-z\d_]{0,49}$/.test(ruleForm.redirectListName) ? `http.request.full_uri in $${ruleForm.redirectListName}` : '');
     default:
       return '';
   }
 });
 
 function openAddRule() {
+  ruleSaveBlocked.value = false; ruleSaveError.value = ''; originalRule.value = null; ruleDraftJson.value = '';
+
   originalRuleParams.value = {}; originalRuleEnabled.value = true;
   editingRuleId.value = null;
-  ruleForm.matchType = 'hostname';
+  ruleForm.matchType = isAccountLevelPhase.value ? 'custom' : 'hostname';
+  ruleForm.redirectListName = '';
   ruleForm.subdomain = '';
   ruleForm.pathValue = '';
   ruleForm.expression = '';
@@ -910,10 +898,13 @@ function openAddRule() {
   ruleForm.ratelimitPeriod = 60;
   ruleForm.ratelimitCount = 100;
   ruleForm.ratelimitMitigation = 60;
+  ruleNewBaseline.value = canonical(ruleForm);
   showRuleModal.value = true;
 }
 
 function openEditRule(row: any) {
+  originalRule.value = JSON.parse(JSON.stringify(row)); ruleDraftJson.value = JSON.stringify(row, null, 2); ruleSaveError.value = ''; ruleSaveBlocked.value = false;
+
   originalRuleParams.value = { ...(row.action_parameters || {}) }; originalRuleEnabled.value = row.enabled !== false;
   editingRuleId.value = row.id;
   ruleForm.expression = row.expression || '';
@@ -1039,8 +1030,22 @@ function buildExpression(): string {
   return ruleExpressionPreview.value;
 }
 async function submitRule() {
-  if (!selectedDomainName.value || !selectedRulePhase.value) return;
+  if (!ruleTargetReady.value || ruleSubmitting.value || ruleSaveBlocked.value) return;
   const phase = selectedRulePhase.value;
+  const domain = selectedDomainName.value, context = { ...ruleContext.value };
+  const request = requests.begin('ruleSave', () => `${selectedRuleAccountId.value}:${selectedDomain.value}:${selectedRulePhase.value}:${showRuleModal.value}`);
+  if (editingRuleId.value) {
+    ruleSubmitting.value = true;
+    try {
+      const parsed = JSON.parse(ruleDraftJson.value);
+      const { data } = await tunnelsApi.updateRule(domain, phase, editingRuleId.value, { ...parsed, baseline: originalRule.value }, context);
+      if (!request.current()) return;
+      if (data.status !== 'success') { ruleSaveBlocked.value = true; ruleSaveError.value = data.message || '写入未确认，请读取实际规则'; return; }
+      showRuleModal.value = false; await loadRules(true);
+    } catch (error) { if (request.current()) { ruleSaveError.value = errorText(error); ruleSaveBlocked.value = true; } }
+    finally { ruleSubmitting.value = false; }
+    return;
+  }
   // 回源规则需要端口
   if (phase === 'http_request_origin' && !ruleForm.port) return;
   const expression = buildExpression();
@@ -1051,21 +1056,20 @@ async function submitRule() {
     let action = 'route';
     let action_parameters: any = {};
     let ratelimit: Record<string, unknown> | undefined;
-    if (phase === 'http_request_origin') {
+    if (ruleForm.showAdvancedJson && ruleForm.actionJson) {
+      const parsed = JSON.parse(ruleForm.actionJson); action = parsed.action; action_parameters = parsed.action_parameters; ratelimit = parsed.ratelimit;
+    } else if (phase === 'http_request_origin') {
       action = 'route';
       action_parameters = { origin: { port: ruleForm.port } };
     } else if (phase === 'http_request_redirect') {
+      if (!/^[a-z][a-z\d_]{0,49}$/.test(ruleForm.redirectListName)) { ruleSaveError.value = '请输入有效的已有 Bulk Redirect List 名称'; return; }
+      action = 'redirect'; action_parameters = { from_list: { name: ruleForm.redirectListName, key: 'http.request.full_uri' } };
+    } else if (phase === 'http_request_dynamic_redirect') {
       action = 'redirect';
       action_parameters = { from_value: { target: { url: ruleForm.redirectUrl || '' }, status_code: ruleForm.redirectStatus || 301 } };
     } else if (phase === 'http_request_firewall_custom') {
       action = 'block';
       action_parameters = {};
-    } else if (ruleForm.showAdvancedJson && ruleForm.actionJson) {
-      // 高级模式：用户自定义 action + action_parameters
-      const parsed = JSON.parse(ruleForm.actionJson);
-      action = parsed.action || action;
-      action_parameters = parsed.action_parameters || action_parameters;
-      ratelimit = parsed.ratelimit;
     } else if (phase === 'http_request_transform') {
       // URL 重写
       action = 'rewrite';
@@ -1098,24 +1102,29 @@ async function submitRule() {
       await tunnelsApi.updateRule(selectedDomainName.value, phase, editingRuleId.value, payload, ruleContext.value);
       message.success(t('tunnels.msg.ruleUpdated'));
     } else {
-      await tunnelsApi.createRule(selectedDomainName.value, phase, payload, ruleContext.value);
+      const { data } = await tunnelsApi.createRule(domain, phase, payload, context);
+      if (!request.current()) return;
+      if (data.status !== 'success') { ruleSaveBlocked.value = true; ruleSaveError.value = data.message || '写入未确认'; return; }
       message.success(t('tunnels.msg.ruleCreated'));
     }
     showRuleModal.value = false;
-    await loadRules();
-  } catch {
-    // error handled by interceptor
+    await loadRules(true);
+  } catch (error) {
+    if (request.current()) { ruleSaveError.value = errorText(error); ruleSaveBlocked.value = true; }
   } finally {
     ruleSubmitting.value = false;
   }
 }
 
 async function deleteRule(ruleId: string) {
-  if (!selectedDomainName.value || !selectedRulePhase.value) return;
+  if (!ruleTargetReady.value || ruleSubmitting.value) return;
+  const phase = selectedRulePhase.value, domain = selectedDomainName.value, accountId = selectedRuleAccountId.value;
   try {
-    await tunnelsApi.deleteRule(selectedDomainName.value, selectedRulePhase.value, ruleId, ruleContext.value);
+    const { data } = await tunnelsApi.deleteRule(selectedDomainName.value, selectedRulePhase.value, ruleId, ruleContext.value, rules.value.find(r => r.id === ruleId));
+    if (selectedRulePhase.value !== phase || selectedDomainName.value !== domain || selectedRuleAccountId.value !== accountId) return;
+    if (data.status !== 'success') { ruleError.value = data.message || '删除结果未确认'; return; }
     message.success(t('tunnels.msg.ruleDeleted'));
-    await loadRules();
+    await loadRules(true);
   } catch {
     // error handled by interceptor
   }
@@ -1143,17 +1152,23 @@ const ruleColumns = computed(() => [
   },
 ]);
 
-watch(() => [selectedDomain.value, selectedRulePhase.value], () => { rules.value = []; showRuleModal.value = false; });
-onBeforeUnmount(() => requests.invalidate());
+watch(() => [selectedDomain.value, selectedRulePhase.value, selectedRuleAccountId.value], () => { ruleError.value = ''; rulesFetchedAt.value = 0; });
+onBeforeRouteLeave(() => { if (!configDirty.value && !ruleDirty.value) return true; return new Promise<boolean>(resolve => { dialog.warning({ title: '有未保存修改', content: '离开页面将丢弃当前草稿。', positiveText: '丢弃并离开', negativeText: '继续编辑', onPositiveClick: () => resolve(true), onNegativeClick: () => resolve(false), onClose: () => resolve(false) }); }); });
+function beforeUnload(event: BeforeUnloadEvent) { if (configDirty.value || ruleDirty.value) { event.preventDefault(); event.returnValue = ''; } }
+window.addEventListener('beforeunload', beforeUnload);
+onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeUnload); requests.invalidate(); configRequests.invalidate(); clearInterval(configTimer); tokenValue.value = ''; });
 
 // ============ 初始化 ============
 onMounted(async () => {
   await loadAccounts();
-  await loadDomains();
 });
 </script>
 
 <style scoped>
+.ingress-row { padding: 8px; border: 1px solid var(--border-color); display: grid; gap: 6px; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.config-diff { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 600px) { .config-diff { grid-template-columns: 1fr; } }
 .tunnel-tab-content {
   display: flex;
   flex-direction: column;

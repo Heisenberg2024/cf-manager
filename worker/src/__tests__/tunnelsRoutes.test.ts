@@ -1,0 +1,18 @@
+import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { Hono } from 'hono';
+import type { Env } from '../types';
+import { tunnelsFixture, tunnelAccount } from '../../../shared/tests/tunnelsRules.fixture';
+import { tunnelsHttpContract } from '../../../shared/tests/tunnelsHttp.contract';
+const mocks = vi.hoisted(() => ({ account: vi.fn(), demo: vi.fn() }));
+vi.mock('../db/models', () => ({ getAccountById: mocks.account, getAllAccounts: () => [tunnelAccount], addAuditLog: vi.fn() }));
+vi.mock('../services/demo', () => ({ isDemoAccount: mocks.demo }));
+vi.mock('../services/encryption', () => ({ decrypt: async () => 'synthetic-key', DecryptError: class extends Error {} }));
+import router from '../routes/tunnels';
+import { getTunnelResources } from '../services/tunnelService';
+import { responseWrapper } from '../middleware/responseWrapper';
+import { errorDetails } from '../services/cfErrors';
+const env = { DB: {}, ENCRYPTION_KEY: 'synthetic', DEMO_ACCOUNT_IDS: '' } as Env;
+const app = new Hono<{ Bindings: Env }>();  app.use('*', responseWrapper); app.route('/tunnels', router); app.onError((error, c) => { const detail = errorDetails(error); return c.json({ success: false, error: detail }, detail.statusCode as 400); });
+let fixture: ReturnType<typeof tunnelsFixture>;
+beforeEach(() => { fixture = tunnelsFixture(); getTunnelResources(env.DB).invalidate(tunnelAccount); mocks.account.mockResolvedValue(tunnelAccount); mocks.demo.mockReturnValue(false); vi.stubGlobal('fetch', async (url: string, init: RequestInit) => { expect(init.headers).toMatchObject({'X-Auth-Key':'synthetic-key','X-Auth-Email':tunnelAccount.email}); const data = await fixture.request(new URL(url).pathname.replace('/client/v4','') + new URL(url).search, init); return new Response(JSON.stringify(data), {status:200}); }); });
+tunnelsHttpContract('Worker real Global Key wrapper', { send: async (path, method = 'GET', body) => app.request(path, { method, headers: { 'Content-Type': 'application/json' }, ...(method !== 'GET' && body ? {body:JSON.stringify(body)} : {}) }, env), demo: value => { mocks.demo.mockReturnValue(value); }, calls: () => fixture.calls }, { describe, it, expect });

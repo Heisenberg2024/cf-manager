@@ -1,0 +1,273 @@
+{
+  "simulated": true,
+  "baseline": "7a317de40bb05ea93834ed1ecc75e039e1c8da3e",
+  "runtime": "v24.21.0",
+  "transport": "5 Tunnels per Account, 2 Rules phases; 1 ms timer per synthetic CF request; mixed every fifth Account 8 ms, every seventh 403; old services exported verbatim; hostnames compare old DNS discovery to new configured-only display",
+  "scheduler": "global 6 / Account 2; cached bytes estimates UTF-16; latency is local fixture, not production",
+  "results": [
+    {
+      "name": "v2.8.2 current Account / 20 Accounts",
+      "rounds": 10,
+      "calls": 41,
+      "kinds": {
+        "tunnels": 1,
+        "zones": 40
+      },
+      "p50Ms": 10.836208,
+      "p95Ms": 13.456542000000013,
+      "cacheBytes": 0
+    },
+    {
+      "name": "v2.8.2 mixed Accounts 20",
+      "rounds": 10,
+      "calls": 20,
+      "kinds": {
+        "tunnels": 20
+      },
+      "p50Ms": 9.200583999999992,
+      "p95Ms": 9.300584000000015,
+      "cacheBytes": 0
+    },
+    {
+      "name": "v2.9 current Account / 20 Accounts",
+      "rounds": 10,
+      "calls": 1,
+      "kinds": {
+        "tunnels": 1
+      },
+      "p50Ms": 1.2375829999999723,
+      "p95Ms": 1.7323749999999905,
+      "cacheBytes": 572
+    },
+    {
+      "name": "v2.9 mixed Accounts 20",
+      "rounds": 10,
+      "calls": 20,
+      "kinds": {
+        "tunnels": 20
+      },
+      "p50Ms": 13.268083000000047,
+      "p95Ms": 14.730125000000044,
+      "cacheBytes": 10296
+    },
+    {
+      "name": "v2.8.2 current Account / 60 Accounts",
+      "rounds": 10,
+      "calls": 121,
+      "kinds": {
+        "tunnels": 1,
+        "zones": 120
+      },
+      "p50Ms": 26.21154200000001,
+      "p95Ms": 27.778749999999945,
+      "cacheBytes": 0
+    },
+    {
+      "name": "v2.8.2 mixed Accounts 60",
+      "rounds": 10,
+      "calls": 60,
+      "kinds": {
+        "tunnels": 60
+      },
+      "p50Ms": 9.267582999999945,
+      "p95Ms": 9.42349999999999,
+      "cacheBytes": 0
+    },
+    {
+      "name": "v2.9 current Account / 60 Accounts",
+      "rounds": 10,
+      "calls": 1,
+      "kinds": {
+        "tunnels": 1
+      },
+      "p50Ms": 1.2084579999999505,
+      "p95Ms": 1.436790999999971,
+      "cacheBytes": 572
+    },
+    {
+      "name": "v2.9 mixed Accounts 60",
+      "rounds": 10,
+      "calls": 60,
+      "kinds": {
+        "tunnels": 60
+      },
+      "p50Ms": 31.17016599999988,
+      "p95Ms": 33.48020799999995,
+      "cacheBytes": 29744
+    },
+    {
+      "name": "v2.8.2 configured hostnames 100 Zones / 50 Ingress",
+      "rounds": 3,
+      "calls": 102,
+      "kinds": {
+        "zones": 2,
+        "dns": 100
+      },
+      "p50Ms": 118.16141700000003,
+      "p95Ms": 119.88245900000015,
+      "cacheBytes": 0
+    },
+    {
+      "name": "v2.9 configured hostnames 100 Zones / 50 Ingress",
+      "rounds": 3,
+      "calls": 1,
+      "kinds": {
+        "config": 1
+      },
+      "p50Ms": 1.4750420000000304,
+      "p95Ms": 2.7402499999998327,
+      "cacheBytes": 0
+    },
+    {
+      "name": "v2.8.2 configured hostnames 100 Zones / 100 Ingress",
+      "rounds": 3,
+      "calls": 102,
+      "kinds": {
+        "zones": 2,
+        "dns": 100
+      },
+      "p50Ms": 124.906833,
+      "p95Ms": 129.92754100000002,
+      "cacheBytes": 0
+    },
+    {
+      "name": "v2.9 configured hostnames 100 Zones / 100 Ingress",
+      "rounds": 3,
+      "calls": 1,
+      "kinds": {
+        "config": 1
+      },
+      "p50Ms": 1.836084000000028,
+      "p95Ms": 1.8454580000000078,
+      "cacheBytes": 0
+    },
+    {
+      "name": "v2.8.2 configured hostnames 1000 Zones / 50 Ingress",
+      "rounds": 3,
+      "calls": 1020,
+      "kinds": {
+        "zones": 20,
+        "dns": 1000
+      },
+      "p50Ms": 1229.2727079999995,
+      "p95Ms": 1245.1395840000005,
+      "cacheBytes": 0
+    },
+    {
+      "name": "v2.9 configured hostnames 1000 Zones / 50 Ingress",
+      "rounds": 3,
+      "calls": 1,
+      "kinds": {
+        "config": 1
+      },
+      "p50Ms": 1.3213750000004438,
+      "p95Ms": 1.3663329999999405,
+      "cacheBytes": 0
+    },
+    {
+      "name": "v2.8.2 configured hostnames 1000 Zones / 100 Ingress",
+      "rounds": 3,
+      "calls": 1020,
+      "kinds": {
+        "zones": 20,
+        "dns": 1000
+      },
+      "p50Ms": 1199.549833,
+      "p95Ms": 1241.0952500000003,
+      "cacheBytes": 0
+    },
+    {
+      "name": "v2.9 configured hostnames 1000 Zones / 100 Ingress",
+      "rounds": 3,
+      "calls": 1,
+      "kinds": {
+        "config": 1
+      },
+      "p50Ms": 2.352042000000438,
+      "p95Ms": 2.4246669999993173,
+      "cacheBytes": 0
+    },
+    {
+      "name": "v2.8.2 10 cold duplicate Tunnel reads",
+      "rounds": 10,
+      "calls": 10,
+      "kinds": {
+        "tunnels": 10
+      },
+      "p50Ms": 1.3648749999993015,
+      "p95Ms": 1.4293330000000424,
+      "cacheBytes": 0
+    },
+    {
+      "name": "v2.8.2 10 repeated Rules reads",
+      "rounds": 10,
+      "calls": 20,
+      "kinds": {
+        "ruleset_ids": 10,
+        "rule_detail": 10
+      },
+      "p50Ms": 23.59350000000086,
+      "p95Ms": 25.144583999999668,
+      "cacheBytes": 0
+    },
+    {
+      "name": "v2.8.2 10 alternating Rules phases",
+      "rounds": 10,
+      "calls": 20,
+      "kinds": {
+        "ruleset_ids": 10,
+        "rule_detail": 10
+      },
+      "p50Ms": 24.21362500000032,
+      "p95Ms": 25.921292000000903,
+      "cacheBytes": 0
+    },
+    {
+      "name": "v2.9 10 cold duplicate Tunnel reads",
+      "rounds": 10,
+      "calls": 1,
+      "kinds": {
+        "tunnels": 1
+      },
+      "p50Ms": 1.9551250000004075,
+      "p95Ms": 2.80724999999984,
+      "cacheBytes": 572
+    },
+    {
+      "name": "v2.9 10 repeated Rules reads",
+      "rounds": 10,
+      "calls": 2,
+      "kinds": {
+        "ruleset_ids": 1,
+        "rule_detail": 1
+      },
+      "p50Ms": 3.0132919999996375,
+      "p95Ms": 5.961708999999246,
+      "cacheBytes": 336
+    },
+    {
+      "name": "v2.9 10 alternating Rules phases",
+      "rounds": 10,
+      "calls": 3,
+      "kinds": {
+        "ruleset_ids": 1,
+        "rule_detail": 2
+      },
+      "p50Ms": 4.29674999999952,
+      "p95Ms": 4.401792000000569,
+      "cacheBytes": 440
+    }
+  ],
+  "eventCounts": {
+    "zone_lookup": 812,
+    "read_started": 2624,
+    "read_finished": 2624,
+    "zone_loaded": 812,
+    "snapshot_lookup": 1320,
+    "snapshot_loaded": 870,
+    "snapshot_failed": 100,
+    "read_merged": 90,
+    "snapshot_hit": 350
+  },
+  "processHeapBytes": 38891600
+}

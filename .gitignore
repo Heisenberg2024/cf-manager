@@ -121,3 +121,10 @@ worker/src/services/accountName.ts
 
 backend/src/services/zoneSettingsEvents.ts
 worker/src/services/zoneSettingsEvents.ts
+
+backend/src/services/tunnelConfig.ts
+backend/src/services/tunnelResources.ts
+backend/src/services/rulesResources.ts
+worker/src/services/tunnelConfig.ts
+worker/src/services/tunnelResources.ts
+worker/src/services/rulesResources.ts

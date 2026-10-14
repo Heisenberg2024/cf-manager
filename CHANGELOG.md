@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.9.0] - 2026-10-14
+
+### 安全与可靠性
+
+- Tunnel 配置按完整快照编辑，保留 originRequest、特殊 service、path 和未知字段；独立读取、Dirty/Diff、排序、基线冲突检测与保存读回，失败不生成默认规则。
+- 一键回源在写前校验真实 Zone、DNS 与 Tunnel；创建/复用分别执行，明确失败走补偿，未知写入不重发、不误删依赖资源，并返回残留资源身份。
+- 规则写入校验 Phase/Action、Demo、实时归属与基线；保留复杂字段，禁用隐式重试并读回确认。Account 规则提供独立路径，Single Redirect 使用 Zone 范围。
+
+### 性能
+
+- Tunnel 列表/Connections、Ruleset ID/详情使用共享短期有界内存缓存及 Singleflight；写后定向失效、身份隔离，规则与 Zone 按当前账号/页签加载。
+- 配置 hostname 快速展示无需扫描 Zone；显式 DNS 验证使用精确查询并报告不完整结果。
+- 新增双端安全合成测试、桌面/移动回归与可复现性能基线，见 docs/tunnels-rules-v2.9.md。
+
 ## [2.8.2] - 2026-10-14
 
 ### Pages 分页热修复

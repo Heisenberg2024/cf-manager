@@ -1,96 +1,11 @@
 import type { Account } from '../db/models';
-import { cfFetch, cfFetchAll } from './cfApi';
-
-export interface GenericRuleInput {
-  description?: string;
-  expression: string;
-  action: string;
-  action_parameters: any;
-  enabled?: boolean;
-  ratelimit?: Record<string, unknown>;
-}
-
-// Account 级 Phase（使用 /accounts/{account_id}/rulesets，kind: 'root'）
-// 其余 Phase 为 Zone 级（使用 /zones/{zone_id}/rulesets，kind: 'zone'）
-const ACCOUNT_LEVEL_PHASES = new Set([
-  'http_request_redirect',
-  'http_request_dynamic_redirect',
-]);
-
-function isAccountLevelPhase(phase: string): boolean {
-  return ACCOUNT_LEVEL_PHASES.has(phase);
-}
-
-/** 根据 phase 返回对应的 API base path */
-function getRulesetBaseUrl(account: Account, zoneId: string, phase: string): string {
-  return isAccountLevelPhase(phase)
-    ? `/accounts/${account.account_id}/rulesets`
-    : `/zones/${zoneId}/rulesets`;
-}
-
-/** 获取指定 phase 的 ruleset ID，不存在则创建 */
-export async function getRulesetId(account: Account, zoneId: string, phase: string, key: string, createIfMissing = true): Promise<string> {
-  if (isAccountLevelPhase(phase) && !account.account_id) {
-    throw new Error('该规则类型为账户级，但当前账户未设置 Cloudflare Account ID');
-  }
-  const baseUrl = getRulesetBaseUrl(account, zoneId, phase);
-  const accountLevel = isAccountLevelPhase(phase);
-  const list = await cfFetchAll<any>(account, baseUrl, key);
-  const existing = list.find(r => r.phase === phase);
-  if (existing) return existing.id;
-  if (!createIfMissing) throw Object.assign(new Error('Ruleset not found'), { statusCode: 404, code: 'RULESET_NOT_FOUND' });
-  const created = await cfFetch<{ result: any }>(account, baseUrl, key, {
-    method: 'POST', body: JSON.stringify({
-      kind: accountLevel ? 'root' : 'zone',
-      phase,
-      name: `${phase} rules`,
-      rules: [],
-    }),
-  });
-  return created.result.id;
-}
-
-export async function listRules(account: Account, zoneId: string, phase: string, key: string): Promise<any[]> {
-  try {
-  const baseUrl = getRulesetBaseUrl(account, zoneId, phase);
-  const rsId = await getRulesetId(account, zoneId, phase, key, false);
-  const rs = await cfFetch<{ result: any }>(account, `${baseUrl}/${rsId}`, key);
-  return rs.result.rules ?? [];
-  } catch (error) {
-    if ((error as { code?: string }).code === 'RULESET_NOT_FOUND') return [];
-    throw error;
-  }
-}
-
-export async function createRule(account: Account, zoneId: string, phase: string, input: GenericRuleInput, key: string): Promise<any> {
-  const baseUrl = getRulesetBaseUrl(account, zoneId, phase);
-  const rsId = await getRulesetId(account, zoneId, phase, key);
-  const res = await cfFetch<{ result: any }>(account, `${baseUrl}/${rsId}/rules`, key, {
-    method: 'POST', body: JSON.stringify({
-      description: input.description, expression: input.expression,
-      action: input.action, action_parameters: input.action_parameters, ratelimit: input.ratelimit,
-      enabled: input.enabled ?? true,
-    }),
-  });
-  return res.result;
-}
-
-export async function updateRule(account: Account, zoneId: string, phase: string, ruleId: string, input: GenericRuleInput, key: string): Promise<any> {
-  const baseUrl = getRulesetBaseUrl(account, zoneId, phase);
-  const rsId = await getRulesetId(account, zoneId, phase, key, false);
-  const res = await cfFetch<{ result: any }>(account, `${baseUrl}/${rsId}/rules/${ruleId}`, key, {
-    method: 'PATCH', body: JSON.stringify({
-      description: input.description, expression: input.expression,
-      action: input.action, action_parameters: input.action_parameters, ratelimit: input.ratelimit,
-      enabled: input.enabled,
-    }),
-  });
-  return res.result;
-}
-
-export async function deleteRule(account: Account, zoneId: string, phase: string, ruleId: string, key: string): Promise<any> {
-  const baseUrl = getRulesetBaseUrl(account, zoneId, phase);
-  const rsId = await getRulesetId(account, zoneId, phase, key, false);
-  await cfFetch(account, `${baseUrl}/${rsId}/rules/${ruleId}`, key, { method: 'DELETE' });
-  return { success: true };
-}
+import { accountRequest } from './cfApi';
+import { getDnsDirectory } from './dnsDirectory';
+import { RulesResources, type GenericRuleInput } from './rulesResources';
+export type { GenericRuleInput } from './rulesResources';
+const resources = new WeakMap<D1Database, RulesResources>();
+export function getRulesResources(db: D1Database) { let r = resources.get(db); if (!r) { r = new RulesResources(getDnsDirectory(db), event => console.info(JSON.stringify({ scope: 'rules_performance', ...event }))); resources.set(db, r); } return r; }
+export async function listRules(account: Account, zoneId: string, phase: string, key: string, db: D1Database, refresh = false) { return (await getRulesResources(db).list(account, await accountRequest(account, key), zoneId, phase, refresh)).value; }
+export async function createRule(account: Account, zoneId: string, phase: string, input: GenericRuleInput, key: string, db: D1Database) { return getRulesResources(db).mutate(account, await accountRequest(account, key), zoneId, phase, 'create', input); }
+export async function updateRule(account: Account, zoneId: string, phase: string, ruleId: string, input: GenericRuleInput, key: string, db: D1Database) { return getRulesResources(db).mutate(account, await accountRequest(account, key), zoneId, phase, 'update', input, ruleId); }
+export async function deleteRule(account: Account, zoneId: string, phase: string, ruleId: string, key: string, db: D1Database, baseline?: unknown) { return getRulesResources(db).mutate(account, await accountRequest(account, key), zoneId, phase, 'delete', undefined, ruleId, baseline); }

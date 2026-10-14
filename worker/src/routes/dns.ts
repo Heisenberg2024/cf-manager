@@ -308,26 +308,28 @@ app.patch('/domains/:domain/status', async (c) => {
 
 app.get('/domains/:domain/rules/:phase', async (c) => {
   const { account, zoneId } = await findAccountByDomain(c.env.DB, c.req.param('domain'), c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
-  return c.json(await listRules(account, zoneId, c.req.param('phase'), c.env.ENCRYPTION_KEY));
+  return c.json(await listRules(account, zoneId, c.req.param('phase'), c.env.ENCRYPTION_KEY, c.env.DB, c.req.query('refresh') === 'true'));
 });
 
 app.post('/domains/:domain/rules/:phase', async (c) => {
   const body = await c.req.json();
-  const { description, expression, action, action_parameters, enabled, ratelimit } = body;
+  const { expression, action } = body;
   if (!expression || !action) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'expression and action are required' } }, 400);
   const { account, zoneId } = await findAccountByDomain(c.env.DB, c.req.param('domain'), c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
-  const rule = await createRule(account, zoneId, c.req.param('phase'), { description, expression, action, action_parameters, enabled, ratelimit }, c.env.ENCRYPTION_KEY);
-  await addAuditLog(c.env.DB, { account_id: account.id, action: 'create_rule', target: c.req.param('domain'), detail: `phase=${c.req.param('phase')} action=${action}`, status: 'success' });
+  if (isDemoAccount(account.id, c.env.DEMO_ACCOUNT_IDS)) return c.json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可修改规则' } }, 403);
+  const rule = await createRule(account, zoneId, c.req.param('phase'), body, c.env.ENCRYPTION_KEY, c.env.DB);
+  await addAuditLog(c.env.DB, { account_id: account.id, action: 'create_rule', target: c.req.param('domain'), detail: `phase=${c.req.param('phase')} action=${action}`, status: rule.status === 'success' ? 'success' : 'error' });
   return c.json(rule, 201);
 });
 
 app.put('/domains/:domain/rules/:phase/:ruleId', async (c) => {
   const body = await c.req.json();
-  const { description, expression, action, action_parameters, enabled, ratelimit } = body;
+  const { expression, action } = body;
   if (!expression || !action) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'expression and action are required' } }, 400);
   const { account, zoneId } = await findAccountByDomain(c.env.DB, c.req.param('domain'), c.env.ENCRYPTION_KEY, c.env.KV, zoneContext(c));
-  const rule = await updateRule(account, zoneId, c.req.param('phase'), c.req.param('ruleId'), { description, expression, action, action_parameters, enabled, ratelimit }, c.env.ENCRYPTION_KEY);
-  await addAuditLog(c.env.DB, { account_id: account.id, action: 'update_rule', target: c.req.param('domain'), detail: `phase=${c.req.param('phase')} rule_id=${c.req.param('ruleId')}`, status: 'success' });
+  if (isDemoAccount(account.id, c.env.DEMO_ACCOUNT_IDS)) return c.json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可修改规则' } }, 403);
+  const rule = await updateRule(account, zoneId, c.req.param('phase'), c.req.param('ruleId'), body, c.env.ENCRYPTION_KEY, c.env.DB);
+  await addAuditLog(c.env.DB, { account_id: account.id, action: 'update_rule', target: c.req.param('domain'), detail: `phase=${c.req.param('phase')} rule_id=${c.req.param('ruleId')}`, status: rule.status === 'success' ? 'success' : 'error' });
   return c.json(rule);
 });
 
@@ -336,9 +338,9 @@ app.delete('/domains/:domain/rules/:phase/:ruleId', async (c) => {
   if (isDemoAccount(account.id, c.env.DEMO_ACCOUNT_IDS)) {
     return c.json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可删除 WAF 规则' } }, 403);
   }
-  await deleteRule(account, zoneId, c.req.param('phase'), c.req.param('ruleId'), c.env.ENCRYPTION_KEY);
-  await addAuditLog(c.env.DB, { account_id: account.id, action: 'delete_rule', target: c.req.param('domain'), detail: `phase=${c.req.param('phase')} rule_id=${c.req.param('ruleId')}`, status: 'success' });
-  return c.json({ success: true });
+  const result = await deleteRule(account, zoneId, c.req.param('phase'), c.req.param('ruleId'), c.env.ENCRYPTION_KEY, c.env.DB, (await c.req.json()).baseline);
+  await addAuditLog(c.env.DB, { account_id: account.id, action: 'delete_rule', target: c.req.param('domain'), detail: `phase=${c.req.param('phase')} rule_id=${c.req.param('ruleId')}`, status: result.status === 'success' ? 'success' : 'error' });
+  return c.json(result);
 });
 
 export default app;
