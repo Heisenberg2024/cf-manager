@@ -18,10 +18,10 @@ export const useWorkerStore = defineStore('workers', () => {
     accounts = bindings.filter(a => a.account_id && a.is_active !== 0 && a.is_enabled !== 0 && (a.enabled_features || '').split(',').includes('workers'));
     for (const [id, version] of versions) {
       const account = accounts.find(a => a.id === id);
-      if (!account || version !== JSON.stringify([account.account_id, account.credential_id, account.updated_at, account.enabled_features])) { invalidate([id]); summary.value = summary.value.filter(row => row.accountId !== id); }
+      if (!account || version !== JSON.stringify([account.account_id, account.credential_id, account.updated_at, account.identity_version, account.enabled_features])) { invalidate([id]); summary.value = summary.value.filter(row => row.accountId !== id); }
     }
     versions.clear();
-    for (const account of accounts) versions.set(account.id, JSON.stringify([account.account_id, account.credential_id, account.updated_at, account.enabled_features]));
+    for (const account of accounts) versions.set(account.id, JSON.stringify([account.account_id, account.credential_id, account.updated_at, account.identity_version, account.enabled_features]));
     summary.value = accounts.map(a => ({ ...unknown(a), ...summary.value.find(s => s.accountId === a.id), accountName: a.name }));
   }
   function invalidate(ids: number[]) {
@@ -49,7 +49,7 @@ export const useWorkerStore = defineStore('workers', () => {
   async function fetchSummary(refresh = false) {
     const metadataSession = generation;
     if (!accounts.length) {
-      try { const { data } = await accountsApi.getAll(); if (metadataSession !== generation) return; configureAccounts(data.accounts || []); }
+      try { const { data } = await accountsApi.getOptions('workers'); if (metadataSession !== generation) return; configureAccounts(data.accounts || []); }
       catch (error: any) { if (metadataSession === generation) resourceError.value = error.errorMessage || error.message; return; }
     }
     if (summaryController) { summaryController.abort(); flights.clear(); }

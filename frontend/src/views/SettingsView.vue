@@ -300,7 +300,7 @@ const proxyEnabled = ref(false);
 const taskAllAccounts = ref<any[]>([]);
 async function loadTaskAccounts() {
   try {
-    const { data } = await accountsApi.getAll();
+    const { data } = await accountsApi.getOptions();
     taskAllAccounts.value = (data as any).accounts || [];
   } catch { taskAllAccounts.value = []; }
 }

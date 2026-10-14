@@ -380,6 +380,7 @@
 </template>
 
 <script setup lang="ts">
+import { requestedAccountId } from '../utils/accountContext';
 import DnsZoneList from '../components/DnsZoneList.vue';
 import { ref, h, computed, onMounted, onUnmounted, watch } from 'vue';
 import { NButton, NSwitch, NTag, NText, NCheckbox, useMessage, useDialog } from 'naive-ui';
@@ -1028,7 +1029,7 @@ async function onZonesDeleted(result: DeleteZonesResult) {
 async function loadAccounts() {
   // Credential labels enrich the UI independently; a slow credential response does not delay Zones.
   void loadCredentialNames();
-  try { const { data } = await accountsApi.getAll(); if (!viewActive) return; accounts.value = data?.accounts || []; setDemoAccounts(data?.accounts || []); }
+  try { const { data } = await accountsApi.getOptions(); if (!viewActive) return; accounts.value = data?.accounts || []; setDemoAccounts(data?.accounts || []); }
   catch { if (!viewActive) return; accounts.value = []; }
   dnsStore.configureAccounts(dnsAccounts.value.map(account => ({ ...account })));
 }
@@ -1047,7 +1048,8 @@ watch(debouncedSearch, (val) => {
 onMounted(async () => {
   await loadAccounts();
   if (!viewActive) return;
-  const saved = loadSavedAccount();
+  const requested=requestedAccountId();
+  const saved = requested&&dnsAccounts.value.some(a=>a.id===requested)?String(requested):loadSavedAccount();
   if (saved && (saved === '__all__' || dnsAccounts.value.some(account => String(account.id) === saved))) {
     selectedAccount.value = saved;
   } else if (dnsAccounts.value.length) {

@@ -1,3 +1,5 @@
+import { accountOptions } from '../services/accountOptions';
+import { localSql } from '../services/localSql';
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { getAllAccounts, createAccount, deleteAccount, getAccountById, nameFromEmail, updateAccountStatus, updateAccountFeatures, updateAccount, AccountInput } from '../models/account';
@@ -18,6 +20,7 @@ import { isDemoAccountId, isDemoMode } from './routeUtils';
 import { probeAvailableFeatures, probeWorkerPlan } from '../services/accountProbe';
 
 const router = Router();
+router.get('/options',async(req,res,next)=>{try{res.setHeader('Cache-Control','no-store');res.json((await accountOptions(localSql,req.query.feature)).map(a=>({...a,is_demo:isDemoAccountId(a.id)})));}catch(error){next(error);}});
 
 /**
  * 探测账号的「可用功能」与「Workers 计划类型」并落库。

@@ -96,7 +96,7 @@ export async function getQuotaSummary(db: D1Database, _encryptionKey: string) {
         const count = row?.count || 0;
         const limit = LIMITS[resource];
         const exhausted = row?.exhausted === 1;
-        return { resource, count, limit, remaining: Math.max(0, limit - count), exhausted };
+        return { resource, count, limit, remaining: Math.max(0, limit - count), exhausted, limitSource:'internal_policy',officialLimit:null,usageSource:'quota_usage_mixed',syncedAt:null,period:'UTC day' };
       });
     return { accountId: account.id, accountName: account.name, resources };
   });

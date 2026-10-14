@@ -1,3 +1,4 @@
+import { safeAuditEvent } from '../services/auditQueries';
 import { getDb } from '../db';
 import { redact } from '../services/cfErrors';
 
@@ -29,14 +30,14 @@ export interface AuditLogWithName extends AuditLog {
 
 export function getRecentLogs(limit: number = 20): AuditLogWithName[] {
   const safeLimit = Math.min(Math.max(1, limit), 200);
-  return getDb()
+  return (getDb()
     .prepare(
       `SELECT a.*, acc.name AS account_name
        FROM audit_log a
        LEFT JOIN accounts acc ON a.account_id = acc.id
-       ORDER BY a.created_at DESC LIMIT ?`
+       ORDER BY a.created_at DESC, a.id DESC LIMIT ?`
     )
-    .all(safeLimit) as AuditLogWithName[];
+    .all(safeLimit) as AuditLogWithName[]).map(safeAuditEvent);
 }
 
 export interface LogFilter {
@@ -66,15 +67,15 @@ export function queryLogs(filter: LogFilter = {}): AuditLogWithName[] {
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const limit = Math.min(Math.max(1, filter.limit ?? 100), 500);
 
-  return getDb()
+  return (getDb()
     .prepare(
       `SELECT a.*, acc.name AS account_name
        FROM audit_log a
        LEFT JOIN accounts acc ON a.account_id = acc.id
        ${where}
-       ORDER BY a.created_at DESC LIMIT ?`
+       ORDER BY a.created_at DESC, a.id DESC LIMIT ?`
     )
-    .all(...params, limit) as AuditLogWithName[];
+    .all(...params, limit) as AuditLogWithName[]).map(safeAuditEvent);
 }
 
 export function getDistinctActions(): string[] {

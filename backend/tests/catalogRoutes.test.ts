@@ -1,0 +1,16 @@
+import {beforeAll,afterAll,it,expect,vi} from 'vitest';
+import express from 'express';
+import type {Server} from 'node:http';
+import {dashboardDb} from '../../shared/tests/dashboard.fixture.mjs';
+const state=vi.hoisted(()=>({sqlite:null as any}));
+vi.mock('../src/db',()=>({getDb:()=>state.sqlite}));
+vi.mock('../src/config',()=>({config:{fileLogging:false,encryptionKey:'test'}}));
+vi.mock('../src/services/ssrfGuard',()=>({assertUrlSafe:async()=>{}}));
+import router from '../src/routes/store';
+import {catalogReader} from '../src/services/catalogRuntime';
+const source={id:1,url:'https://catalog.old.test/catalog.json',is_default:0};
+let f:ReturnType<typeof dashboardDb>,server:Server,base:string;
+const nativeFetch=globalThis.fetch;
+beforeAll(async()=>{f=dashboardDb();state.sqlite=f.sqlite;f.sqlite.prepare('INSERT INTO catalog_sources(id,url,name) VALUES(1,?,?)').run(source.url,'Original');await catalogReader.seed(source,{templates:[]} as never);const app=express();app.use(express.json());app.use('/store',router);server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));base=`http://127.0.0.1:${(server.address() as {port:number}).port}`;vi.stubGlobal('fetch',((url:Parameters<typeof fetch>[0],init?:RequestInit)=>String(url).startsWith('https://catalog.bad.test')?Promise.resolve(new Response('failure',{status:500})):nativeFetch(url,init)) as typeof fetch);});
+afterAll(async()=>{vi.unstubAllGlobals();await new Promise<void>(r=>server.close(()=>r()));f.sqlite.close();});
+it('failed source URL validation leaves the current success snapshot and URL intact',async()=>{const before=await catalogReader.read(source,{cacheOnly:true});const response=await fetch(base+'/store/sources/1',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:'https://catalog.bad.test/catalog.json'})});expect(response.status).toBe(400);const after=await catalogReader.read(source,{cacheOnly:true});expect(after.state).toBe('empty');expect(after.lastSuccessAt).toBe(before.lastSuccessAt);expect(f.sqlite.prepare('SELECT url FROM catalog_sources WHERE id=1').get()).toMatchObject({url:source.url});});

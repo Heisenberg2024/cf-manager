@@ -31,6 +31,7 @@ const server = createServer(async (req, res) => {
       const p = u.pathname.slice(4), method = req.method; let raw = ''; for await (const chunk of req) raw += chunk;
       const body = raw ? JSON.parse(raw) : {}; apiCalls.push({ p, method });
       if (p === '/settings') return json({ platform: 'docker', version: baseline ? '2.8.2' : '2.9.0', demo_account_ids: '' });
+      if(p==='/accounts/options')return json(accounts);
       if (p === '/accounts') return json({ accounts, quota: [], total: accounts.length });
       if (p === '/credentials') return json(accounts.map(a => ({ id: a.credential_id, name: `Credential ${a.id}`, accounts: [] })));
       if (p === '/quota' || p.startsWith('/audit-log')) return json([]);
@@ -63,7 +64,7 @@ const server = createServer(async (req, res) => {
 await new Promise(r => server.listen(0, '127.0.0.1', r));
 const origin = `http://127.0.0.1:${server.address().port}`, report = []; let browser;
 try {
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ executablePath:process.env.CHROMIUM_EXECUTABLE||undefined, headless: true });
   for (const width of [1440, 390]) for (const dark of [false, true]) {
     reset(); const context = await browser.newContext({ viewport: { width, height: 1000 }, colorScheme: dark ? 'dark' : 'light' });
     const page = await context.newPage(); const errors = []; page.on('pageerror', e => errors.push(e.message));

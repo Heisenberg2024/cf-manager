@@ -1,4 +1,10 @@
 import apiClient from './client';
+import { MetadataCache } from '../utils/metadataCache';
+import type {AccountOption} from '../shared/accountOptions';
+const optionsCache=new MetadataCache<AccountOption[]>();
+export function resetAccountOptions(){optionsCache.clear();}
+if(typeof window!=='undefined'){window.addEventListener('auth-expired',resetAccountOptions);window.addEventListener('account-metadata-invalidated',resetAccountOptions);window.addEventListener('session-cleared',resetAccountOptions);}
+
 
 export interface AccountListParams {
   page?: number;
@@ -17,6 +23,7 @@ export interface AccountExportParams {
 }
 
 export const accountsApi = {
+  getOptions:async(feature?:string)=>({data:{accounts:await optionsCache.read(feature||'all',async()=>{const {data}=await apiClient.get<AccountOption[]>('/accounts/options',{params:{feature}});return data;})}}),
   getAll: (params: AccountListParams = {}) =>
     apiClient.get('/accounts', { params }),
   create: (data: any) => apiClient.post('/accounts', data),

@@ -126,7 +126,8 @@
     "browserRender": "浏览器渲染",
     "store": "模板商店",
     "tunnels": "隧道/回源",
-    "settings": "设置"
+    "settings": "设置",
+    "auditLogs": "审计日志"
   },
   "nav": {
     "dashboard": "仪表盘",
@@ -139,7 +140,8 @@
     "render": "渲染",
     "store": "商店",
     "tunnels": "隧道/回源",
-    "settings": "设置"
+    "settings": "设置",
+    "auditLogs": "审计日志"
   },
   "dashboard": {
     "title": "仪表盘",
@@ -309,7 +311,7 @@
       "proxy": "代理",
       "features": "功能",
       "status": "状态",
-      "aiQuota": "AI 配额",
+      "aiQuota": "AI 已记录用量",
       "actions": "操作",
       "token": "Token",
       "key": "Key",
@@ -323,7 +325,8 @@
       "r2": "R2",
       "totalItems": "共 {count} 条",
       "email": "邮箱",
-      "accountNameShort": "账户名"
+      "accountNameShort": "账户名",
+      "recordedUsageHint": "UTC 当日已记录用量，来源包含本地估算和曾同步数据；非实时账单，官方限额未确认。"
     }
   },
   "dns": {
@@ -769,7 +772,8 @@
       "cpuTime": "CPU 耗时",
       "subrequests": "子请求"
     },
-    "resourceReadFailed": "Cloudflare 资源读取失败，数量暂未知；请刷新重试。"
+    "resourceReadFailed": "Cloudflare 资源读取失败，数量暂未知；请刷新重试。",
+    "usageSource": "Cloudflare 用量快照（UTC 当日），非实时账单；官方额度未确认。"
   },
   "ai": {
     "title": "AI 工作台",
@@ -1579,5 +1583,125 @@
     "label": "语言",
     "zhCN": "中文",
     "en": "English"
+  },
+  "overview": {
+    "title": "Cloudflare 总览",
+    "localHealth": "本地服务",
+    "updated": "本地统计更新",
+    "allAccounts": "全部账号",
+    "allProducts": "全部产品",
+    "days": "天",
+    "accounts": "Cloudflare Accounts",
+    "realAccounts": "去重 CF Account",
+    "enabled": "本地活跃且启用",
+    "disabled": "停用",
+    "unverified": "未验证 / 访问失败",
+    "zones": "DNS Zones",
+    "workersPages": "Workers & Pages",
+    "tunnels": "Tunnels",
+    "storage": "Storage",
+    "attention": "待关注问题",
+    "knownIssues": "仅汇总已记录的检测结果",
+    "unknownNotice": "未检测资源保持未知",
+    "snapshotSource": "来源：资源模块成功快照 / 持久化数量汇总",
+    "coverage": "覆盖账号",
+    "unknownOrAbnormal": "异常或未知",
+    "moduleError": "此模块读取失败，可独立刷新",
+    "resourceCollection": "资源快照采集",
+    "collectionHint": "首页不会自动扫描 Cloudflare。按账号与产品逐项读取，复用有效缓存；暂停后不再发出下一项请求。强制采集会访问远端。",
+    "collectMissing": "采集缺失 / 过期快照",
+    "forceCollect": "强制采集所选范围",
+    "pause": "暂停采集",
+    "collectionDone": "本批读取已结束",
+    "usageTrends": "资源使用趋势",
+    "usageDisclaimer": "已记录用量，非实时账单；重复 CF Account 取各日最大值，缺失日期不补零",
+    "seconds": "秒",
+    "requests": "请求",
+    "auditTrends": "审计操作趋势",
+    "auditDisclaimer": "本平台记录的审计事件，不代表全部 Cloudflare 请求量或 API 错误率",
+    "success": "成功",
+    "failure": "失败",
+    "operations": "次操作",
+    "noHistory": "暂无真实历史数据",
+    "dataTable": "查看数值",
+    "noKnownIssues": "暂无已记录的关注事项",
+    "remoteHealthNotice": "本地服务健康不代表全部 Cloudflare 账号及远端资源健康。未知资源需采集后确认。",
+    "accountSummary": "账号概况",
+    "searchAccounts": "搜索账号、凭证或 CF ID",
+    "status": "状态",
+    "todayRecorded": "今日已记录用量（UTC）",
+    "lastCheck": "最近成功检测",
+    "recentActivity": "最近活动",
+    "allAudit": "查看全部审计日志",
+    "atLeast": "已确认至少 ",
+    "states": {
+      "ready": "已确认",
+      "stale": "已过期",
+      "partial": "部分覆盖",
+      "unknown": "未知",
+      "loading": "读取中",
+      "error": "读取失败"
+    },
+    "severity": {
+      "critical": "严重",
+      "warning": "警告",
+      "info": "提示"
+    },
+    "issueKinds": {
+      "accountAccess": "账号访问异常",
+      "credential": "凭证失效",
+      "verification": "账号未验证或检测已过期",
+      "quota": "已记录额度耗尽",
+      "catalog": "Catalog 更新失败",
+      "resourceRead": "资源读取失败",
+      "zonePending": "Zone 待生效",
+      "unknownWrite": "已记录的远端写入结果未知",
+      "recentAuditFailure": "最近 7 天已记录的操作失败",
+      "staleSnapshot": "资源统计快照已过期"
+    },
+    "metrics": {
+      "zones": "Zones",
+      "workers": "Workers",
+      "pages": "Pages",
+      "tunnels": "Tunnels",
+      "kv": "KV Namespaces",
+      "d1": "D1 Databases",
+      "r2": "R2 Buckets",
+      "workers_requests": "Workers Requests",
+      "ai_neurons": "AI Neurons",
+      "browser_render_seconds": "Browser Render Seconds"
+    },
+    "verified": "最近已知可用",
+    "accountDetails": "账号详情",
+    "credential": "凭证",
+    "features": "已启用功能",
+    "manageAccount": "进入账号管理"
+  },
+  "audit": {
+    "title": "审计日志",
+    "description": "查询本平台的操作事件。日期筛选按 UTC，自然日结束日期包含当天；显示时间为 UTC+8。",
+    "action": "操作类型",
+    "startDate": "开始日期",
+    "endDate": "结束日期",
+    "target": "目标关键词",
+    "query": "查询",
+    "total": "总操作数",
+    "success": "成功数",
+    "error": "失败数",
+    "page": "第 {page} 页",
+    "cursorNotice": "稳定游标分页，新操作在刷新后展示",
+    "previous": "上一页",
+    "next": "下一页",
+    "details": "详情",
+    "time": "时间",
+    "redactionNotice": "详情仅展示安全的状态与数量字段。历史自由文本、环境变量和配置内容不予回传。"
+  },
+  "catalogState": {
+    "ready": "已同步",
+    "empty": "目录为空",
+    "stale": "旧快照",
+    "unknown": "未读取",
+    "error": "同步失败",
+    "lastSuccess": "最近成功"
   }
 }

@@ -1,3 +1,5 @@
+import { boundedCatalogFetch, mapCatalogSources } from '../services/catalogReader';
+import { getCatalogReader, CATALOG_URLS } from '../services/catalogRuntime';
 import { mapConcurrent } from '../utils/concurrent';
 import { errorDetails } from '../services/cfErrors';
 import { Hono } from 'hono';
@@ -16,16 +18,8 @@ const app = new Hono<{ Bindings: Env }>();
 
 // 主源用 surge.sh：Surge 静态托管，更新即时生效，避免 jsDelivr 缓存 GitHub 主分支导致更新延迟。
 // 兜底顺序：surge.sh → jsDelivr → GitHub raw（GitHub raw 放最后，作为最终兜底）。
-const DEFAULT_CATALOG_URL = 'https://cf-store.surge.sh/catalog.json';
-const DEFAULT_CATALOG_FALLBACK_URLS = [
-  'https://cdn.jsdelivr.net/gh/hefy2027/cf-store@main/catalog.json',
-  'https://raw.githubusercontent.com/hefy2027/cf-store/main/catalog.json',
-];
-const DEFAULT_CATALOG_URLS = [DEFAULT_CATALOG_URL, ...DEFAULT_CATALOG_FALLBACK_URLS];
+const DEFAULT_CATALOG_URL=CATALOG_URLS[0]!;
 const DEFAULT_CATALOG_NAME = '官方源';
-
-// KV 缓存 TTL：6 小时，避免脏数据永久驻留
-const KV_CACHE_TTL = 6 * 60 * 60;
 
 // ============ Source CRUD ============
 
@@ -37,24 +31,17 @@ interface CatalogUrlTestResult {
   errorCode?: string;
   error?: string;
   etag?: string | null;
+  etagUrl?: string;
   json?: any;
 }
 
-async function testCatalogUrl(url: string): Promise<CatalogUrlTestResult> {
-  if (!url || !url.startsWith('https://')) {
-    return { ok: false, errorCode: 'VALIDATION_ERROR', error: 'url must be a valid HTTPS URL' };
-  }
+async function testCatalogUrl(url: string, env?: Env): Promise<CatalogUrlTestResult> {
   try {
-    assertUrlSafe(url);
-    const resp = await fetch(url);
-    if (!resp.ok) return { ok: false, status: resp.status, errorCode: 'FETCH_ERROR', error: `URL 不可达: HTTP ${resp.status}` };
-    const json: any = await resp.json();
-    const result = validateCatalog(json);
-    if (!result.valid) return { ok: false, errorCode: 'INVALID_CATALOG', error: `不是有效的 catalog: ${result.errors.join('; ')}` };
-    return { ok: true, templateCount: Array.isArray(json.templates) ? json.templates.length : 0, etag: resp.headers.get('etag'), json };
-  } catch (e: any) {
-    return { ok: false, errorCode: 'FETCH_ERROR', error: `拉取校验失败: ${e.message}` };
-  }
+    const response=await boundedCatalogFetch(url,{safe:url=>assertUrlSafe(url, env),fetch:(url,init)=>fetch(url,init)});
+    const json=JSON.parse(response.text);const result=validateCatalog(json);
+    if(!result.valid)return {ok:false,errorCode:'INVALID_CATALOG',error:'Schema invalid'};
+    return {ok:true,templateCount:json.templates.length,etag:response.etag,etagUrl:response.url,json};
+  }catch(error){return {ok:false,errorCode:'FETCH_ERROR',error:(error as Error).message};}
 }
 
 app.get('/sources', async (c) => {
@@ -65,7 +52,7 @@ app.get('/sources', async (c) => {
 // 独立测试接口：验证 URL 是否可拉取且符合 catalog 格式（不落库）
 app.post('/sources/test', async (c) => {
   const { url } = await c.req.json();
-  const result = await testCatalogUrl(url);
+  const result = await testCatalogUrl(url,c.env);
   return c.json(result);
 });
 
@@ -76,16 +63,12 @@ app.post('/sources', async (c) => {
   }
 
   // Fetch and validate before saving
-  const test = await testCatalogUrl(url);
+  const test = await testCatalogUrl(url,c.env);
   if (!test.ok) {
     return c.json({ error: { code: test.errorCode || 'FETCH_ERROR', message: test.error } }, 400);
   }
   const id = await createCatalogSource(c.env.DB, { url, name });
-  // Cache the catalog in KV
-  if (c.env.KV) {
-    await c.env.KV.put(`catalog:${id}`, JSON.stringify(test.json), { expirationTtl: KV_CACHE_TTL });
-  }
-  if (test.etag) await updateCatalogSource(c.env.DB, id, { etag: test.etag, last_synced: new Date().toISOString(), last_status: 'ok', last_error: null });
+  await getCatalogReader(c.env).seed({id,url},test.json,test.etag??null,test.etagUrl??url);
   return c.json({ id }, 201);
 });
 
@@ -99,25 +82,16 @@ app.put('/sources/:id', async (c) => {
     return c.json({ error: { code: 'FORBIDDEN', message: '默认源的 URL 不可修改' } }, 403);
   }
 
-  // If URL changed, re-fetch and validate
-  if (body.url && body.url !== source.url) {
-    const test = await testCatalogUrl(body.url);
-    if (!test.ok) {
-      return c.json({ error: { code: test.errorCode || 'FETCH_ERROR', message: test.error } }, 400);
-    }
-    if (c.env.KV) await c.env.KV.put(`catalog:${id}`, JSON.stringify(test.json), { expirationTtl: KV_CACHE_TTL });
-    await updateCatalogSource(c.env.DB, id, {
-      ...body, etag: test.etag || null, last_synced: new Date().toISOString(), last_status: 'ok', last_error: null,
-    });
-  } else {
-    await updateCatalogSource(c.env.DB, id, body);
-  }
+  if(body.url&&body.url!==source.url){const test=await testCatalogUrl(body.url,c.env);if(!test.ok)return c.json({error:{code:test.errorCode,message:test.error}},400);
+    await updateCatalogSource(c.env.DB,id,{...body,etag:null});getCatalogReader(c.env).invalidate(id);await getCatalogReader(c.env).seed({...source,url:body.url},test.json,test.etag??null,test.etagUrl??body.url);
+  }else await updateCatalogSource(c.env.DB,id,body);
   return c.json({ success: true });
 });
 
 app.delete('/sources/:id', async (c) => {
   const id = parseInt(c.req.param('id'), 10);
   await deleteCatalogSource(c.env.DB, id);
+  getCatalogReader(c.env).invalidate(id);
   if (c.env.KV) await c.env.KV.delete(`catalog:${id}`);
   return c.json({ success: true });
 });
@@ -125,90 +99,13 @@ app.delete('/sources/:id', async (c) => {
 // ============ Catalog Fetch ============
 
 // 官方默认源启用 fallback 链；用户自定义源只使用自己的 url
-function candidateUrls(source: any): string[] {
-  return source.is_default ? DEFAULT_CATALOG_URLS : [source.url];
-}
-
-async function fetchSourceCatalog(c: any, source: any): Promise<Catalog | null> {
-  return fetchSourceCatalogImpl(c, source, false);
-}
-
-// skipCache=true 时跳过 KV 缓存读取，强制从远程拉取（供 /refresh 使用）
-async function fetchSourceCatalogImpl(c: any, source: any, skipCache: boolean): Promise<Catalog | null> {
-  const getCached = async (): Promise<Catalog | null> => {
-    if (c.env.KV) {
-      const cached = await c.env.KV.get(`catalog:${source.id}`);
-      if (cached) { try { return JSON.parse(cached); } catch {} }
-    }
-    return null;
-  };
-
-  // Try KV cache first (unless force refresh)
-  if (!skipCache) {
-    const cached = await getCached();
-    // 空目录（无模板）不视为有效命中：用户看到空白时应立即重新拉取远程
-    if (cached && cached.templates && cached.templates.length > 0) return cached;
-  }
-
-  // Fetch from remote with fallback chain
-  const urls = candidateUrls(source);
-  let lastError = '';
-  for (const url of urls) {
-    try {
-      assertUrlSafe(url);
-      const headers: Record<string, string> = {};
-      // etag 仅对主记录 url 携带，避免跨地址 etag 误判
-      if (url === source.url && source.etag) headers['If-None-Match'] = source.etag;
-      const resp = await fetch(url, { headers });
-
-      if (resp.status === 304) {
-        await updateCatalogSource(c.env.DB, source.id, {
-          last_synced: new Date().toISOString(), last_status: 'ok', last_error: null,
-        });
-        const c2 = await getCached();
-        if (c2) return c2;
-        continue; // 缓存缺失，尝试下一个地址
-      }
-
-      if (!resp.ok) {
-        lastError = `HTTP ${resp.status} (${url})`;
-        continue;
-      }
-
-      const json = await resp.json();
-      const result = validateCatalog(json);
-      if (!result.valid) {
-        lastError = `Schema invalid: ${result.errors.slice(0, 3).join('; ')} (${url})`;
-        continue;
-      }
-
-      // Cache + update metadata
-      if (c.env.KV) await c.env.KV.put(`catalog:${source.id}`, JSON.stringify(json), { expirationTtl: KV_CACHE_TTL });
-      const etag = resp.headers.get('etag');
-      await updateCatalogSource(c.env.DB, source.id, {
-        etag: etag || null, last_synced: new Date().toISOString(),
-        last_status: 'ok', last_error: null,
-      });
-
-      return json as Catalog;
-    } catch (e: any) {
-      lastError = `${e.message} (${url})`;
-      continue;
-    }
-  }
-  await updateCatalogSource(c.env.DB, source.id, {
-    last_status: 'error', last_error: lastError,
-  });
-  return null;
-}
-
+async function fetchSourceCatalog(c:any,source:any):Promise<Catalog|null>{return (await getCatalogReader(c.env).read(source,{waitUntil:p=>c.executionCtx?.waitUntil(p)})).catalog;}
 // ============ Template List (merged + dedup) ============
 
 app.get('/templates', async (c) => {
-  const sources = await getEnabledCatalogSources(c.env.DB);
-
-  // Fetch all source catalogs in parallel
-  const results = await Promise.all(sources.map(s => fetchSourceCatalog(c, s)));
+  const sources=(await getEnabledCatalogSources(c.env.DB)).filter(s=>!c.req.query('sourceId')||s.id===Number(c.req.query('sourceId')));
+  const states=await mapCatalogSources(sources,s=>getCatalogReader(c.env).read(s,{cacheOnly:c.req.query('cacheOnly')==='true',waitUntil:p=>c.executionCtx.waitUntil(p)}));
+  const results=states.map(r=>r.catalog);
 
   // Dedup by id, priority: default source first, then by id ASC
   const seen = new Map<string, { template: CatalogTemplate; sourceId: number; sourceName: string; sourceCount: number }>();
@@ -237,21 +134,13 @@ app.get('/templates', async (c) => {
   }
 
   const templates = Array.from(seen.values());
-  return c.json({ templates, sources });
+  return c.json({ templates, sources:sources.map((s,i)=>({...s,sync:{...states[i],catalog:undefined}})) });
 });
 
 // ============ Force Refresh ============
 
-app.post('/refresh', async (c) => {
-  const sources = await getEnabledCatalogSources(c.env.DB);
-  const results = await Promise.all(sources.map(async (s) => {
-    // Force refresh: clear etag + KV 缓存，确保从远程重新拉取
-    if (s.etag) await updateCatalogSource(c.env.DB, s.id, { etag: null });
-    if (c.env.KV) await c.env.KV.delete(`catalog:${s.id}`);
-    const cat = await fetchSourceCatalogImpl(c, s, true);
-    return { id: s.id, name: s.name, success: !!cat };
-  }));
-  return c.json(results);
+app.post('/refresh',async c=>{const body=await c.req.json().catch(()=>({}));const sources=(await getEnabledCatalogSources(c.env.DB)).filter(s=>!body.sourceId||s.id===Number(body.sourceId));
+  const results=await mapCatalogSources(sources,async s=>{const r=await getCatalogReader(c.env).read(s,{force:true});return {id:s.id,name:s.name,success:!r.errorKind,state:r.state,errorKind:r.errorKind};});return c.json(results);
 });
 
 // ============ Init default source ============

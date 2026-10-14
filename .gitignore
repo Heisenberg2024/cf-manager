@@ -128,3 +128,16 @@ backend/src/services/rulesResources.ts
 worker/src/services/tunnelConfig.ts
 worker/src/services/tunnelResources.ts
 worker/src/services/rulesResources.ts
+
+backend/src/services/auditQueries.ts
+backend/src/services/dashboardData.ts
+backend/src/services/dashboardCollector.ts
+worker/src/services/auditQueries.ts
+worker/src/services/dashboardData.ts
+worker/src/services/dashboardCollector.ts
+
+backend/src/services/catalogReader.ts
+worker/src/services/catalogReader.ts
+
+backend/src/services/accountOptions.ts
+worker/src/services/accountOptions.ts

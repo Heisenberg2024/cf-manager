@@ -25,6 +25,7 @@ const server=createServer(async(req,res)=>{
    const api=path.slice(4),json=data=>{res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({success:true,data}));};
    if(req.method!=='GET' && !api.endsWith('/query')){res.writeHead(405);res.end();return;}
    if(api==='/settings')return json({platform:'docker',version:'2.5.2',demo_account_ids:''});
+   if(api==='/accounts/options')return json(accounts);
    if(api==='/accounts')return json({accounts,quota:[],total:2,counts:{all:2,active:2,unverified:0}});
    if(api==='/credentials')return json([]);
    if(/^\/dns\/accounts\/\d+\/domains$/.test(api)){if(delayedDomains)await new Promise(r=>setTimeout(r,350));return json({zones:zones.filter(zone=>zone.cfAccountId===Number(api.split('/')[3])),meta:{state:'miss'}});}
@@ -38,7 +39,7 @@ const server=createServer(async(req,res)=>{
    if(/^\/storage\/\d+\/r2$/.test(api))return json(rows('bucket').map(name=>({name})));
    if(api.endsWith('/objects'))return json({objects:rows('file').map(key=>({key,size:10})),delimited_prefixes:[]});
    if(api==='/store/init')return json({});
-   if(api==='/store/templates')return json({sources:[],templates:rows('Template',60).map(id=>({sourceId:1,sourceName:'Fixture',sourceCount:1,template:{id,name:id,type:'worker',version:'1.0.0',description:'Scroll fixture',readmeUrl:'/fixture/readme.md',bindings:[],env:{}}}))});
+   if(api==='/store/templates')return json({sources:[{id:1,name:'Fixture',enabled:1,sync:{state:'ready'}}],templates:rows('Template',60).map(id=>({sourceId:1,sourceName:'Fixture',sourceCount:1,template:{id,name:id,type:'worker',version:'1.0.0',description:'Scroll fixture',readmeUrl:'https://fixture-readme.test/README.md',bindings:[],env:{}}}))});
    if(api==='/ai/usage')return json(rows('AI Account',60).map(accountName=>({accountName,totalNeurons:5,models:[]})));
    if(api==='/workers/summary')return json([{accountId:1,accountName:'Account 1',workerCount:100,pagesCount:0,requests:0}]);
    if(api==='/workers')return json(rows('worker').map(name=>({name,type:'worker',cfAccountId:1,accountName:'Account 1',status:'deployed'})));
@@ -82,10 +83,10 @@ async function tableWheel(label){
 }
 
 try {
- browser=await chromium.launch({headless:true});
+ browser=await chromium.launch({executablePath:process.env.CHROMIUM_EXECUTABLE||undefined,headless:true});
  for(const viewport of [{width:1440,height:900},{width:1100,height:650},{width:900,height:700},{width:390,height:844}]) {
   const context=await browser.newContext({viewport,reducedMotion:'reduce'});await context.addInitScript(()=>{localStorage.setItem('api_token','synthetic');localStorage.setItem('app_locale','zh-CN');localStorage.setItem('dns_selected_account','__all__');});
-  page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));page.on('console',e=>{if(e.type()==='error')errors.push(e.text());});
+  page=await context.newPage();await page.route('https://fixture-readme.test/README.md',route=>route.fulfill({status:200,contentType:'text/plain',body:readme}));page.on('pageerror',e=>errors.push(e.message));page.on('console',e=>{if(e.type()==='error')errors.push(e.text());});
   await page.goto(origin+base+'/dns');await page.locator('.dns-zone-list .n-list-item').nth(99).waitFor();
   const toolbar=page.locator('.dns-zone-actions'),before=await toolbar.boundingBox();
   await wheel(page.locator('.dns-zone-list'),`DNS grouped ${viewport.width}x${viewport.height}`);const after=await toolbar.boundingBox();assert(Math.abs(after.y-before.y)<1&&Math.abs(after.x-before.x)<1,'DNS toolbar moved with list');

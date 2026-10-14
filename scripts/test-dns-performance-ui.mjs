@@ -23,6 +23,7 @@ const server = createServer(async (req, res) => {
     const send = (data, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(status === 200 ? { success: true, data } : { success: false, error: { message: data } })); };
     if (url.pathname.startsWith('/api/')) {
       if (path === '/settings') return send({ platform: 'docker' });
+      if(path==='/accounts/options'){counts.accounts++;return send(accounts);}
       if (path === '/accounts') { counts.accounts++; return send({ accounts }); }
       if (path === '/credentials') { await sleep(900); return send(accounts.map(a => ({ id: a.id, name: `Credential ${a.id}` }))); }
       if (/^\/dns\/accounts\/\d+\/domains$/.test(path)) { const id = Number(path.split('/')[3]); counts.zoneReads.push(id); await sleep(slowAccount && id === 2 ? 700 : 15); if (failAccount && id === 1) return send('Synthetic Account failure', 503); return send({ zones: zones.filter(zone => zone.cfAccountId === id), meta: { state: 'miss' } }); }
@@ -44,7 +45,7 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 const output = '/private/tmp/cf-manager-dns-performance-ui'; mkdirSync(output, { recursive: true });
 let browser;
 try {
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ executablePath:process.env.CHROMIUM_EXECUTABLE||undefined, headless: true });
   for (const width of [1440, 390]) {
     for(const row of records) { row.proxied = false; row.ttl = 300; }
     counts.writes = 0; counts.accounts = 0; counts.zoneReads = []; counts.recordReads = 0;

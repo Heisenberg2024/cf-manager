@@ -343,6 +343,7 @@
 </template>
 
 <script setup lang="ts">
+import { requestedAccountId } from '../utils/accountContext';
 import { useAccountLabels } from '../utils/useAccountLabels';
 import { ref, reactive, computed, h, onMounted, watch, onBeforeUnmount } from 'vue';
 import AutoFitTable from '../components/AutoFitTable.vue';
@@ -386,7 +387,7 @@ async function loadAccounts() {
     const { data } = await tunnelsApi.getAccounts();
     accounts.value = data;
     if (accounts.value.length > 0 && !selectedAccountId.value) {
-      selectedAccountId.value = accounts.value[0].id;
+      selectedAccountId.value = accounts.value.find(a=>a.id===requestedAccountId())?.id ?? accounts.value[0].id;
       await loadTunnels();
     }
   } catch {

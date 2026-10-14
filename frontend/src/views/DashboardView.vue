@@ -1,362 +1,408 @@
 <template>
-  <div class="dashboard-page">
-    <n-space align="center" justify="space-between" style="width: 100%" :wrap="true">
-      <n-space align="center">
-        <n-h2 style="margin: 0">{{ t('dashboard.title') }}</n-h2>
-        <n-tag size="small" type="info">{{ t('dashboard.todayQuota') }}</n-tag>
-      </n-space>
-      <n-space align="center">
-        <n-select
-          v-model:value="sortBy"
-          :options="sortOptions"
-          style="width: 160px"
-        />
-        <n-input
-          v-model:value="searchQuery"
-          :placeholder="t('dashboard.searchAccounts')"
-          clearable
-          style="width: 200px"
-        />
-        <n-button
-          secondary
-          type="primary"
-          :loading="quotaStore.syncing"
-          @click="quotaStore.fetchQuota(true)"
-        >
-          {{ quotaStore.syncing ? t('dashboard.syncingQuota') : t('dashboard.syncQuota') }}
-        </n-button>
-      </n-space>
-    </n-space>
-
-    <n-space v-if="globalStats.totalAccounts > 0" style="margin: 12px 0; flex-shrink: 0" :wrap="true">
-      <n-tag>{{ globalStats.totalAccounts }} {{ t('dashboard.accounts') }}</n-tag>
-      <n-tag v-if="globalStats.aiExhausted > 0" type="error">🤖 {{ globalStats.aiExhausted }}</n-tag>
-      <n-tag v-if="globalStats.browserExhausted > 0" type="error">🖥️ {{ globalStats.browserExhausted }}</n-tag>
-      <n-tag type="info">
-        AI {{ formatCompact(globalStats.aiNeuronsTotal) }} · W {{ formatCompact(globalStats.workersRequestsTotal) }} · R {{ formatCompact(globalStats.browserRenderTotal) }}s
-      </n-tag>
-    </n-space>
-
-
-
-
-      <n-spin :show="quotaStore.loading" style="flex-shrink: 0; width: 100%">
-      <div class="card-grid-scroll" style="width: 100%" :style="{ maxHeight: isMobile ? '150px' : '200px' }">
-
-        <n-grid
-          v-if="quotaWithResources.length > 0"
-          cols="1 s:2 m:5 l:6 xl:8"
-          :x-gap="8"
-          :y-gap="8"
-          responsive="screen"
-          style="width: 100%"
-        >
-        <n-gi v-for="acct in quotaWithResources" :key="acct.accountId">
-          <CompactAccountCard :account-name="acct.accountName" :resources="acct.resources" />
-        </n-gi>
-      </n-grid>
+  <div class="overview-page">
+    <header class="overview-header">
+      <div>
+        <h2>{{ t('overview.title') }}</h2><div class="muted">
+          v{{ version || '—' }} · {{ t('overview.localHealth') }}: {{ overview ? t('overview.states.ready') : '—' }} · {{ t('overview.updated') }} {{ time(overview?.fetchedAt) }}
+        </div>
       </div>
-      <n-empty v-if="!quotaStore.loading && quotaWithResources.length === 0" :description="t('dashboard.noAccountData')" />
-    </n-spin>
-
-    <n-h3 style="margin: 0; flex-shrink: 0">{{ t('dashboard.recentLogs') }}</n-h3>
-    <n-space style="flex-shrink: 0" :wrap="true" align="center" :size="8">
+      <n-button
+        :loading="busy.overview"
+        @click="reload"
+      >
+        {{ t('common.refresh') }}
+      </n-button>
+    </header>
+    <div class="overview-filters">
       <n-select
-        v-model:value="logFilter.action"
-        :options="actionOptions"
-        :placeholder="t('dashboard.actionType')"
+        v-model:value="accountId"
         clearable
         filterable
-        size="small"
-        style="width: 160px"
+        :options="accountOptions"
+        :placeholder="t('overview.allAccounts')"
       />
-      <n-date-picker
-        v-model:value="logFilter.startDate"
-        type="date"
-        value-format="yyyy-MM-dd"
-        :placeholder="t('dashboard.startDate')"
-        clearable
-        size="small"
-        style="width: 140px"
+      <n-select
+        v-model:value="product"
+        :options="productOptions"
       />
-      <n-date-picker
-        v-model:value="logFilter.endDate"
-        type="date"
-        value-format="yyyy-MM-dd"
-        :placeholder="t('dashboard.endDate')"
-        clearable
+      <n-radio-group
+        v-model:value="days"
         size="small"
-        style="width: 140px"
+      >
+        <n-radio-button :value="7">
+          7 {{ t('overview.days') }}
+        </n-radio-button><n-radio-button :value="30">
+          30 {{ t('overview.days') }}
+        </n-radio-button>
+      </n-radio-group>
+    </div>
+    <n-alert
+      v-if="errors.overview"
+      type="error"
+      :title="t('overview.moduleError')"
+    >
+      {{ errors.overview }}
+    </n-alert>
+    <div class="overview-cards">
+      <button
+        class="overview-card"
+        @click="go('/accounts')"
+      >
+        <span>{{ t('overview.accounts') }}</span><strong>{{ overview?.counts.bindings ?? '—' }}</strong><p>{{ t('overview.realAccounts') }} {{ overview?.counts.cloudflareAccounts ?? '—' }}</p><small>{{ t('overview.verified') }} {{ overview?.counts.verified ?? '—' }} · {{ t('overview.enabled') }} {{ overview?.counts.enabled ?? '—' }} · {{ t('overview.disabled') }} {{ overview?.counts.disabled ?? '—' }} · {{ t('overview.unverified') }} {{ overview?.counts.unverified ?? '—' }}</small>
+      </button>
+      <button
+        v-for="group in visibleGroups"
+        :key="group.key"
+        class="overview-card"
+        @click="go(group.route)"
+      >
+        <span>{{ t(`overview.${group.key}`) }}</span>
+        <div
+          v-for="key in group.metrics"
+          :key="key"
+          class="metric-line"
+        >
+          <b>{{ t(`overview.metrics.${key}`) }}</b><strong>{{ metricValue(key) }}</strong><n-tag
+            size="small"
+            :type="metric(key)?.state === 'ready' ? 'success' : 'default'"
+          >
+            {{ t(`overview.states.${metric(key)?.state ?? (busy.resources?'loading':'unknown')}`) }}
+          </n-tag>
+        </div>
+        <p
+          v-for="key in group.metrics"
+          :key="`coverage-${key}`"
+          class="metric-coverage"
+        >
+          {{ t(`overview.metrics.${key}`) }} · {{ t('overview.coverage') }} {{ metric(key)?.coveredAccounts ?? 0 }}/{{ metric(key)?.totalAccounts ?? '—' }} · {{ time(metric(key)?.lastSuccessAt) }}<template v-if="key==='zones'">
+            · Active {{ breakdownValue(key,'active') }} / Pending {{ breakdownValue(key,'pending') }} / Paused {{ breakdownValue(key,'paused') }}
+          </template><template v-if="key==='tunnels'">
+            · Healthy {{ breakdownValue(key,'healthy') }} / {{ t('overview.unknownOrAbnormal') }} {{ breakdownValue(key,'abnormalOrUnknown') }}
+          </template>
+        </p>
+        <small>{{ t('overview.snapshotSource') }}</small>
+      </button>
+      <button
+        class="overview-card"
+        @click="attentionElement?.scrollIntoView({behavior:'smooth'})"
+      >
+        <span>{{ t('overview.attention') }}</span><strong>{{ overview && resources ? issues.length : '—' }}</strong><p>{{ t('overview.knownIssues') }}</p><small>{{ t('overview.unknownNotice') }}</small>
+      </button>
+    </div>
+    <n-alert
+      v-if="errors.resources"
+      type="warning"
+      :title="t('overview.moduleError')"
+    >
+      {{ errors.resources }}
+    </n-alert>
+    <n-card size="small">
+      <div class="collection-toolbar">
+        <div>
+          <strong>{{ t('overview.resourceCollection') }}</strong><p class="muted">
+            {{ t('overview.collectionHint') }}
+          </p>
+        </div><n-space>
+          <n-button
+            v-if="!collecting"
+            size="small"
+            :disabled="!overview"
+            @click="collect(false)"
+          >
+            {{ t('overview.collectMissing') }}
+          </n-button><n-button
+            v-if="!collecting"
+            size="small"
+            :disabled="!overview"
+            @click="collect(true)"
+          >
+            {{ t('overview.forceCollect') }}
+          </n-button><n-button
+            v-else
+            size="small"
+            @click="pauseCollection"
+          >
+            {{ t('overview.pause') }}
+          </n-button><span v-if="progress.total">{{ progress.done }}/{{ progress.total }} · {{ progress.label }}</span>
+        </n-space>
+      </div>
+    </n-card>
+    <section>
+      <div class="section-heading">
+        <h3>{{ t('overview.usageTrends') }}</h3><span class="muted">UTC · {{ t('overview.usageDisclaimer') }}</span>
+      </div>
+      <n-alert
+        v-if="errors.trends"
+        type="warning"
+      >
+        {{ errors.trends }}
+      </n-alert>
+      <div
+        v-else
+        class="trend-grid"
+      >
+        <n-card
+          v-for="key in usageKeys"
+          :key="key"
+          size="small"
+        >
+          <n-skeleton
+            v-if="busy.trends && !trends"
+            height="145px"
+          /><UsageTrend
+            v-else
+            :title="t(`overview.metrics.${key}`)"
+            :unit="key==='browser_render_seconds' ? t('overview.seconds') : key==='ai_neurons' ? 'Neurons' : t('overview.requests')"
+            :points="usagePoints(key)"
+          />
+        </n-card>
+      </div>
+    </section>
+    <section class="audit-trends">
+      <n-card
+        size="small"
+        :title="t('overview.auditTrends')"
+      >
+        <p class="muted">
+          {{ t('overview.auditDisclaimer') }} · UTC
+        </p><div class="trend-grid two">
+          <UsageTrend
+            :title="t('overview.success')"
+            :unit="t('overview.operations')"
+            :points="auditPoints('success')"
+          /><UsageTrend
+            :title="t('overview.failure')"
+            :unit="t('overview.operations')"
+            :points="auditPoints('error')"
+          />
+        </div><div class="action-distribution">
+          <n-tag
+            v-for="item in trends?.audit.actions.slice(0,10)"
+            :key="item.action"
+            size="small"
+          >
+            {{ actionLabel(item.action) }} {{ item.count }}
+          </n-tag>
+        </div>
+      </n-card>
+    </section>
+    <section ref="attentionElement">
+      <div class="section-heading">
+        <h3>{{ t('overview.attention') }}</h3><span class="muted">{{ t('overview.knownIssues') }}</span>
+      </div><n-empty
+        v-if="!issues.length"
+        :description="t('overview.noKnownIssues')"
+      /><div
+        v-else
+        class="attention-list"
+      >
+        <button
+          v-for="issue in issues.slice(0,8)"
+          :key="issue.id"
+          class="attention-item"
+          @click="go(issue.route,issue.accountId)"
+        >
+          <n-tag
+            size="small"
+            :type="issue.severity==='critical'?'error':issue.severity==='warning'?'warning':'info'"
+          >
+            {{ t(`overview.severity.${issue.severity}`) }}
+          </n-tag><b>{{ t(`overview.issueKinds.${issue.kind}`) }}</b><span>{{ issue.name }} · {{ issue.source }} · {{ issue.state }}</span><small>{{ time(issue.detectedAt) }}</small>
+        </button>
+      </div><p class="muted">
+        {{ t('overview.remoteHealthNotice') }}
+      </p>
+    </section>
+    <section>
+      <div class="section-heading">
+        <h3>{{ t('overview.accountSummary') }}</h3><n-input
+          v-model:value="search"
+          clearable
+          :placeholder="t('overview.searchAccounts')"
+          style="max-width:260px"
+        />
+      </div><n-data-table
+        :columns="accountColumns"
+        :data="filteredAccounts"
+        :pagination="{pageSize:10}"
+        :row-key="(a:DashboardAccount)=>a.id"
+        :scroll-x="1060"
+        size="small"
       />
-      <n-button size="small" type="primary" :loading="loadingLogs" @click="fetchLogs">{{ t('dashboard.query') }}</n-button>
-    </n-space>
-    <AutoFitTable
-      class="dashboard-log-table"
-      :columns="logColumns"
-      :data="auditLogs"
-      :loading="loadingLogs"
-      :scroll-x="scrollX"
-    />
+    </section>
+    <section>
+      <div class="section-heading">
+        <h3>{{ t('overview.recentActivity') }}</h3><n-button
+          text
+          type="primary"
+          @click="go('/audit-logs')"
+        >
+          {{ t('overview.allAudit') }}
+        </n-button>
+      </div><n-alert
+        v-if="errors.activity"
+        type="warning"
+      >
+        {{ errors.activity }}
+      </n-alert><n-empty
+        v-else-if="!activity.length"
+        :description="t('overview.noHistory')"
+      /><div
+        v-else
+        class="activity-list"
+      >
+        <div
+          v-for="event in activity"
+          :key="event.id"
+        >
+          <small>{{ time(event.created_at) }}</small><span>{{ event.account_name || '—' }}</span><b>{{ actionLabel(event.action) }}</b><span class="activity-target">{{ event.target || '—' }}</span><n-tag
+            size="small"
+            :type="event.status==='success'?'success':'error'"
+          >
+            {{ event.status==='success'?t('overview.success'):t('overview.failure') }}
+          </n-tag>
+        </div>
+      </div>
+    </section>
+    <n-drawer
+      :show="!!detailAccount"
+      :width="560"
+      style="max-width:100vw"
+      @update:show="(show:boolean)=>{if(!show)detailAccountId=null;}"
+    >
+      <n-drawer-content
+        :title="t('overview.accountDetails')"
+        closable
+        body-content-style="overflow-wrap:anywhere"
+      >
+        <template v-if="detailAccount">
+          <n-descriptions
+            :column="1"
+            bordered
+          >
+            <n-descriptions-item :label="t('overview.accounts')">
+              {{ detailAccount.name }} (#{{ detailAccount.id }})
+            </n-descriptions-item>
+            <n-descriptions-item label="CF Account ID">
+              {{ detailAccount.account_id || t('overview.states.unknown') }}
+            </n-descriptions-item>
+            <n-descriptions-item :label="t('overview.credential')">
+              {{ detailAccount.credential_name || '—' }} (#{{ detailAccount.credential_id || '—' }})
+            </n-descriptions-item>
+            <n-descriptions-item :label="t('overview.status')">
+              {{ detailAccount.access_status }} · {{ detailAccount.is_enabled===0?t('overview.disabled'):detailAccount.is_active===0?t('overview.unverified'):t('overview.enabled') }}
+            </n-descriptions-item>
+            <n-descriptions-item :label="t('overview.features')">
+              {{ detailAccount.enabled_features }}
+            </n-descriptions-item>
+            <n-descriptions-item :label="t('overview.lastCheck')">
+              {{ detailAccount.access_status==='available'?time(detailAccount.last_checked_at):'—' }}
+            </n-descriptions-item>
+            <n-descriptions-item
+              v-for="m in detailMetrics"
+              :key="m.metric"
+              :label="t(`overview.metrics.${m.metric}`)"
+            >
+              {{ m.value ?? '—' }} · {{ t(`overview.states.${m.state}`) }} · {{ time(m.lastSuccessAt) }}
+            </n-descriptions-item>
+          </n-descriptions>
+          <p
+            class="muted"
+            style="margin-top:12px"
+          >
+            {{ t('overview.snapshotSource') }} · {{ t('overview.remoteHealthNotice') }}
+          </p>
+          <n-button
+            style="margin-top:12px"
+            type="primary"
+            @click="go('/accounts',detailAccount.id)"
+          >
+            {{ t('overview.manageAccount') }}
+          </n-button>
+        </template>
+      </n-drawer-content>
+    </n-drawer>
   </div>
 </template>
-
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, reactive } from 'vue';
-import { createRequestScope } from '../utils/requestScope';
+import { inject, type Ref, computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { NButton } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
-import { useQuotaStore } from '../stores/quotaStore';
-import apiClient from '../api/client';
-import type { DataTableColumns } from 'naive-ui';
-import { formatCN, formatCNShort } from '../utils/dateFormat';
-import CompactAccountCard from '../components/CompactAccountCard.vue';
-import AutoFitTable from '../components/AutoFitTable.vue';
-
-const { t } = useI18n();
-const requests = createRequestScope();
-
-const quotaStore = useQuotaStore();
-const searchQuery = ref('');
-const sortBy = ref('name');
-const windowWidth = ref(window.innerWidth);
-
-function onResize() {
-  windowWidth.value = window.innerWidth;
+import { useRouter } from 'vue-router';
+import { dashboardApi, type Overview, type ResourceOverview, type Trends } from '../api/dashboard';
+import { RESOURCE_METRICS, supports, type ResourceMetric, type DashboardAccount, type Attention } from '../shared/dashboardData';
+import type { AuditEvent } from '../shared/auditQueries';
+import { formatCN } from '../utils/dateFormat';
+import { createRequestScope } from '../utils/requestScope';
+import { confirmedResourceKeys, collectionKey } from '../utils/dashboardCollection';
+import UsageTrend from '../components/UsageTrend.vue';
+const {t,te}=useI18n(), router=useRouter();
+const overview=ref<Overview>(),resources=ref<ResourceOverview>(),trends=ref<Trends>(),activity=ref<AuditEvent[]>([]);
+const version=inject<Ref<string>>('appVersion',ref(''));
+const accountId=ref<number|null>(null),product=ref('all'),days=ref(7),search=ref('');
+const detailAccountId=ref<number|null>(null);
+const detailAccount=computed(()=>overview.value?.accounts.find(a=>a.id===detailAccountId.value));
+const detailMetrics=computed(()=>resources.value?.accounts.find(a=>a.accountId===detailAccountId.value)?.metrics??[]);
+const busy=reactive<Record<string,boolean>>({}),errors=reactive<Record<string,string>>({});
+const requests=createRequestScope(()=>String(accountId.value));let controller=new AbortController(),collectionEpoch=0;
+const collecting=ref(false),progress=reactive({done:0,total:0,label:''}),attentionElement=ref<HTMLElement>();
+const groups=[{key:'zones',route:'/dns',metrics:['zones']},{key:'workersPages',route:'/workers',metrics:['workers','pages']},{key:'tunnels',route:'/tunnels',metrics:['tunnels']},{key:'storage',route:'/storage',metrics:['kv','d1','r2']}];
+const visibleGroups=computed(()=>groups.filter(g=>product.value==='all'||g.key===product.value));
+const productOptions=computed(()=>[{label:t('overview.allProducts'),value:'all'},...groups.map(g=>({label:t(`overview.${g.key}`),value:g.key}))]);
+const accountOptions=computed(()=>(allAccounts.value.length?allAccounts.value:overview.value?.accounts??[]).map(a=>({label:`${a.name}｜${a.credential_name??`#${a.credential_id}`}`,value:a.id})));
+// Preserve filter choices when the overview response contains only the selected binding.
+const allAccounts=ref<DashboardAccount[]>([]);
+watch(()=>overview.value?.accounts,rows=>{if(rows&&accountId.value===null)allAccounts.value=rows;});
+const issues=computed<Attention[]>(()=>[...(overview.value?.issues??[]),...(resources.value?.issues??[])].sort((a,b)=>({critical:0,warning:1,info:2}[a.severity]-{critical:0,warning:1,info:2}[b.severity])));
+const usageKeys=['workers_requests','ai_neurons','browser_render_seconds'];
+const time=(value:unknown)=>value?formatCN(value as string|number):'—';
+const metric=(key:string)=>resources.value?.metrics.find(m=>m.metric===key);
+const breakdownValue=(key:string,part:string)=>metric(key)?.value===null||!metric(key)?'—':metric(key)?.breakdown[part]??0;
+const metricValue=(key:string)=>{const m=metric(key);return m?.value===null||!m?'—':`${m.complete?'':t('overview.atLeast')}${m.value.toLocaleString()}`;};
+const usagePoints=(key:string)=>(trends.value?.usage??[]).filter(p=>p.resource===key);
+const auditPoints=(key:'success'|'error')=>(trends.value?.audit.daily??[]).map(p=>({date:p.date,count:p[key]}));
+const actionLabel=(action:string)=>te(`dashboard.actions.${action}`)?t(`dashboard.actions.${action}`):action;
+function go(path:string,id?:number){router.push({path,query:(id||accountId.value)?{accountId:id||accountId.value!}:{}});}
+async function load(module:'overview'|'resources'|'trends'|'activity'){
+  const request=requests.begin(module,()=>`${accountId.value}:${module==='trends'?days.value:''}`);busy[module]=true;errors[module]='';
+  try{const params={...(accountId.value?{accountId:accountId.value}:{}),days:days.value};
+    if(module==='overview'){const {data}=await dashboardApi.overview(params,controller.signal);if(request.current())overview.value=data;}
+    if(module==='resources'){const {data}=await dashboardApi.resources(params,controller.signal);if(request.current())resources.value=data;}
+    if(module==='trends'){const {data}=await dashboardApi.trends(params,controller.signal);if(request.current())trends.value=data;}
+    if(module==='activity'){const {data}=await dashboardApi.activity(params,controller.signal);if(request.current())activity.value=data.items;}
+  }catch(e){if(request.current()&&!controller.signal.aborted)errors[module]=(e as Error).message;}finally{if(request.current())busy[module]=false;}
 }
-
-const sortOptions = computed(() => [
-  { label: t('dashboard.sortNameAsc'), value: 'name' },
-  { label: t('dashboard.sortNameDesc'), value: 'name-desc' },
-  { label: t('dashboard.sortUsageDesc'), value: 'usage-desc' },
-  { label: t('dashboard.sortUsageAsc'), value: 'usage-asc' },
+function reload(){void Promise.allSettled(['overview','resources','trends','activity'].map(m=>load(m as 'overview')));}
+function pauseCollection(){collectionEpoch++;collecting.value=false;}
+async function collect(refresh:boolean){
+  const epoch=++collectionEpoch;collecting.value=true;
+  const keys=visibleGroups.value.flatMap(g=>g.metrics) as ResourceMetric[];
+  const jobs=(overview.value?.accounts??[]).flatMap(a=>RESOURCE_METRICS.filter(m=>keys.includes(m)&&supports(a,m)).map(metric=>({account:a,metric})));
+  progress.done=0;progress.total=jobs.length;
+  const confirmed=refresh?new Set<string>():confirmedResourceKeys(overview.value?.accounts??[],resources.value?.accounts??[]);
+  try{for(const job of jobs){if(epoch!==collectionEpoch)break;const key=collectionKey(job.account,job.metric);if(confirmed.has(key)){progress.done++;continue;}progress.label=`${job.account.name} · ${t(`overview.metrics.${job.metric}`)}`;try{const {data}=await dashboardApi.collect(job.account.id,job.metric,refresh,controller.signal);if(!data.error_kind&&data.value!==null)confirmed.add(key);}catch{/* independent failures remain visible in local summaries */}if(epoch!==collectionEpoch)break;progress.done++;await load('resources');}}
+  finally{if(epoch===collectionEpoch){collecting.value=false;progress.label=t('overview.collectionDone');}}
+}
+const filteredAccounts=computed(()=>(overview.value?.accounts??[]).filter(a=>`${a.name} ${a.account_id} ${a.credential_name}`.toLowerCase().includes(search.value.toLowerCase())));
+const rowCount=(id:number,key:string)=>{const m=resources.value?.accounts.find(a=>a.accountId===id)?.metrics.find(m=>m.metric===key);return m?.value??'—';};
+const accountColumns=computed(()=>[
+  {title:t('overview.accounts'),key:'name',width:190,sorter:(a:DashboardAccount,b:DashboardAccount)=>a.name.localeCompare(b.name),render:(a:DashboardAccount)=>h(NButton,{text:true,type:'primary',onClick:()=>{detailAccountId.value=a.id;}},()=>`${a.name}｜${a.credential_name??'#'+a.credential_id}`)},
+  {title:'CF Account',key:'account_id',width:150,render:(a:DashboardAccount)=>a.account_id?`${a.account_id.slice(0,6)}…${a.account_id.slice(-4)}`:'—'},
+  {title:t('overview.status'),key:'access_status',width:130,render:(a:DashboardAccount)=>a.is_enabled===0?t('overview.disabled'):a.access_status==='available'?t('overview.states.ready'):a.access_status},
+  {title:'Workers / Pages',key:'workers',width:140,render:(a:DashboardAccount)=>`${rowCount(a.id,'workers')} / ${rowCount(a.id,'pages')}`},
+  {title:'Zones',key:'zones',width:80,render:(a:DashboardAccount)=>rowCount(a.id,'zones')},
+  {title:t('overview.todayRecorded'),key:'usage',width:220,render:(a:DashboardAccount)=>(overview.value?.quota??[]).filter(q=>q.account_id===a.id).map(q=>`${t(`overview.metrics.${q.resource}`)}: ${q.count.toLocaleString()}`).join(' · ')||'—'},
+  {title:t('overview.lastCheck'),key:'last_checked_at',width:170,render:(a:DashboardAccount)=>a.access_status==='available'?time(a.last_checked_at):'—'},
 ]);
-
-function getMaxUsage(account: any) {
-  return Math.max(
-    0,
-    ...account.resources.map((r: any) => {
-      if (!r.limit) return 0;
-      return Math.min(100, Math.round(((r.count || 0) / r.limit) * 100));
-    }),
-  );
-}
-
-const quotaWithResources = computed(() => {
-  let accounts = quotaStore.quota.filter(
-    (acct: any) => acct.resources && acct.resources.length > 0,
-  );
-
-  if (searchQuery.value) {
-    const query = searchQuery.value.toLowerCase();
-    accounts = accounts.filter((acct: any) =>
-      acct.accountName.toLowerCase().includes(query),
-    );
-  }
-
-  accounts = [...accounts].sort((a: any, b: any) => {
-    switch (sortBy.value) {
-      case 'name':
-        return a.accountName.localeCompare(b.accountName);
-      case 'name-desc':
-        return b.accountName.localeCompare(a.accountName);
-      case 'usage-desc':
-        return getMaxUsage(b) - getMaxUsage(a);
-      case 'usage-asc':
-        return getMaxUsage(a) - getMaxUsage(b);
-      default:
-        return 0;
-    }
-  });
-
-  return accounts;
-});
-
-function formatCompact(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
-  if (n >= 1_000) return Math.round(n / 1_000) + 'K';
-  return n.toString();
-}
-
-const globalStats = computed(() => {
-  const accounts = quotaStore.quota.filter(
-    (acct: any) => acct.resources && acct.resources.length > 0,
-  );
-  const totalAccounts = accounts.length;
-
-  const aiExhausted = accounts.filter((acct: any) =>
-    acct.resources.some((r: any) => r.resource === 'ai_neurons' && r.exhausted),
-  ).length;
-
-  const browserExhausted = accounts.filter((acct: any) =>
-    acct.resources.some((r: any) => r.resource === 'browser_render_seconds' && r.exhausted),
-  ).length;
-
-  const aiNeuronsTotal = accounts.reduce((sum: number, acct: any) => {
-    const aiResource = acct.resources.find(
-      (r: any) => r.resource === 'ai_neurons',
-    );
-    return sum + (aiResource?.count || 0);
-  }, 0);
-
-  const workersRequestsTotal = accounts.reduce((sum: number, acct: any) => {
-    const w = acct.resources.find(
-      (r: any) => r.resource === 'workers_requests',
-    );
-    return sum + (w?.count || 0);
-  }, 0);
-
-  const browserRenderTotal = accounts.reduce((sum: number, acct: any) => {
-    const r = acct.resources.find(
-      (r: any) => r.resource === 'browser_render_seconds',
-    );
-    return sum + (r?.count || 0);
-  }, 0);
-
-  return { totalAccounts, aiExhausted, browserExhausted, aiNeuronsTotal, workersRequestsTotal, browserRenderTotal };
-});
-
-const auditLogs = ref<any[]>([]);
-const loadingLogs = ref(false);
-const ACTION_KEYS = [
-  'ai_chat_completion', 'browser_render', 'create_account', 'import_account',
-  'delete_account', 'update_features', 'test_account', 'view_credentials',
-  'clear_exhausted', 'create_dns', 'update_dns', 'delete_dns',
-  'deploy_worker', 'delete_worker', 'deploy_pages', 'delete_pages',
-  'batch_deploy', 'batch_deploy_pages', 'env_sync', 'kv_write',
-  'task_create', 'task_delete', 'task_run',
-];
-const actionOptions = computed(() => ACTION_KEYS.map(k => ({ label: t(`dashboard.actions.${k}`), value: k })));
-function actionLabel(action: string): string {
-  return ACTION_KEYS.includes(action) ? t(`dashboard.actions.${action}`) : action;
-}
-function statusLabel(status: string): string {
-  if (status === 'success') return t('dashboard.statusSuccess');
-  if (status === 'error') return t('dashboard.statusError');
-  return status;
-}
-const logFilter = reactive<{ action: string | null; startDate: number | null; endDate: number | null }>({
-  action: null,
-  startDate: null,
-  endDate: null,
-});
-
-async function fetchLogs() {
-  loadingLogs.value = true;
-  const request = requests.begin('fetchLogs');
-  try {
-    const params: Record<string, string> = {};
-    if (logFilter.action) params.action = logFilter.action;
-    if (logFilter.startDate) params.startDate = toDateStr(logFilter.startDate);
-    if (logFilter.endDate) params.endDate = toDateStr(logFilter.endDate);
-    const { data } = await apiClient.get('/audit-log', { params });
-    if (!request.current()) return;
-    auditLogs.value = data;
-  } catch {
-    if (!request.current()) return;
-    auditLogs.value = [];
-  } finally {
-    if (request.current()) loadingLogs.value = false;
-  }
-}
-
-function toDateStr(ts: number): string {
-  const d = new Date(ts);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-const isMobile = computed(() => windowWidth.value < 640);
-
-const logColumns = computed<DataTableColumns<any>>(() => {
-  if (isMobile.value) {
-    // 移动端：列宽保持可读并统一 ellipsis 不换行（此前列宽过窄导致内容折行、行高膨胀）
-    return [
-      { title: t('dashboard.time'), key: 'created_at', width: 90, ellipsis: { tooltip: true }, render: (row) => formatCNShort(row.created_at) },
-      { title: t('dashboard.account'), key: 'account_name', width: 85, ellipsis: { tooltip: true }, render: (row) => row.account_name || '-' },
-      { title: t('dashboard.action'), key: 'action', width: 110, ellipsis: { tooltip: true }, render: (row) => actionLabel(row.action) },
-      { title: t('dashboard.target'), key: 'target', width: 130, ellipsis: { tooltip: true } },
-      { title: t('dashboard.detail'), key: 'detail', width: 100, minWidth: 80, ellipsis: { tooltip: true } },
-      { title: t('dashboard.status'), key: 'status', width: 60, render: (row) => statusLabel(row.status) },
-    ];
-  }
-  return [
-    { title: t('dashboard.time'), key: 'created_at', width: 150, render: (row) => formatCN(row.created_at) },
-    { title: t('dashboard.account'), key: 'account_name', width: 120, render: (row) => row.account_name || '-' },
-    { title: t('dashboard.action'), key: 'action', width: 150, render: (row) => actionLabel(row.action) },
-    { title: t('dashboard.target'), key: 'target', width: 150, ellipsis: { tooltip: true } },
-    { title: t('dashboard.detail'), key: 'detail', width: 180, minWidth: 120, ellipsis: { tooltip: true } },
-    { title: t('dashboard.status'), key: 'status', width: 80, render: (row) => statusLabel(row.status) },
-  ];
-});
-
-const scrollX = computed(() => {
-  const colWidths = isMobile.value ? [90, 85, 110, 130, 100, 60] : [180, 120, 150, 150, 160, 80];
-  return colWidths.reduce((a, b) => a + b, 0);
-});
-
-
-
-onMounted(async () => {
-  window.addEventListener('resize', onResize);
-  quotaStore.fetchQuota();
-  await fetchLogs();
-});
-
-onUnmounted(() => {
-  window.removeEventListener('resize', onResize);
-});
+watch(accountId,()=>{detailAccountId.value=null;requests.invalidate();pauseCollection();progress.done=0;progress.total=0;progress.label='';overview.value=undefined;resources.value=undefined;trends.value=undefined;activity.value=[];reload();});
+watch(days,()=>{trends.value=undefined;void load('trends');});
+function clearSession(){detailAccountId.value=null;requests.invalidate();controller.abort();controller=new AbortController();pauseCollection();overview.value=undefined;resources.value=undefined;trends.value=undefined;activity.value=[];allAccounts.value=[];}
+onMounted(()=>{reload();window.addEventListener('auth-expired',clearSession);});
+onUnmounted(()=>{clearSession();window.removeEventListener('auth-expired',clearSession);});
 </script>
-
 <style scoped>
-.dashboard-page {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  gap: 12px;
-}
+.overview-page{width:100%;max-width:100%;grid-template-columns:minmax(0,1fr);box-sizing:border-box}
+.overview-page>*{min-width:0;max-width:100%;box-sizing:border-box}
 
-.log-table-wrapper {
-  max-width: 100%;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  flex: 1;
-  min-height: 0;
-  border-radius: 12px;
-  background: var(--glass-card-bg);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-border-subtle);
-  box-shadow: var(--glass-shadow);
-  padding: 10px 14px;
-}
-
-.card-grid-scroll {
-  max-height: 200px;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  -webkit-overflow-scrolling: touch;
-  padding: 4px 2px;
-}
-
-/* 移动端：日志表格限高并内部滚动。
-   移动端页面是文档流布局（没有确定高度的父级），表格的 flex-height 失效，
-   会把全部日志行展开成上千像素，整页被撑得极长。 */
-@media (max-width: 768px) {
-  .autofit-table-wrapper.dashboard-log-table {
-    flex: 0 0 auto;
-    /* 视口高度减去上方内容（标题 / 额度卡片 / 日志筛选）与页脚，
-       让表格刚好占满剩余一屏并内部滚动 */
-    height: calc(100vh - 550px);
-    min-height: 240px;
-  }
-}
-
-:global(.n-data-table) {
-  height: 100% !important;
-}
-
-:global(.n-tooltip) {
-  max-width: 400px !important;
-  word-break: break-all;
-}
-
+.overview-page{display:grid;gap:22px;min-width:0;padding-bottom:20px}.overview-header,.section-heading,.collection-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}h2,h3,p{margin:0}h2{font-size:24px}h3{font-size:17px}.muted,.metric-coverage{font-size:12px;opacity:.65}.overview-filters{display:grid;grid-template-columns:minmax(180px,320px) minmax(150px,220px) auto;gap:12px;align-items:center}.overview-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.overview-card{font:inherit;color:inherit;text-align:left;border:1px solid var(--border-color,rgba(128,128,128,.2));border-radius:10px;background:var(--glass-card-bg);padding:18px;display:flex;flex-direction:column;gap:10px;cursor:pointer;min-width:0}.overview-card:hover{border-color:var(--primary-color,#18a058)}.overview-card>strong{font-size:30px;font-weight:650}.overview-card>span{font-weight:600}.overview-card small,.metric-coverage{font-size:11px;opacity:.65;overflow-wrap:anywhere}.metric-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.metric-line b{font-size:12px;opacity:.7}.metric-line strong{font-size:22px;margin-left:auto}.trend-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.trend-grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}.section-heading{margin-bottom:12px}.action-distribution{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.attention-list{display:grid;gap:8px}.attention-item{font:inherit;color:inherit;background:transparent;border:1px solid rgba(128,128,128,.18);border-radius:8px;display:flex;gap:10px;align-items:center;text-align:left;padding:12px;cursor:pointer;flex-wrap:wrap}.attention-item span{overflow-wrap:anywhere}.attention-item small{margin-left:auto;opacity:.6}.activity-list{display:grid;gap:1px}.activity-list>div{display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(128,128,128,.15);padding:12px 0;flex-wrap:wrap}.activity-target{min-width:0;flex:1;overflow-wrap:anywhere}.activity-list small{opacity:.65}.collection-toolbar p{margin-top:4px}@media(max-width:1100px){.overview-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.trend-grid{grid-template-columns:1fr}.overview-filters{grid-template-columns:1fr 1fr}.overview-filters>*:last-child{grid-column:1/-1}}@media(max-width:600px){.overview-cards,.trend-grid.two,.overview-filters{grid-template-columns:1fr}.overview-header h2{font-size:21px}.overview-card{padding:15px}.overview-page{gap:18px}}
 </style>

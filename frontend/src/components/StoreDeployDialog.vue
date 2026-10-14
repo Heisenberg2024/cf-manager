@@ -566,7 +566,7 @@ watch(isMultiAccount, (multi) => {
 
 async function loadAccounts() {
   try {
-    const { data } = await accountsApi.getAll();
+    const { data } = await accountsApi.getOptions('workers');
     accounts.value = Array.isArray(data) ? data : ((data as any).accounts || []);
   } catch {}
 }

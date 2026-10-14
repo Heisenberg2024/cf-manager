@@ -3,7 +3,7 @@ import type { ReadMetric, ReadScheduler } from './readScheduler';
 import { errorDetails } from './cfErrors';
 
 export interface CacheState { state: 'fresh' | 'miss' | 'stale'; fetchedAt: number; error?: string }
-type Entry = { accountId: number; cfAccountId: string; scope: string; value: unknown; fetchedAt: number; bytes: number; error?: string };
+type Entry = { accountId: number; cfAccountId: string; scope: string; value: unknown; fetchedAt: number; bytes: number; error?: string; failedAt?:number };
 /** Bounded display snapshots. Ownership and write preconditions are checked outside this cache. */
 export class BoundReadCache {
   private entries = new Map<string, Entry>();
@@ -21,7 +21,11 @@ export class BoundReadCache {
     this.revision++;
     for (const [key, entry] of this.entries) if ((accountId === undefined || entry.accountId === accountId || (!!cfAccountId && entry.cfAccountId === cfAccountId)) && (!scope || entry.scope === scope || entry.scope.startsWith(`${scope}/`))) this.entries.delete(key);
   }
-  async read<T>(account: DnsBinding, scope: string, load: (signal: AbortSignal) => Promise<T>, options: { refresh?: boolean; signal?: AbortSignal; waitUntil?: (promise: Promise<unknown>) => void } = {}): Promise<{ value: T; cache: CacheState }> {
+  async peek<T>(account: DnsBinding, scope: string) {
+    const entry = this.entries.get(`${await bindingSignature(account)}:${scope}`);
+    return entry ? { value: structuredClone(entry.value) as T, fetchedAt: entry.fetchedAt, error: entry.error, failedAt:entry.failedAt } : undefined;
+  }
+  async read<T>(account: DnsBinding, scope: string, load: (signal: AbortSignal) => Promise<T>, options: { refresh?: boolean; background?:boolean; signal?: AbortSignal; waitUntil?: (promise: Promise<unknown>) => void } = {}): Promise<{ value: T; cache: CacheState }> {
     options.signal?.throwIfAborted();
     const revision = this.revision, key = `${await bindingSignature(account)}:${scope}`;
     options.signal?.throwIfAborted();
@@ -36,7 +40,7 @@ export class BoundReadCache {
         this.metric({event:'snapshot_loaded',accountId:account.id,durationMs:Date.now()-started});
         return {value: structuredClone(value),cache:{state:'miss' as const,fetchedAt:entry.fetchedAt}};
       } catch (error) {
-        if (revision === this.revision && cached && !options.signal?.aborted) cached.error = errorDetails(error).message;
+        if (revision === this.revision && cached && !options.signal?.aborted) {cached.error = errorDetails(error).message;cached.failedAt=Date.now();}
         this.metric({event:'snapshot_failed',accountId:account.id,status:errorDetails(error).statusCode,durationMs:Date.now()-started}); throw error;
       }
     };
@@ -47,7 +51,7 @@ export class BoundReadCache {
       this.metric({event:stale ? 'snapshot_stale' : 'snapshot_hit',accountId:account.id});
       return {value:structuredClone(cached.value) as T,cache:{state:stale ? 'stale' : 'fresh',fetchedAt:cached.fetchedAt,...(cached.error ? {error:cached.error} : {})}};
     }
-    return perform(false);
+    return perform(options.background??false);
   }
   private put(key: string, entry: Entry) {
     this.entries.delete(key);

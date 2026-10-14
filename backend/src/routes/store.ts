@@ -1,3 +1,5 @@
+import { boundedCatalogFetch, mapCatalogSources } from '../services/catalogReader';
+import { catalogReader, CATALOG_URLS } from '../services/catalogRuntime';
 import { mapConcurrent } from '../utils/concurrent';
 import { errorDetails } from '../services/cfErrors';
 import { Router, Request, Response, NextFunction } from 'express';
@@ -13,18 +15,10 @@ import { assertUrlSafe } from '../services/ssrfGuard';
 
 // 主源用 surge.sh：Surge 静态托管，更新即时生效，避免 jsDelivr 缓存 GitHub 主分支导致更新延迟。
 // 兜底顺序：surge.sh → jsDelivr → GitHub raw（GitHub raw 放最后，作为最终兜底）。
-const DEFAULT_CATALOG_URL = 'https://cf-store.surge.sh/catalog.json';
-const DEFAULT_CATALOG_FALLBACK_URLS = [
-  'https://cdn.jsdelivr.net/gh/hefy2027/cf-store@main/catalog.json',
-  'https://raw.githubusercontent.com/hefy2027/cf-store/main/catalog.json',
-];
-const DEFAULT_CATALOG_URLS = [DEFAULT_CATALOG_URL, ...DEFAULT_CATALOG_FALLBACK_URLS];
+const DEFAULT_CATALOG_URL=CATALOG_URLS[0]!;
 const DEFAULT_CATALOG_NAME = '官方源';
 
 const router = Router();
-
-// In-memory catalog cache for Docker version
-const catalogCache = new Map<number, Catalog>();
 
 // ============ Source CRUD ============
 
@@ -36,35 +30,17 @@ interface CatalogUrlTestResult {
   errorCode?: string;
   error?: string;
   etag?: string | null;
+  etagUrl?: string;
   json?: any;
 }
 
 async function testCatalogUrl(url: string): Promise<CatalogUrlTestResult> {
-  const isLocal = url?.startsWith('http://localhost:') || url?.startsWith('http://127.0.0.1:');
-  if (!url || (!url.startsWith('https://') && !isLocal)) {
-    return { ok: false, errorCode: 'VALIDATION_ERROR', error: 'url must be a valid HTTPS URL' };
-  }
-  let resp;
   try {
-    await assertUrlSafe(url);
-    resp = await fetch(url);
-  } catch (e: any) {
-    return { ok: false, errorCode: 'SSRF_BLOCKED', error: e.message || `无法连接: ${e.message}` };
-  }
-  if (!resp.ok) {
-    return { ok: false, status: resp.status, errorCode: 'FETCH_ERROR', error: `URL 不可达: HTTP ${resp.status}` };
-  }
-  let json: any;
-  try {
-    json = await resp.json();
-  } catch (e: any) {
-    return { ok: false, errorCode: 'PARSE_ERROR', error: `不是合法 JSON: ${e.message}` };
-  }
-  const result = validateCatalog(json);
-  if (!result.valid) {
-    return { ok: false, errorCode: 'INVALID_CATALOG', error: `不是有效的 catalog: ${result.errors.join('; ')}` };
-  }
-  return { ok: true, templateCount: Array.isArray(json.templates) ? json.templates.length : 0, etag: resp.headers.get('etag'), json };
+    const response=await boundedCatalogFetch(url,{safe:url=>assertUrlSafe(url),fetch:(url,init)=>fetch(url,init)});
+    const json=JSON.parse(response.text);const result=validateCatalog(json);
+    if(!result.valid)return {ok:false,errorCode:'INVALID_CATALOG',error:'Schema invalid'};
+    return {ok:true,templateCount:json.templates.length,etag:response.etag,etagUrl:response.url,json};
+  }catch(error){return {ok:false,errorCode:'FETCH_ERROR',error:(error as Error).message};}
 }
 
 router.get('/sources', (_req: Request, res: Response, next: NextFunction) => {
@@ -95,7 +71,7 @@ router.post('/sources', async (req: Request, res: Response, next: NextFunction) 
       return;
     }
     const id = createCatalogSource({ url, name });
-    catalogCache.set(id, test.json as Catalog);
+    await catalogReader.seed({id,url},test.json as Catalog,test.etag??null,test.etagUrl??url);
     if (test.etag) updateCatalogSource(id, { etag: test.etag, last_synced: new Date().toISOString(), last_status: 'ok', last_error: null });
     res.status(201).json({ id });
   } catch (err) { next(err); }
@@ -112,26 +88,9 @@ router.put('/sources/:id', async (req: Request, res: Response, next: NextFunctio
       return;
     }
     if (body.url && body.url !== source.url) {
-      try {
-        await assertUrlSafe(body.url);
-      } catch (e: any) {
-        res.status(e.statusCode || 403).json({ error: { code: 'SSRF_BLOCKED', message: e.message } });
-        return;
-      }
-      const resp = await fetch(body.url);
-      if (!resp.ok) { res.status(400).json({ error: { code: 'FETCH_ERROR', message: `URL 不可达: ${resp.status}` } }); return; }
-      const json: Catalog = await resp.json() as Catalog;
-      const result = validateCatalog(json);
-      if (!result.valid) {
-        res.status(400).json({ error: { code: 'INVALID_CATALOG', message: `不是有效的 catalog: ${result.errors.join('; ')}` } });
-        return;
-      }
-      catalogCache.set(id, json);
-      const etag = resp.headers.get('etag') as string | null;
-      updateCatalogSource(id, { ...body, etag: etag || null, last_synced: new Date().toISOString(), last_status: 'ok', last_error: null });
-    } else {
-      updateCatalogSource(id, body);
-    }
+      const test=await testCatalogUrl(body.url);if(!test.ok){res.status(400).json({error:{code:test.errorCode,message:test.error}});return;}
+      updateCatalogSource(id,{...body,etag:null});catalogReader.invalidate(id);await catalogReader.seed({...source,url:body.url},test.json,test.etag??null,test.etagUrl??body.url);
+    } else updateCatalogSource(id,body);
     res.json({ success: true });
   } catch (err) { next(err); }
 });
@@ -140,84 +99,22 @@ router.delete('/sources/:id', (req: Request, res: Response, next: NextFunction) 
   try {
     const id = parseInt(req.params.id as string, 10);
     deleteCatalogSource(id);
-    catalogCache.delete(id);
+    catalogReader.invalidate(id);
     res.json({ success: true });
   } catch (err) { next(err); }
 });
 
 // ============ Catalog Fetch ============
 
-async function fetchSourceCatalog(source: any): Promise<Catalog | null> {
-  // Check cache
-  const cached = catalogCache.get(source.id);
-  // 空目录（无模板）不视为有效命中：用户看到空白时应立即重新拉取，
-  // 而不是长期返回缓存中的空结果导致页面一直空白。
-  if (cached && cached.templates && cached.templates.length > 0) {
-    // Try refresh in background
-    refreshSourceInBackground(source).catch(e => appLogger.error(`[Store] refresh ${source.id}: ${e}`));
-    return cached;
-  }
-  return refreshSource(source);
-}
-
-// 官方默认源启用 fallback 链；用户自定义源只使用自己的 url
-function candidateUrls(source: any): string[] {
-  return source.is_default ? DEFAULT_CATALOG_URLS : [source.url];
-}
-
-async function refreshSource(source: any): Promise<Catalog | null> {
-  const urls = candidateUrls(source);
-  let lastError = '';
-  for (const url of urls) {
-    try {
-      await assertUrlSafe(url);
-      const headers: Record<string, string> = {};
-      // etag 仅对主记录 url 携带，避免跨地址 etag 误判
-      if (url === source.url && source.etag) headers['If-None-Match'] = source.etag;
-      const resp = await fetch(url, { headers });
-
-      if (resp.status === 304) {
-        updateCatalogSource(source.id, { last_synced: new Date().toISOString(), last_status: 'ok', last_error: null });
-        return catalogCache.get(source.id) || null;
-      }
-      if (!resp.ok) {
-        lastError = `HTTP ${resp.status} (${url})`;
-        continue;
-      }
-      const json: Catalog = await resp.json() as Catalog;
-      const result = validateCatalog(json);
-      if (!result.valid) {
-        lastError = `Schema invalid: ${result.errors.slice(0, 3).join('; ')} (${url})`;
-        continue;
-      }
-      catalogCache.set(source.id, json);
-      const etag = resp.headers.get('etag') as string | null;
-      updateCatalogSource(source.id, { etag: etag || null, last_synced: new Date().toISOString(), last_status: 'ok', last_error: null });
-      return json;
-    } catch (e: any) {
-      lastError = `${e.message} (${url})`;
-      continue;
-    }
-  }
-  updateCatalogSource(source.id, { last_status: 'error', last_error: lastError });
-  return catalogCache.get(source.id) || null;
-}
-
-async function refreshSourceInBackground(source: any): Promise<void> {
-  // Only refresh if last sync was > 5 minutes ago
-  if (source.last_synced) {
-    const age = Date.now() - new Date(source.last_synced).getTime();
-    if (age < 5 * 60 * 1000) return;
-  }
-  await refreshSource(source);
-}
-
+async function fetchSourceCatalog(source:any):Promise<Catalog|null>{return (await catalogReader.read(source)).catalog;}
+async function refreshSource(source:any):Promise<Catalog|null>{return (await catalogReader.read(source,{force:true})).catalog;}
 // ============ Template List ============
 
-router.get('/templates', async (_req: Request, res: Response, next: NextFunction) => {
+router.get('/templates', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const sources = getEnabledCatalogSources();
-    const results = await Promise.all(sources.map(s => fetchSourceCatalog(s)));
+    const sources = getEnabledCatalogSources().filter(s=>!req.query.sourceId||s.id===Number(req.query.sourceId));
+    const states=await mapCatalogSources(sources,s=>catalogReader.read(s,{cacheOnly:req.query.cacheOnly==='true'}));
+    const results=states.map(r=>r.catalog);
 
     const seen = new Map<string, { template: CatalogTemplate; sourceId: number; sourceName: string; sourceCount: number }>();
     const idSources = new Map<string, number>();
@@ -237,23 +134,16 @@ router.get('/templates', async (_req: Request, res: Response, next: NextFunction
     for (const entry of seen.values()) {
       entry.sourceCount = idSources.get(entry.template.id) || 1;
     }
-    res.json({ templates: Array.from(seen.values()), sources });
+    res.json({ templates: Array.from(seen.values()), sources:sources.map((s,i)=>({...s,sync:{...states[i],catalog:undefined}})) });
   } catch (err) { next(err); }
 });
 
 // ============ Refresh ============
 
-router.post('/refresh', async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const sources = getEnabledCatalogSources();
-    const results = await Promise.all(sources.map(async (s) => {
-      if (s.etag) updateCatalogSource(s.id, { etag: null });
-      const cat = await refreshSource(s);
-      return { id: s.id, name: s.name, success: !!cat };
-    }));
-    res.json(results);
-  } catch (err) { next(err); }
-});
+router.post('/refresh', async (req: Request,res: Response,next: NextFunction)=>{try{
+    const sources=getEnabledCatalogSources().filter(s=>!req.body?.sourceId||s.id===Number(req.body.sourceId));
+    const results=await mapCatalogSources(sources,async s=>{const r=await catalogReader.read(s,{force:true});return {id:s.id,name:s.name,success:!r.errorKind,state:r.state,errorKind:r.errorKind};});res.json(results);
+  }catch(error){next(error);}});
 
 // ============ Init ============
 

@@ -45,6 +45,7 @@ const server = createServer(async (req, res) => {
   const json = (data, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(status < 400 ? { success: true, data } : { success: false, error: data })); };
   if (url.pathname.startsWith('/api/')) {
     const path = url.pathname.slice(4);
+    if(path==='/accounts/options')return json(accounts);
     if (path === '/accounts') return json({ accounts, quota: [] });
     if (path === '/settings') return json({ platform: 'docker', version: '2.5.4', demo_account_ids: '' });
     if (path === '/credentials') return json(credentials);
@@ -122,7 +123,7 @@ const server = createServer(async (req, res) => {
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const origin = `http://127.0.0.1:${server.address().port}`;
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ executablePath:process.env.CHROMIUM_EXECUTABLE||undefined, headless: true });
 const errors = [];
 try {
   for (const [theme, width] of [['light', 1440], ['light', 390], ['dark', 1440], ['dark', 390]]) {

@@ -24,7 +24,7 @@ export function recordPageQuery(query: { page?: unknown; perPage?: unknown; type
   for (const value of [query.nameContains, query.contentContains]) if (value !== undefined && (typeof value !== 'string' || value.length > 256)) throw Object.assign(new Error('Invalid DNS field filter'), { statusCode: 400, code: 'VALIDATION_ERROR' });
   return new URLSearchParams({ page: String(page), per_page: String(perPage), ...(query.type ? { type: String(query.type) } : {}), ...(query.search ? { search: String(query.search) } : {}), ...(query.nameContains ? { 'name.contains': String(query.nameContains) } : {}), ...(query.contentContains ? { 'content.contains': String(query.contentContains) } : {}), ...(query.nameContains || query.contentContains ? { match: 'all' } : {}) }).toString();
 }
-type Entry = { signature: string; cloudflareAccountId: string; snapshot?: ZoneSnapshot; flight?: Promise<ZoneSnapshot>; failed?: string };
+type Entry = { signature: string; cloudflareAccountId: string; snapshot?: ZoneSnapshot; flight?: Promise<ZoneSnapshot>; failed?: string; failedAt?: number };
 export function requireDnsBinding<T extends DnsBinding>(account: T | undefined | null): T {
   if (!account) throw Object.assign(new Error('Account not found'), { statusCode: 404, code: 'ACCOUNT_NOT_FOUND' });
   if (account.is_enabled === 0 || account.is_active === 0 || !account.account_id || !(account.enabled_features ?? 'dns').split(',').includes('dns')) throw Object.assign(new Error('Account unavailable or DNS feature disabled'), { statusCode: 409, code: 'ACCOUNT_DISABLED' });
@@ -55,12 +55,16 @@ export class ZoneDirectory {
     }
     for(const id of ids)this.revisions.set(id,(this.revisions.get(id)||0)+1);
   }
+  async peek(account: DnsBinding): Promise<ZoneSnapshot | undefined> {
+    const entry = this.entries.get(account.id);
+    return entry?.signature === await bindingSignature(account) && entry.snapshot ? structuredClone({...entry.snapshot,meta:{...entry.snapshot.meta,...(entry.failed?{error:entry.failed,failedAt:entry.failedAt}: {})}}) : undefined;
+  }
   async request(account: DnsBinding, request: CfRequest, path: string, options: { background?: boolean; signal?: AbortSignal; revision?: string } = {}): Promise<CfEnvelope> {
     const revision = options.revision ?? this.epoch(account.id);
     const signature = await bindingSignature(account);
     return this.scheduler.run(`${revision}:${signature}:${path}`, account.id, signal => request(path, { signal }), options);
   }
-  async list(account: DnsBinding, request: CfRequest, options: { refresh?: boolean; waitUntil?: (promise: Promise<unknown>) => void } = {}): Promise<ZoneSnapshot> {
+  async list(account: DnsBinding, request: CfRequest, options: { refresh?: boolean; background?:boolean; waitUntil?: (promise: Promise<unknown>) => void } = {}): Promise<ZoneSnapshot> {
     requireDnsBinding(account);
     this.metric({ event: 'zone_lookup', accountId: account.id });
     const revision = this.epoch(account.id);
@@ -78,10 +82,10 @@ export class ZoneDirectory {
         const raw = await this.all(account, request, `/zones?account.id=${encodeURIComponent(account.account_id!)}`, 50, { background, revision });
         const zones = (raw as DnsZone[]).filter(z => z.account?.id === account.account_id).map(z => ({ id: z.id, name: z.name, status: z.paused ? 'paused' : z.status, paused: z.paused, account: z.account, plan: z.plan, name_servers: z.name_servers, cfAccountId: account.id, credentialId: account.credential_id, accountName: account.name }));
         const snapshot: ZoneSnapshot = { zones, meta: { accountId: account.id, state: 'miss', fetchedAt: Date.now(), durationMs: Date.now() - started } };
-        if (this.entries.get(account.id) === current) { current.snapshot = snapshot; current.failed = undefined; }
+        if (this.entries.get(account.id) === current) { current.snapshot = snapshot; current.failed = undefined; current.failedAt = undefined; }
         this.metric({ event: 'zone_loaded', accountId: account.id, durationMs: Date.now() - started });
         return snapshot;
-      })().catch(error => { current.failed = errorDetails(error).kind; this.metric({ event: 'zone_failed', accountId: account.id, durationMs: Date.now() - started }); throw error; }).finally(() => { if (current.flight === pending) current.flight = undefined; });
+      })().catch(error => { current.failed = errorDetails(error).kind; current.failedAt=Date.now(); this.metric({ event: 'zone_failed', accountId: account.id, durationMs: Date.now() - started }); throw error; }).finally(() => { if (current.flight === pending) current.flight = undefined; });
       current.flight = pending; return pending;
     };
     if (!options.refresh && entry.snapshot && age < this.freshMs && !entry.failed) { this.metric({ event: 'zone_hit', accountId: account.id }); return { zones: entry.snapshot.zones, meta: { ...entry.snapshot.meta, state: 'fresh' } }; }
@@ -90,7 +94,7 @@ export class ZoneDirectory {
       this.metric({ event: 'zone_stale', accountId: account.id });
       return { zones: entry.snapshot.zones, meta: { ...entry.snapshot.meta, state: 'stale', error: entry.failed } };
     }
-    return load(false);
+    return load(options.background??false);
   }
   async resolve<T extends DnsBinding>(account: T, request: CfRequest, domain: string, zoneId: string) {
     requireDnsBinding(account);

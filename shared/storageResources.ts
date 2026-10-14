@@ -3,7 +3,7 @@ import type {DnsBinding} from './zoneDirectory';
 import type {ReadMetric,ReadScheduler} from './readScheduler';
 import {BoundReadCache} from './resourceCache';
 export interface StoragePage {items:any[];prefixes:string[];cursor?:string;is_truncated:boolean}
-export interface PageOptions {prefix?:string;delimiter?:string;cursor?:string;limit?:number;refresh?:boolean;signal?:AbortSignal}
+export interface PageOptions {prefix?:string;delimiter?:string;cursor?:string;limit?:number;refresh?:boolean;background?:boolean;signal?:AbortSignal}
 const invalid=(message:string)=>Object.assign(new Error(message),{statusCode:502,code:'CF_INVALID_PAGINATION'});
 export function requireStorageBinding<T extends DnsBinding>(account:T):T {
  if(!account.account_id||account.is_active===0||account.is_enabled===0||!account.enabled_features.split(',').includes('storage'))throw Object.assign(new Error('Account unavailable or Storage feature disabled'),{statusCode:409});return account;
@@ -35,7 +35,7 @@ export class StorageResources {
  readonly cache:BoundReadCache;
  constructor(directory:{scheduler:Pick<ReadScheduler,'run'>},metric:(event:ReadMetric)=>void=()=>{}){this.cache=new BoundReadCache(directory,metric,30000,30000,300,8*1024*1024);}
  async page(account:DnsBinding,request:CfRequest,kind:'kv'|'objects'|'buckets',resource:string,options:PageOptions={}){
-  requireStorageBinding(account);options={...pageOptions(options as Record<string,unknown>),signal:options.signal};
+  requireStorageBinding(account);options={...pageOptions(options as Record<string,unknown>),signal:options.signal,background:options.background};
   const base=`/accounts/${encodeURIComponent(account.account_id!)}`;
   const path=kind==='kv'?`${base}/storage/kv/namespaces/${encodeURIComponent(resource)}/keys`:kind==='objects'?`${base}/r2/buckets/${encodeURIComponent(resource)}/objects`:`${base}/r2/buckets`;
   const query=new URLSearchParams({[kind==='kv'?'limit':'per_page']:String(options.limit)});

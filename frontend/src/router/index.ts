@@ -8,6 +8,7 @@ const routes = [
   { path: '/ai', name: 'ai', component: () => import('../views/AiUnifiedView.vue') },
   { path: '/storage', name: 'storage', component: () => import('../views/StorageView.vue') },
   { path: '/browser-render', name: 'browser-render', component: () => import('../views/BrowserRenderView.vue') },
+  { path: '/audit-logs', name: 'audit-logs', component: () => import('../views/AuditLogsView.vue') },
   { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue') },
   { path: '/store', name: 'store', component: () => import('../views/StoreView.vue') },
   { path: '/tunnels', name: 'tunnels', component: () => import('../views/TunnelsView.vue'), meta: { titleKey: 'menu.tunnels' } },

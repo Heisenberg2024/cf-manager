@@ -126,7 +126,8 @@
     "browserRender": "Browser Rendering",
     "store": "Template Store",
     "tunnels": "Tunnels",
-    "settings": "Settings"
+    "settings": "Settings",
+    "auditLogs": "Audit logs"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -139,7 +140,8 @@
     "render": "Render",
     "store": "Store",
     "tunnels": "Tunnels",
-    "settings": "Settings"
+    "settings": "Settings",
+    "auditLogs": "Audit logs"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -309,7 +311,7 @@
       "proxy": "Proxy",
       "features": "Features",
       "status": "Status",
-      "aiQuota": "AI Quota",
+      "aiQuota": "AI recorded usage",
       "actions": "Actions",
       "token": "Token",
       "key": "Key",
@@ -323,7 +325,8 @@
       "r2": "R2",
       "totalItems": "{count} total",
       "email": "Email",
-      "accountNameShort": "Account"
+      "accountNameShort": "Account",
+      "recordedUsageHint": "Recorded UTC-day usage from local estimates and prior synchronization; not live billing. Official limit unverified."
     }
   },
   "dns": {
@@ -769,7 +772,8 @@
       "cpuTime": "CPU Time",
       "subrequests": "Subrequests"
     },
-    "resourceReadFailed": "Cloudflare resource read failed. Counts are unknown; refresh to retry."
+    "resourceReadFailed": "Cloudflare resource read failed. Counts are unknown; refresh to retry.",
+    "usageSource": "Cloudflare usage snapshot (UTC day), not live billing; official limit unverified."
   },
   "ai": {
     "title": "AI Workspace",
@@ -1579,5 +1583,125 @@
     "label": "Language",
     "zhCN": "中文",
     "en": "English"
+  },
+  "overview": {
+    "title": "Cloudflare Overview",
+    "localHealth": "Local service",
+    "updated": "Local statistics updated",
+    "allAccounts": "All accounts",
+    "allProducts": "All products",
+    "days": "days",
+    "accounts": "Cloudflare Accounts",
+    "realAccounts": "Unique CF Accounts",
+    "enabled": "Locally active / enabled",
+    "disabled": "Disabled",
+    "unverified": "Unverified / access failed",
+    "zones": "DNS Zones",
+    "workersPages": "Workers & Pages",
+    "tunnels": "Tunnels",
+    "storage": "Storage",
+    "attention": "Needs attention",
+    "knownIssues": "Recorded observations only",
+    "unknownNotice": "Unchecked resources remain unknown",
+    "snapshotSource": "Source: successful resource snapshots / persisted counts",
+    "coverage": "Account coverage",
+    "unknownOrAbnormal": "Abnormal or unknown",
+    "moduleError": "This module failed; refresh independently",
+    "resourceCollection": "Resource snapshot collection",
+    "collectionHint": "Opening this page does not scan Cloudflare. Read one account and product at a time using valid caches. Pause stops the next item. Forced collection reads remote resources.",
+    "collectMissing": "Collect missing / stale snapshots",
+    "forceCollect": "Force selected scope",
+    "pause": "Pause",
+    "collectionDone": "Batch reads finished",
+    "usageTrends": "Resource usage trends",
+    "usageDisclaimer": "Recorded usage, not live billing; daily MAX per CF Account; missing days are not zero-filled",
+    "seconds": "seconds",
+    "requests": "requests",
+    "auditTrends": "Audit operation trends",
+    "auditDisclaimer": "Recorded audit events, not total Cloudflare requests or API error rates",
+    "success": "Success",
+    "failure": "Failure",
+    "operations": "operations",
+    "noHistory": "No recorded history",
+    "dataTable": "View values",
+    "noKnownIssues": "No recorded attention items",
+    "remoteHealthNotice": "Local service health does not establish remote Cloudflare account or resource health. Collect unknown resources to check them.",
+    "accountSummary": "Account summary",
+    "searchAccounts": "Search account, credential or CF ID",
+    "status": "Status",
+    "todayRecorded": "Today recorded usage (UTC)",
+    "lastCheck": "Last successful check",
+    "recentActivity": "Recent activity",
+    "allAudit": "View all audit logs",
+    "atLeast": "At least ",
+    "states": {
+      "ready": "Confirmed",
+      "stale": "Stale",
+      "partial": "Partial coverage",
+      "unknown": "Unknown",
+      "loading": "Loading",
+      "error": "Read failed"
+    },
+    "severity": {
+      "critical": "Critical",
+      "warning": "Warning",
+      "info": "Info"
+    },
+    "issueKinds": {
+      "accountAccess": "Account access failed",
+      "credential": "Invalid credential",
+      "verification": "Unverified or outdated check",
+      "quota": "Recorded quota exhaustion",
+      "catalog": "Catalog update failed",
+      "resourceRead": "Resource read failed",
+      "zonePending": "Zone pending",
+      "unknownWrite": "Recorded unknown remote write outcome",
+      "recentAuditFailure": "Recorded operation failure in last 7 days",
+      "staleSnapshot": "Resource snapshot is stale"
+    },
+    "metrics": {
+      "zones": "Zones",
+      "workers": "Workers",
+      "pages": "Pages",
+      "tunnels": "Tunnels",
+      "kv": "KV Namespaces",
+      "d1": "D1 Databases",
+      "r2": "R2 Buckets",
+      "workers_requests": "Workers Requests",
+      "ai_neurons": "AI Neurons",
+      "browser_render_seconds": "Browser Render Seconds"
+    },
+    "verified": "Last known available",
+    "accountDetails": "Account details",
+    "credential": "Credential",
+    "features": "Enabled features",
+    "manageAccount": "Manage account"
+  },
+  "audit": {
+    "title": "Audit logs",
+    "description": "Operations recorded by this platform. Date filters use UTC and include the selected end day; timestamps display UTC+8.",
+    "action": "Action",
+    "startDate": "Start date",
+    "endDate": "End date",
+    "target": "Target keyword",
+    "query": "Query",
+    "total": "Total operations",
+    "success": "Succeeded",
+    "error": "Failed",
+    "page": "Page {page}",
+    "cursorNotice": "Stable cursor; new events appear after refresh",
+    "previous": "Previous",
+    "next": "Next",
+    "details": "Details",
+    "time": "Time",
+    "redactionNotice": "Details show safe status and count fields. Legacy free-form text, environment variables and configuration are withheld."
+  },
+  "catalogState": {
+    "ready": "Synced",
+    "empty": "Empty catalog",
+    "stale": "Stale snapshot",
+    "unknown": "Not loaded",
+    "error": "Sync failed",
+    "lastSuccess": "Last success"
   }
 }

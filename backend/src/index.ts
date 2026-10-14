@@ -10,6 +10,8 @@ import { errorHandler } from './middleware/errorHandler';
 import { v1ErrorHandler } from './middleware/v1ErrorHandler';
 import { responseWrapper } from './middleware/responseWrapper';
 import accountsRouter from './routes/accounts';
+import dashboardRouter from './routes/dashboard';
+import auditRouter from './routes/audit';
 import credentialsRouter from './routes/credentials';
 import dnsRouter from './routes/dns';
 import workersRouter from './routes/workers';
@@ -104,6 +106,8 @@ app.use('/api', apiRequestLogger);
 app.use('/api', responseWrapper);
 
 app.use('/api/accounts', accountsRouter);
+app.use('/api/dashboard', dashboardRouter);
+app.use('/api/audit-log', auditRouter);
 app.use('/api/credentials', credentialsRouter);
 app.use('/api/dns', dnsRouter);
 app.use('/api/workers', workersRouter);

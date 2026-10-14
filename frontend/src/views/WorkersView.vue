@@ -19,15 +19,6 @@
                 @click="selectAccount(c.accountId)"
               >
                 <span class="worker-compact-card__name" :title="c.accountName">{{ c.accountName }}</span>
-                <n-progress
-                  v-if="c.requests != null"
-                  type="line"
-                  :percentage="calcUsagePercentage(c)"
-                  :height="6"
-                  :show-indicator="false"
-                  :status="calcUsagePercentage(c) > 90 ? 'error' : calcUsagePercentage(c) > 70 ? 'warning' : 'success'"
-                  :style="{ flex: '1 1 0', minWidth: '24px', overflow: 'hidden' }"
-                />
                 <span class="worker-compact-card__metric">{{ formatNumber(c.requests) }}</span>
                 <span class="worker-compact-card__count">{{ resourceCount(c) }}</span>
               </div>
@@ -38,10 +29,9 @@
                 <span>{{ t('workers.table.deployCount') }}</span><span>{{ c.workerCount ?? '—' }}W · {{ c.pagesCount ?? '—' }}P（{{ resourceCount(c) }}）</span>
               </div>
               <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px;">
-                <span>{{ t('workers.table.requests') }}</span><span>{{ formatNumber(c.requests) }} / 100,000</span>
+                <span>{{ t('workers.table.requests') }}</span><span>{{ formatNumber(c.requests) }}</span>
               </div>
-              <n-progress type="line" :percentage="calcUsagePercentage(c)" :height="12" :show-indicator="false"
-                :status="calcUsagePercentage(c) > 90 ? 'error' : calcUsagePercentage(c) > 70 ? 'warning' : 'success'" style="margin-bottom: 10px;" />
+              <p style="font-size:11px;opacity:.65;max-width:280px">{{ t('workers.usageSource') }}</p>
               <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px;">
                 <span>{{ t('workers.table.errors') }}</span><span>{{ formatNumber(c.errors) }}</span>
               </div>
@@ -128,6 +118,7 @@
 </template>
 
 <script setup lang="ts">
+import { requestedAccountId } from '../utils/accountContext';
 import { ref, h, computed, onMounted, onUnmounted } from 'vue';
 import { NButton, NSpace, NTag, useMessage, NPopconfirm } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
@@ -167,12 +158,6 @@ function selectAccount(accountId: number) {
   workerStore.fetchWorkers(accountId);
   workerStore.fetchAccountSummary(accountId);
 }
-const FREE_DAILY_LIMIT = 100000;
-
-function calcUsagePercentage(u: { requests: number }) {
-  return Math.min(100, Math.round((u.requests / FREE_DAILY_LIMIT) * 100));
-}
-
 function resourceCount(c: any) { return c.workerCount == null || c.pagesCount == null ? '—' : c.workerCount + c.pagesCount; }
 function formatNumber(n: number | null): string {
   return n == null ? '—' : n.toLocaleString();
@@ -206,7 +191,7 @@ function openSettings(row: any) {
 const allAccounts = ref<any[]>([]);
 async function loadAllAccounts() {
   try {
-    const { data } = await accountsApi.getAll();
+    const { data } = await accountsApi.getOptions('workers');
     allAccounts.value = data.accounts || [];
   } catch { allAccounts.value = []; }
 }
@@ -290,7 +275,7 @@ onMounted(async () => {
   await Promise.all([loadDemoAccounts(), loadAllAccounts()]);
   if (!viewActive) return;
   workerStore.configureAccounts(allAccounts.value);
-  const selected = workerStore.selectedAccountId;
+  const selected = requestedAccountId() ?? workerStore.selectedAccountId;
   const first = workerStore.summary.find(c => c.accountId === selected) || workerStore.summary[0];
   if (first) selectAccount(first.accountId);
   void workerStore.fetchSummary();

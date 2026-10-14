@@ -281,7 +281,7 @@
 <script setup lang="ts">
 import { ref, h, computed, onMounted, onBeforeUnmount } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { NButton, NSpace, NSwitch, NProgress, NTag, NDropdown, useMessage } from 'naive-ui';
+import { NButton, NSpace, NSwitch, NTag, NDropdown, useMessage } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
 import type { UploadFileInfo } from 'naive-ui';
 import { useAccountStore } from '../stores/accountStore';
@@ -794,22 +794,11 @@ const columns = computed<DataTableColumns<any>>(() => {
     const aiResource = quotaItem.resources.find((r: any) => r.resource === 'ai_neurons');
     if (!aiResource) return h('span', { style: { color: 'var(--app-text-muted)', fontSize: '12px' } }, '—');
     const exhausted = aiResource.exhausted;
-    const pct = Math.min(100, Math.round(((aiResource.count || 0) / (aiResource.limit || 1)) * 100));
-    return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '100px' } }, [
-      h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } }, [
-        h('span', { style: { fontSize: '12px', color: exhausted ? 'var(--theme-error)' : 'var(--app-text-secondary)' } }, `${pct}%`),
-        exhausted
-          ? h(NTag, { size: 'small', type: 'error', bordered: false }, { default: () => t('accounts.table.exhausted') })
-          : null,
-      ].filter(Boolean)),
-      h(NProgress, {
-        type: 'line',
-        percentage: pct,
-        height: 6,
-        showIndicator: false,
-        status: exhausted ? 'error' : (pct > 90 ? 'warning' : 'success'),
-      }),
+    return h('div', { title:t('accounts.table.recordedUsageHint'),style:{display:'flex',flexWrap:'wrap',alignItems:'center',gap:'6px'} },[
+      h('span',{style:{fontSize:'12px',color:exhausted?'var(--theme-error)':'var(--app-text-secondary)'}},`${Number(aiResource.count??0).toLocaleString()} Neurons`),
+      exhausted?h(NTag,{size:'small',type:'error',bordered:false},{default:()=>t('accounts.table.exhausted')}):null,
     ]);
+
   }},
   {
     title: t('accounts.table.actions'), key: 'actions', width: 200, fixed: 'right',

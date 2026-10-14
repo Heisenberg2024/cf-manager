@@ -1,0 +1,14 @@
+import { Router } from 'express';
+import { dashboardRuntime } from '../services/dashboardRuntime';
+import { dashboardOverview, dashboardTrends, selectedAccount } from '../services/dashboardData';
+import { collectResource, dashboardResources } from '../services/dashboardCollector';
+import { auditPage, positive } from '../services/auditQueries';
+import type { ResourceMetric } from '../services/dashboardData';
+const router=Router();
+router.use((_req,res,next)=>{res.setHeader('Cache-Control','no-store');next();});
+router.get('/overview',async(req,res,next)=>{try{res.json(await dashboardOverview(dashboardRuntime.db,req.query));}catch(e){next(e);}});
+router.get('/resources',async(req,res,next)=>{try{res.json(await dashboardResources(dashboardRuntime,selectedAccount(req.query)));}catch(e){next(e);}});
+router.get('/trends',async(req,res,next)=>{try{res.json(await dashboardTrends(dashboardRuntime.db,req.query));}catch(e){next(e);}});
+router.get('/activity',async(req,res,next)=>{try{res.json(await auditPage(dashboardRuntime.db,{accountId:req.query.accountId,limit:6}));}catch(e){next(e);}});
+router.post('/collect',async(req,res,next)=>{try{const body=req.body;res.json(await collectResource(dashboardRuntime,positive(body.accountId),body.metric as ResourceMetric,body.refresh===true));}catch(e){next(e);}});
+export default router;

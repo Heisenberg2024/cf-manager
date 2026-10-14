@@ -22,6 +22,7 @@ const server=createServer(async(req,res)=>{try{
  const u=new URL(req.url,'http://fixture.local'),path=u.pathname.slice(4);
  const json=(data,status=200)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(status<400?{success:true,data}:{success:false,error:data}));};
  if(u.pathname.startsWith('/api/')){
+  if(path==='/accounts/options')return json(accounts);
   if(path==='/accounts')return json({accounts,quota:[]});
   if(path==='/credentials'){await new Promise(r=>setTimeout(r,30));return json(credentials);}
   if(path==='/settings')return json({platform:'docker',version:'2.8.1',demo_account_ids:''});
@@ -74,7 +75,7 @@ async function openBatch(page,title){
  const modal=page.locator('.n-modal').filter({hasText:title});await modal.waitFor();return modal;
 }
 try{
- browser=await chromium.launch({headless:true});
+ browser=await chromium.launch({executablePath:process.env.CHROMIUM_EXECUTABLE||undefined,headless:true});
  for(const width of [1440,390])for(const dark of [false,true]){
   reset();scenario='ssl';
   const context=await browser.newContext({viewport:{width,height:900},colorScheme:dark?'dark':'light',reducedMotion:'reduce'});

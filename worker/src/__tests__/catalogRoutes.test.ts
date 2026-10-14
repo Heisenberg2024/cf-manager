@@ -1,0 +1,12 @@
+import {beforeAll,afterAll,it,expect,vi} from 'vitest';
+import {Hono} from 'hono';
+import type {Env} from '../types';
+import {dashboardDb} from '../../../shared/tests/dashboard.fixture.mjs';
+vi.mock('../services/ssrfGuard',()=>({assertUrlSafe:()=>{}}));
+import router from '../routes/store';
+import {getCatalogReader} from '../services/catalogRuntime';
+const source={id:1,url:'https://catalog.old.test/catalog.json',is_default:0};
+let f:ReturnType<typeof dashboardDb>,env:Env;
+const app=new Hono<{Bindings:Env}>();app.route('/store',router);
+beforeAll(async()=>{f=dashboardDb();f.sqlite.prepare('INSERT INTO catalog_sources(id,url,name) VALUES(1,?,?)').run(source.url,'Original');env={DB:f.d1,ENCRYPTION_KEY:'test'} as Env;await getCatalogReader(env).seed(source,{templates:[]} as never);vi.stubGlobal('fetch',async()=>new Response('failure',{status:500}));});afterAll(()=>{vi.unstubAllGlobals();f.sqlite.close();});
+it('Worker failed source edits retain the previous successful representation',async()=>{const reader=getCatalogReader(env),before=await reader.read(source,{cacheOnly:true});const response=await app.request('/store/sources/1',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:'https://catalog.bad.test/catalog.json'})},env);expect(response.status).toBe(400);const after=await reader.read(source,{cacheOnly:true});expect(after.state).toBe('empty');expect(after.lastSuccessAt).toBe(before.lastSuccessAt);expect(f.sqlite.prepare('SELECT url FROM catalog_sources WHERE id=1').get()).toMatchObject({url:source.url});});

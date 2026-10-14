@@ -30,6 +30,13 @@ export class WorkerResources {
     for (const [key, entry] of this.entries) if (ids.has(entry.accountId) && !key.includes(':usage:')) this.entries.delete(key);
     // Usage is independent of resource mutations; its UTC date and credential fingerprint fence it.
   }
+  async peek(account: DnsBinding, kind: 'workers' | 'pages') {
+    const entry = this.entries.get(`${await bindingSignature(account)}:${kind}:`);
+    if (!entry) return;
+    if(entry.error)return {value:null,fetchedAt:entry.expires-(errorDetails(entry.error).statusCode===429?300000:5000),errorKind:errorDetails(entry.error).kind};
+    if(!Array.isArray(entry.value))return;
+    return { value: structuredClone(entry.value), fetchedAt: entry.expires - this.listMs };
+  }
   async read<T>(account: DnsBinding, request: CfRequest, kind: ResourceKind, options: { refresh?: boolean; signal?: AbortSignal; background?: boolean } = {}): Promise<T> {
     requireWorkerBinding(account);
     options.signal?.throwIfAborted();

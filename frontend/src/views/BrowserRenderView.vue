@@ -180,7 +180,7 @@ const result = ref<any>(null);
 
 async function fetchAccounts() {
   try {
-    const [{ data }] = await Promise.all([accountsApi.getAll(), loadCredentialNames()]);
+    const [{ data }] = await Promise.all([accountsApi.getOptions('browser_render'), loadCredentialNames()]);
     const accounts = (data.accounts || []).filter((a: any) => a.is_active && (a.enabled_features || '').includes('browser_render')).map((a: any) => ({
       label: accountLabel(a),
       value: String(a.id),

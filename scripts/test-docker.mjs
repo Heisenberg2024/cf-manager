@@ -49,6 +49,14 @@ async function api(url, path, method = 'GET') {
 try {
   const normal = await start('default');
   assertRuntime(normal.name);
+  if((await api(normal.url,'/settings')).version==='2.10.0'){
+    assert.equal((await api(normal.url,'/dashboard/overview')).counts.bindings,0);
+    assert.ok((await api(normal.url,'/dashboard/resources')).metrics.every(m=>m.value===0&&m.complete));
+    assert.equal((await api(normal.url,'/audit-log/stats')).total,0);
+    assert.deepEqual((await api(normal.url,'/audit-log/page')).items,[]);
+    assert.deepEqual(await api(normal.url,'/accounts/options'),[]);
+    console.log('PASS v2.10 local overview/resource/audit/options endpoints and fresh schema');
+  }
   console.log('PASS default image runs as UID 1000, logs in data volume, local DB health');
   docker('rm', '-f', normal.name);
 

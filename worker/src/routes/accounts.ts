@@ -1,3 +1,5 @@
+import { accountOptions } from '../services/accountOptions';
+import { localSql } from '../services/localSql';
 import { Hono } from 'hono';
 import type { Env } from '../types';
 import { getAllAccounts, getAccountById, nameFromEmail, createAccount, updateAccount, deleteAccount, addAuditLog, listAccountsPaged, AccountListFilter, clearExhausted, Account, normalizeWorkerPlan } from '../db/models';
@@ -15,6 +17,7 @@ import {getStorageResources} from '../services/storageRuntime';
 import { getZoneSettingsRuntime } from '../services/zoneSettingsRuntime';
 
 const app = new Hono<{ Bindings: Env }>();
+app.get('/options',async c=>{c.header('Cache-Control','no-store');return c.json((await accountOptions(localSql(c.env.DB),c.req.query('feature'))).map(a=>({...a,is_demo:isDemoAccount(a.id,c.env.DEMO_ACCOUNT_IDS)})));});
 async function invalidateAccountCaches(env: Env) {
   getDnsDirectory(env.DB).invalidate();
   getZoneSettingsRuntime(env.DB).invalidate();getStorageResources(env.DB).invalidate();

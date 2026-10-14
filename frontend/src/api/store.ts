@@ -9,8 +9,8 @@ export const storeApi = {
   deleteSource: (id: number) => apiClient.delete(`/store/sources/${id}`),
 
   // Templates
-  getTemplates: () => apiClient.get('/store/templates'),
-  refresh: () => apiClient.post('/store/refresh'),
+  getTemplates: (params: {sourceId?:number;cacheOnly?:boolean} = {},signal?:AbortSignal) => apiClient.get('/store/templates',{params,signal}),
+  refresh: (sourceId?:number) => apiClient.post('/store/refresh',{sourceId}),
   init: () => apiClient.get('/store/init', { _silent: true }),
 
   // Preflight (两阶段部署: 预检)

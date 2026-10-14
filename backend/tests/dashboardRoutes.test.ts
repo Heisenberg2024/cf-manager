@@ -1,0 +1,18 @@
+import {beforeAll,afterAll,it,expect,vi} from 'vitest';
+import express from 'express';
+import type {Server} from 'node:http';
+import {dashboardDb} from '../../shared/tests/dashboard.fixture.mjs';
+const state=vi.hoisted(()=>({db:null as any}));
+vi.mock('../src/services/localSql',()=>({localSql:{all:(sql:string,params:unknown[])=>state.db.all(sql,params),run:(sql:string,params:unknown[])=>state.db.run(sql,params)}}));
+vi.mock('../src/db',()=>({getDb:()=>state.db.sqlite}));
+vi.mock('../src/config',()=>({config:{apiSecret:'test-secret',fileLogging:false,encryptionKey:'test'}}));
+import dashboard from '../src/routes/dashboard';
+import audit from '../src/routes/audit';
+import {responseWrapper} from '../src/middleware/responseWrapper';
+import {errorHandler} from '../src/middleware/errorHandler';
+import {authMiddleware} from '../src/middleware/auth';
+let f:ReturnType<typeof dashboardDb>,server:Server,base:string;
+beforeAll(async()=>{f=dashboardDb();f.accounts(20);f.logs(100);state.db={...f.db,sqlite:f.sqlite};const app=express();app.use(express.json());app.use(authMiddleware);app.use(responseWrapper);app.use('/dashboard',dashboard);app.use('/audit-log',audit);app.use(errorHandler);server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));base=`http://127.0.0.1:${(server.address() as {port:number}).port}`;});
+afterAll(async()=>{await new Promise<void>(r=>server.close(()=>r()));f.sqlite.close();});
+for(const endpoint of ['/dashboard/overview','/dashboard/resources','/dashboard/trends?days=7','/dashboard/activity','/audit-log/page?limit=10','/audit-log/stats'])it(`Docker HTTP ${endpoint} uses local data and preserves wrapper`,async()=>{const r=await fetch(base+endpoint,{headers:{Authorization:'Bearer test-secret'}});expect(r.status).toBe(200);expect(r.headers.get('cache-control')).toBe('no-store');const body=await r.json() as any;expect(body.success).toBe(true);expect(body.data).toBeDefined();expect(JSON.stringify(body)).not.toContain('api_token');});
+it('rejects unauthenticated requests and invalid pagination',async()=>{expect((await fetch(base+'/dashboard/overview')).status).toBe(401);expect((await fetch(base+'/audit-log/page?cursor=bad',{headers:{Authorization:'Bearer test-secret'}})).status).toBe(400);});

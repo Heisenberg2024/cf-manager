@@ -1,0 +1,7 @@
+import {describe,it,expect,vi} from 'vitest';
+import {MetadataCache} from '../src/utils/metadataCache';
+describe('account metadata cache',()=>{
+ it('merges concurrent requests, clones results and reuses a valid feature snapshot',async()=>{const cache=new MetadataCache<Array<{id:number}>>();const load=vi.fn(async()=>[{id:1}]);const [a,b]=await Promise.all([cache.read('dns',load),cache.read('dns',load)]);expect(load).toHaveBeenCalledTimes(1);a[0]!.id=99;expect(b[0]!.id).toBe(1);expect((await cache.read('dns',load))[0]!.id).toBe(1);await cache.read('workers',load);expect(load).toHaveBeenCalledTimes(2);});
+ it('clears on mutation/session exit and rejects delayed results from the prior identity',async()=>{const cache=new MetadataCache<number[]>();let release!:(value:number[])=>void;const old=cache.read('all',()=>new Promise(r=>{release=r;}));cache.clear();const current=await cache.read('all',async()=>[2]);release([1]);await expect(old).rejects.toThrow('invalidated');expect(current).toEqual([2]);expect(await cache.read('all',async()=>[3])).toEqual([2]);});
+ it('expires metadata and never caches failures',async()=>{const cache=new MetadataCache<number[]>(-1),load=vi.fn(async()=>[1]);await cache.read('all',load);await cache.read('all',load);expect(load).toHaveBeenCalledTimes(2);await expect(cache.read('dns',async()=>{throw Error('Denied');})).rejects.toThrow();expect(await cache.read('dns',async()=>[2])).toEqual([2]);});
+});

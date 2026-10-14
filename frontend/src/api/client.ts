@@ -29,6 +29,7 @@ apiClient.interceptors.request.use((config) => {
 
 apiClient.interceptors.response.use(
   (response) => {
+    if(response.config.method!=='get'&&/^\/(accounts|credentials)(?:\/|$)/.test(response.config.url||''))window.dispatchEvent(new Event('account-metadata-invalidated'));
     const body = response.data;
     if (body && typeof body === 'object' && body.success !== undefined) {
       response.data = body.data;
@@ -36,6 +37,7 @@ apiClient.interceptors.response.use(
     return response;
   },
   (error: ApiError) => {
+    if(error.config?.method!=='get'&&/^\/(accounts|credentials)(?:\/|$)/.test(error.config?.url||''))window.dispatchEvent(new Event('account-metadata-invalidated'));
     const body = error?.response?.data as any;
     const errObj = body?.error;
     if (errObj) {

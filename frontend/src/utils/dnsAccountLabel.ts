@@ -3,7 +3,7 @@ export interface DnsAccountIdentity {
   id: number;
   name?: string;
   account_id?: string | null;
-  credential_id?: number;
+  credential_id?: number | null;
   credential_name?: string;
 }
 

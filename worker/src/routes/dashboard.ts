@@ -1,0 +1,14 @@
+import { Hono } from 'hono';
+import type { Env } from '../types';
+import { dashboardRuntime } from '../services/dashboardRuntime';
+import { dashboardOverview, dashboardTrends, selectedAccount, type ResourceMetric } from '../services/dashboardData';
+import { collectResource, dashboardResources } from '../services/dashboardCollector';
+import { auditPage, positive } from '../services/auditQueries';
+const router=new Hono<{Bindings:Env}>();
+router.use('*',async(c,next)=>{await next();c.header('Cache-Control','no-store');});
+router.get('/overview',async c=>c.json(await dashboardOverview(dashboardRuntime(c.env).db,c.req.query())));
+router.get('/resources',async c=>c.json(await dashboardResources(dashboardRuntime(c.env),selectedAccount(c.req.query()))));
+router.get('/trends',async c=>c.json(await dashboardTrends(dashboardRuntime(c.env).db,c.req.query())));
+router.get('/activity',async c=>c.json(await auditPage(dashboardRuntime(c.env).db,{accountId:c.req.query('accountId'),limit:6})));
+router.post('/collect',async c=>{const body=await c.req.json();return c.json(await collectResource(dashboardRuntime(c.env),positive(body.accountId),body.metric as ResourceMetric,body.refresh===true));});
+export default router;

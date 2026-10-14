@@ -10,11 +10,15 @@ import { canonicalizeMiddleware } from './middleware/canonicalize';
 import { apiLoggerMiddleware } from './middleware/apiLogger';
 import { responseWrapper } from './middleware/responseWrapper';
 import { getRecentLogs, queryLogs, getDistinctActions } from './db/models';
-import { getEnabledCatalogSources, updateCatalogSource } from './db/models';
+import { getCatalogReader } from './services/catalogRuntime';
+import { mapCatalogSources } from './services/catalogReader';
+import { getEnabledCatalogSources } from './db/models';
 import { getQuotaSummary, syncUsageFromCloudflare, invalidateAiCache } from './services/quotaTracker';
 import { getFakeNginxPage } from './pages/fakeNginx';
 
 import accountsRouter from './routes/accounts';
+import dashboardRouter from './routes/dashboard';
+import auditRouter from './routes/audit';
 import credentialsRouter from './routes/credentials';
 import dnsRouter from './routes/dns';
 import workersRouter from './routes/workers';
@@ -83,6 +87,8 @@ app.onError((err: any, c) => {
 });
 
 app.route('/api/accounts', accountsRouter);
+app.route('/api/dashboard', dashboardRouter);
+app.route('/api/audit-log', auditRouter);
 app.route('/api/credentials', credentialsRouter);
 app.route('/api/dns', dnsRouter);
 app.route('/api/workers', workersRouter);
@@ -160,36 +166,7 @@ export default {
     // Periodic catalog refresh every 6 hours
     try {
       const sources = await getEnabledCatalogSources(env.DB);
-      for (const source of sources) {
-        try {
-          const headers: Record<string, string> = {};
-          if (source.etag) headers['If-None-Match'] = source.etag;
-          const resp = await fetch(source.url, { headers });
-          if (resp.status === 304) {
-            await updateCatalogSource(env.DB, source.id, {
-              last_synced: new Date().toISOString(), last_status: 'ok', last_error: null,
-            });
-            continue;
-          }
-          if (!resp.ok) {
-            await updateCatalogSource(env.DB, source.id, {
-              last_status: 'error', last_error: `HTTP ${resp.status}`,
-            });
-            continue;
-          }
-          const json = await resp.json();
-          if (env.KV) await env.KV.put(`catalog:${source.id}`, JSON.stringify(json));
-          const etag = resp.headers.get('etag');
-          await updateCatalogSource(env.DB, source.id, {
-            etag: etag || null, last_synced: new Date().toISOString(),
-            last_status: 'ok', last_error: null,
-          });
-        } catch (e: any) {
-          await updateCatalogSource(env.DB, source.id, {
-            last_status: 'error', last_error: e.message,
-          });
-        }
-      }
+      await mapCatalogSources(sources,source=>getCatalogReader(env).read(source,{force:true}));
     } catch (e) {
       console.error('[Scheduled] Catalog refresh failed:', e);
     }

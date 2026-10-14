@@ -1,0 +1,140 @@
+{
+  "baseline": "c7beed9",
+  "chunks": [
+    {
+      "name": "AccountsView-D6AUxx4A.js",
+      "bytes": 37978,
+      "gzipBytes": 8942
+    },
+    {
+      "name": "AiUnifiedView-46iZgnX7.js",
+      "bytes": 41987,
+      "gzipBytes": 12216
+    },
+    {
+      "name": "AutoFitTable-C6oeJtBR.js",
+      "bytes": 1640,
+      "gzipBytes": 854
+    },
+    {
+      "name": "BrowserRenderView-QUxJI0nE.js",
+      "bytes": 9512,
+      "gzipBytes": 3244
+    },
+    {
+      "name": "DashboardView-zImL--4r.js",
+      "bytes": 11522,
+      "gzipBytes": 3944
+    },
+    {
+      "name": "DnsView-Bc5ec1jn.js",
+      "bytes": 86097,
+      "gzipBytes": 22680
+    },
+    {
+      "name": "Popover-BsdiHaMv.js",
+      "bytes": 45512,
+      "gzipBytes": 14742
+    },
+    {
+      "name": "SettingsView-C_gvvUqZ.js",
+      "bytes": 24268,
+      "gzipBytes": 5933
+    },
+    {
+      "name": "StorageView-BC2VEgeY.js",
+      "bytes": 47874,
+      "gzipBytes": 12693
+    },
+    {
+      "name": "StoreView-DpA5QCvP.js",
+      "bytes": 140069,
+      "gzipBytes": 56858
+    },
+    {
+      "name": "TunnelsView-C5XFvUmz.js",
+      "bytes": 48112,
+      "gzipBytes": 12444
+    },
+    {
+      "name": "WorkersView-D4TW9o5I.js",
+      "bytes": 83275,
+      "gzipBytes": 18573
+    },
+    {
+      "name": "client-IFitpDaw.js",
+      "bytes": 548986,
+      "gzipBytes": 170799
+    },
+    {
+      "name": "confirmOperation-C8Mi0NDk.js",
+      "bytes": 311,
+      "gzipBytes": 230
+    },
+    {
+      "name": "credentials-7ThnA78t.js",
+      "bytes": 423,
+      "gzipBytes": 214
+    },
+    {
+      "name": "dateFormat-_vSrQOeD.js",
+      "bytes": 630,
+      "gzipBytes": 265
+    },
+    {
+      "name": "demoAccounts-CyyZyHVL.js",
+      "bytes": 331,
+      "gzipBytes": 250
+    },
+    {
+      "name": "github-dark-Dhn2UGw7.js",
+      "bytes": 152285,
+      "gzipBytes": 51287
+    },
+    {
+      "name": "index-BYNicNGX.js",
+      "bytes": 791948,
+      "gzipBytes": 209376
+    },
+    {
+      "name": "purify.es-F_7NWVtX.js",
+      "bytes": 28073,
+      "gzipBytes": 10982
+    },
+    {
+      "name": "requestScope-CxpiuJWR.js",
+      "bytes": 214,
+      "gzipBytes": 171
+    },
+    {
+      "name": "settings-B7ECdziI.js",
+      "bytes": 276,
+      "gzipBytes": 183
+    },
+    {
+      "name": "storage-DjJFyAFm.js",
+      "bytes": 2244,
+      "gzipBytes": 713
+    },
+    {
+      "name": "store-DGvEP95n.js",
+      "bytes": 597,
+      "gzipBytes": 279
+    },
+    {
+      "name": "use-compitable-1y-vf4ux.js",
+      "bytes": 152,
+      "gzipBytes": 146
+    },
+    {
+      "name": "use-merged-state-B6DMCTV4.js",
+      "bytes": 162,
+      "gzipBytes": 148
+    },
+    {
+      "name": "useAccountLabels-ByDvAhqm.js",
+      "bytes": 922,
+      "gzipBytes": 570
+    }
+  ]
+}

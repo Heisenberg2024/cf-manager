@@ -1,0 +1,14 @@
+import {beforeAll,afterAll,it,expect} from 'vitest';
+import {Hono} from 'hono';
+import type {Env} from '../types';
+import {dashboardDb} from '../../../shared/tests/dashboard.fixture.mjs';
+import dashboard from '../routes/dashboard';
+import audit from '../routes/audit';
+import {responseWrapper} from '../middleware/responseWrapper';
+import {authMiddleware} from '../middleware/auth';
+import {errorDetails} from '../services/cfErrors';
+let f:ReturnType<typeof dashboardDb>,env:Env;
+const app=new Hono<{Bindings:Env}>();app.use('*',responseWrapper);app.use('*',authMiddleware);app.route('/dashboard',dashboard);app.route('/audit-log',audit);app.onError((error,c)=>{const d=errorDetails(error);return c.json({success:false,error:d},d.statusCode as 400);});
+beforeAll(()=>{f=dashboardDb();f.accounts(20);f.logs(100);env={DB:f.d1,API_SECRET:'test-secret',ENCRYPTION_KEY:'test'} as Env;});afterAll(()=>f.sqlite.close());
+for(const endpoint of ['/dashboard/overview','/dashboard/resources','/dashboard/trends?days=7','/dashboard/activity','/audit-log/page?limit=10','/audit-log/stats'])it(`Worker HTTP ${endpoint} matches Docker local response`,async()=>{const r=await app.request(endpoint,{headers:{Authorization:'Bearer test-secret'}},env);expect(r.status).toBe(200);expect(r.headers.get('cache-control')).toBe('no-store');const body=await r.json() as any;expect(body.success).toBe(true);expect(body.data).toBeDefined();expect(JSON.stringify(body)).not.toContain('api_token');});
+it('rejects unauthenticated requests and invalid cursors',async()=>{expect((await app.request('/dashboard/overview',{},env)).status).toBe(401);expect((await app.request('/audit-log/page?cursor=bad',{headers:{Authorization:'Bearer test-secret'}},env)).status).toBe(400);});

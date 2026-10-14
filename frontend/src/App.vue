@@ -135,9 +135,10 @@
 </template>
 
 <script setup lang="ts">
+import { useAccountStore } from './stores/accountStore';
 import { useWorkerStore } from './stores/workerStore';
 import { useDnsStore } from './stores/dnsStore';
-import { ref, reactive, computed, h, watch, onMounted, onBeforeUnmount } from 'vue';
+import { provide, ref, reactive, computed, h, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { darkTheme, zhCN, dateZhCN, enUS, dateEnUS } from 'naive-ui';
@@ -185,6 +186,7 @@ const authChecking = ref(true);
 const loginSecret = ref('');
 const loginLoading = ref(false);
 const appVersion = ref('');
+provide('appVersion',appVersion);
 const appCommit = ref('');
 
 function applyVersion(data: any) {
@@ -214,6 +216,7 @@ const navItems = computed(() => [
   { label: t('nav.render'), key: 'browser-render', iconComponent: ImageOutline },
   { label: t('nav.store'), key: 'store', iconComponent: StorefrontOutline },
   { label: t('nav.tunnels'), key: 'tunnels', iconComponent: GitBranchOutline },
+  { label: t('nav.auditLogs'), key: 'audit-logs', iconComponent: ServerOutline },
   { label: t('nav.settings'), key: 'settings', iconComponent: SettingsOutline },
 ]);
 
@@ -269,7 +272,7 @@ function onResize() {
 }
 
 function onAuthExpired() {
-  useDnsStore().resetSensitiveState(); useWorkerStore().resetSensitiveState();
+  useDnsStore().resetSensitiveState(); useWorkerStore().resetSensitiveState(); useAccountStore().resetSensitiveState();
   isAuthenticated.value = false;
   showLogin.value = true;
 }
@@ -309,7 +312,7 @@ async function handleLogin() {
     showLogin.value = false;
   } catch {
     localStorage.removeItem('api_token');
-    useDnsStore().resetSensitiveState(); useWorkerStore().resetSensitiveState();
+    useDnsStore().resetSensitiveState(); useWorkerStore().resetSensitiveState(); useAccountStore().resetSensitiveState();
     isAuthenticated.value = false;
     globalMessage.error(t('app.invalidApiSecret'));
   } finally {
@@ -318,8 +321,9 @@ async function handleLogin() {
 }
 
 function handleLogout() {
+  window.dispatchEvent(new Event('session-cleared'));
   localStorage.removeItem('api_token');
-  useDnsStore().resetSensitiveState(); useWorkerStore().resetSensitiveState();
+  useDnsStore().resetSensitiveState(); useWorkerStore().resetSensitiveState(); useAccountStore().resetSensitiveState();
   isAuthenticated.value = false;
   showLogin.value = true;
   loginSecret.value = '';
@@ -343,6 +347,7 @@ const menuOptions = computed(() => [
   { label: t('menu.ai'), key: 'ai', icon: renderIcon(SparklesOutline) },
   { label: t('menu.browserRender'), key: 'browser-render', icon: renderIcon(ImageOutline) },
   { label: t('menu.store'), key: 'store', icon: renderIcon(StorefrontOutline) },
+  { label: t('menu.auditLogs'), key: 'audit-logs', icon: renderIcon(ServerOutline) },
   { label: t('menu.settings'), key: 'settings', icon: renderIcon(SettingsOutline) },
 ]);
 

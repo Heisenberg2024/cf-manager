@@ -1,5 +1,6 @@
 import {displayAccount,normalizeAccountName} from '../services/accountName';
 import { ACCOUNT_SELECT, ensureCredential, getCredential, updateCredential } from './credentials';
+import { safeAuditEvent } from '../services/auditQueries';
 import { redact } from '../services/cfErrors';
 export interface Account {
   id: number;
@@ -66,7 +67,7 @@ export interface AuditLogRow {
   detail: string | null;
   status: string;
   created_at: string;
-  account_name?: string;
+  account_name?: string | null;
 }
 
 // ============ Account queries ============
@@ -287,9 +288,9 @@ export async function getRecentLogs(db: D1Database, limit = 20): Promise<AuditLo
   const { results } = await db.prepare(
     `SELECT l.*, a.name as account_name FROM audit_log l
      LEFT JOIN accounts a ON l.account_id = a.id
-     ORDER BY l.created_at DESC LIMIT ?`
+     ORDER BY l.created_at DESC, l.id DESC LIMIT ?`
   ).bind(safeLimit).all<AuditLogRow>();
-  return results;
+  return results.map(row => safeAuditEvent({...row, account_name:row.account_name??null}));
 }
 
 export interface LogFilter {
@@ -324,9 +325,9 @@ export async function queryLogs(db: D1Database, filter: LogFilter = {}): Promise
     `SELECT l.*, a.name as account_name FROM audit_log l
      LEFT JOIN accounts a ON l.account_id = a.id
      ${where}
-     ORDER BY l.created_at DESC LIMIT ?`
+     ORDER BY l.created_at DESC, l.id DESC LIMIT ?`
   ).bind(...params, limit).all<AuditLogRow>();
-  return results;
+  return results.map(row => safeAuditEvent({...row, account_name:row.account_name??null}));
 }
 
 /** 获取所有不重复的操作类型 */
@@ -421,7 +422,7 @@ export async function createCatalogSource(db: D1Database, data: {
 }
 
 export async function updateCatalogSource(db: D1Database, id: number, data: Partial<{
-  url: string; name: string; enabled: number; last_synced: string;
+  url: string; name: string; enabled: number; last_synced: string | null;
   last_status: string; last_error: string | null; etag: string | null;
 }>): Promise<void> {
   const sets: string[] = [];

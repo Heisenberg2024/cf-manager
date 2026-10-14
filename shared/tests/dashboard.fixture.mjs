@@ -1,0 +1,10 @@
+import { DatabaseSync } from 'node:sqlite';
+import { readFileSync } from 'node:fs';
+export function dashboardDb() {
+  const sqlite=new DatabaseSync(':memory:');sqlite.exec(readFileSync(new URL('../../worker/src/db/schema.sql',import.meta.url),'utf8'));
+  const db={async all(sql,params=[]){return sqlite.prepare(sql).all(...params);},async run(sql,params=[]){sqlite.prepare(sql).run(...params);}};
+  const d1={prepare(sql){let values=[];return {bind(...v){values=v;return this;},async all(){return {results:await db.all(sql,values)};},async run(){await db.run(sql,values);return {success:true};},async first(){return (await db.all(sql,values))[0]??null;}};}};
+  function accounts(n,duplicate=false){sqlite.exec('DELETE FROM accounts;DELETE FROM credentials;');const c=sqlite.prepare("INSERT INTO credentials(id,name,auth_type,api_token,status) VALUES(?,?,'token',?,'active')"),a=sqlite.prepare("INSERT INTO accounts(id,name,account_id,credential_id,auth_type,access_status,last_checked_at) VALUES(?,?,?,?,'token', 'available',CURRENT_TIMESTAMP)");sqlite.exec('BEGIN');for(let i=1;i<=n;i++){c.run(i,`Credential ${i}`,'synthetic');a.run(i,`Account ${i}`,duplicate?'a'.repeat(32):i.toString(16).padStart(32,'0'),i);}sqlite.exec('COMMIT');}
+  function logs(n){sqlite.exec('DELETE FROM audit_log;BEGIN');const insert=sqlite.prepare("INSERT INTO audit_log(account_id,action,target,status,created_at,detail) VALUES(1,?,?,?,? ,?)");for(let i=0;i<n;i++)insert.run(i%2?'create_worker':'delete_worker',i%3?'resource':'needle',i%5?'success':'error',`2026-10-${String(1+Math.floor(i/10000)).padStart(2,'0')} 12:00:00`,JSON.stringify({status:'success',count:1,env:{ANY_VALUE:'never-return-me'},api_token:'sensitive'}));sqlite.exec('COMMIT');}
+  return {db,sqlite,d1,accounts,logs};
+}

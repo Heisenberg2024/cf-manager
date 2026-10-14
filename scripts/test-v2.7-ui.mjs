@@ -26,6 +26,7 @@ const server=createServer(async(req,res)=>{try{
  if(u.pathname.startsWith('/api/')) {
   apiCalls.push({path,query:u.search,method:req.method});let text='';for await(const part of req)text+=part;const body=text?JSON.parse(text):{};
   if(path==='/settings')return send({platform:'docker',version:'synthetic'});
+  if(path==='/accounts/options')return send(accounts.slice(0,accountCount));
   if(path==='/accounts')return send({accounts:accounts.slice(0,accountCount)});
   if(path==='/credentials')return send(accounts.map(a=>({id:a.id,name:`Credential ${a.id}`})));
   if(path.includes('/dns/accounts/')){await sleep(10);return send({zones:Number(path.split('/')[3])===1?zones:[],meta:{state:'fresh'}});}
@@ -58,7 +59,7 @@ const server=createServer(async(req,res)=>{try{
 }catch(e){res.writeHead(500);res.end(String(e));}});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin=`http://127.0.0.1:${server.address().port}`,report={source:'Local isolated Chromium simulation, not production latency or P95',baseline,dns:[],workers:[]};let browser,currentPage;
 try {
- browser=await chromium.launch({headless:true});
+ browser=await chromium.launch({executablePath:process.env.CHROMIUM_EXECUTABLE||undefined,headless:true});
  for(const width of (process.env.UI_WIDTHS?process.env.UI_WIDTHS.split(',').map(Number):[1440,390])) for(size of [100,1000,10000]) {
   apiCalls=[];recordRows=0;cache=new WorkerResources(new ZoneDirectory());
   const context=await browser.newContext({viewport:{width,height:900},reducedMotion:'reduce'});await context.addInitScript(()=>{localStorage.setItem('api_token','fixture');localStorage.setItem('app_locale','zh-CN');localStorage.setItem('dns_selected_account','1');});

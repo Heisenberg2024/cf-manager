@@ -156,7 +156,7 @@ function renderModelLabel(option: any) {
 
 async function fetchAccounts() {
   try {
-    const [{ data }] = await Promise.all([accountsApi.getAll(), loadCredentialNames()]);
+    const [{ data }] = await Promise.all([accountsApi.getOptions('ai'), loadCredentialNames()]);
     const seen = new Set<string>();
     const accounts = (data.accounts || [])
       .filter((a: any) => a.is_active && (a.enabled_features || '').includes('ai'))

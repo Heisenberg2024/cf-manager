@@ -314,6 +314,7 @@
 </template>
 
 <script setup lang="ts">
+import { requestedAccountId } from '../utils/accountContext';
 import { useAccountLabels } from '../utils/useAccountLabels';
 import { ref, computed, h, onMounted, onBeforeUnmount, watch } from 'vue';
 import { NButton, NSpace, NInput, NSelect, NCheckbox, NTag, useMessage, useDialog } from 'naive-ui';
@@ -1140,13 +1141,13 @@ watch(activeTab, (tab) => {
 onMounted(async () => {
   try {
     await loadDemoAccounts();
-    const { data } = await accountsApi.getAll();
+    const { data } = await accountsApi.getOptions('storage');
     allAccounts.value = data.accounts || [];
   } catch {
     allAccounts.value = [];
   }
   if (accountOptions.value.length > 0) {
-    selectedAccount.value = accountOptions.value[0].value;
+    selectedAccount.value = accountOptions.value.find(a=>a.value===requestedAccountId())?.value ?? accountOptions.value[0].value;
     await checkR2Available();
     loadKvNamespaces();
   }

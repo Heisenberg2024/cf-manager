@@ -31,6 +31,7 @@ function cf(account){return async(path,init={})=>{cfCalls.push({path,method:init
  return {result:[]};};}
 const server=createServer(async(req,res)=>{try{const u=new URL(req.url,'http://fixture.local'),path=u.pathname.slice(4);let body='';for await(const chunk of req)body+=chunk;const data=body?JSON.parse(body):{};const send=(value,status=200)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(status<400?{success:true,data:value}:{success:false,error:{message:value,code:'FIXTURE'}}));};
  if(u.pathname.startsWith('/api/')){apiCalls.push({path,method:req.method,query:Object.fromEntries(u.searchParams)});
+ if(path==='/accounts/options')return send(accounts.slice(0,count).map(displayAccount));
  if(path==='/accounts')return send({accounts:accounts.slice(0,count).map(displayAccount),quota:{}});if(path==='/credentials')return send(accounts.slice(0,count).map(a=>({id:a.id,name:`Credential ${a.id}`})));
  if(path.startsWith('/settings')||path==='/health')return send({demo_account_ids:'',version:'2.8.0'});
  if(/^\/dns\/accounts\/\d+\/domains$/.test(path)){const id=Number(path.split('/')[3]);return send({zones:id===1?zones:[{...zones[0],id:`b-${id}`,name:`a${id}.test`,cfAccountId:id,accountName:`Account ${id}`}],meta:{state:'fresh'}});}
@@ -49,7 +50,7 @@ const server=createServer(async(req,res)=>{try{const u=new URL(req.url,'http://f
  }catch(error){res.writeHead(error.statusCode || 500,{'Content-Type':'application/json'});res.end(JSON.stringify({success:false,error:{message:error.message,code:error.code||'FIXTURE'}}));}});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin=`http://127.0.0.1:${server.address().port}`,report=[];
 let browser;
-try{browser=await chromium.launch({headless:true});for(const width of [1440,390])for(const dark of [false,true]){reset();count=width===1440?60:20;const context=await browser.newContext({viewport:{width,height:1000},colorScheme:dark?'dark':'light'}),page=await context.newPage();
+try{browser=await chromium.launch({executablePath:process.env.CHROMIUM_EXECUTABLE||undefined,headless:true});for(const width of [1440,390])for(const dark of [false,true]){reset();count=width===1440?60:20;const context=await browser.newContext({viewport:{width,height:1000},colorScheme:dark?'dark':'light'}),page=await context.newPage();
  await page.addInitScript(({dark})=>{localStorage.setItem('api_token','synthetic');localStorage.setItem('app_locale','zh-CN');localStorage.setItem('dns_selected_account','1');localStorage.setItem('themeMode',dark?'dark':'light');window.__revoked=0;const revoke=URL.revokeObjectURL;URL.revokeObjectURL=function(value){window.__revoked++;return revoke.call(URL,value);};},{dark});
  const started=Date.now();await page.goto(`${origin}${base}/dns`);await page.getByText('a1-000.test',{exact:true}).click();await page.getByText(zh.dns.cacheAndStatus,{exact:true}).click();await page.locator('.n-form-item').filter({hasText:zh.dns.cacheLevel}).locator('.n-base-selection').click();await page.getByText('Basic',{exact:true}).click();
  const settingsGets=()=>apiCalls.filter(c=>c.path.endsWith('/settings')&&c.path.startsWith('/dns/')&&c.method==='GET').length;

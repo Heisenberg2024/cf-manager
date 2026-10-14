@@ -110,8 +110,9 @@ export const useAccountStore = defineStore('accounts', () => {
     return data as Blob;
   }
 
+  function resetSensitiveState(){requestIdentity++;page.value=1;pageSize.value=10;filter.value='all';search.value='';accounts.value=[];quota.value=[];total.value=0;counts.value={all:0,active:0,unverified:0};loading.value=false;}
   return {
-    accounts, quota, loading,
+    resetSensitiveState, fetchOptions:accountsApi.getOptions, accounts, quota, loading,
     page, pageSize, filter, search, total, counts,
     fetchAccounts, setPage, setPageSize, setFilter, setSearch,
     createAccount, updateAccount, deleteAccount, testAccount, testBatch, updateFeatures, clearExhausted, importCsv, exportCsv,

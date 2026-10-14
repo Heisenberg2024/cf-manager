@@ -1,0 +1,29 @@
+{
+  "synthetic": true,
+  "report": [
+    {
+      "width": 1440,
+      "dark": false,
+      "readmeRequests": 2,
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "dark": true,
+      "readmeRequests": 2,
+      "passed": true
+    },
+    {
+      "width": 390,
+      "dark": false,
+      "readmeRequests": 2,
+      "passed": true
+    },
+    {
+      "width": 390,
+      "dark": true,
+      "readmeRequests": 2,
+      "passed": true
+    }
+  ]
+}

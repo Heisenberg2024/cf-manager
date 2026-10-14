@@ -3,15 +3,48 @@
     <n-h2>{{ t('store.title') }}</n-h2>
 
     <!-- Source Status Bar -->
-    <n-space v-if="sources.length > 0" align="center" style="margin-bottom: 12px">
-      <n-tag v-for="s in sources" :key="s.id" :type="s.last_status === 'ok' ? 'success' : s.last_status === 'error' ? 'error' : 'default'" size="small" round>
-        {{ s.name }}
-        <template #icon><n-icon :component="s.last_status === 'ok' ? CheckmarkCircle : s.last_status === 'error' ? CloseCircle : TimeOutline" /></template>
-        {{ s.last_status === 'ok' ? t('store.updated') : s.last_status === 'error' ? t('store.failed') : t('store.loading') }}
-      </n-tag>
-      <n-button size="small" @click="loadTemplates(true)" :loading="refreshing">{{ t('store.refreshCatalog') }}</n-button>
+    <n-space
+      v-if="sources.length > 0"
+      align="center"
+      style="margin-bottom: 12px"
+    >
+      <n-button
+        size="small"
+        :loading="refreshing"
+        @click="loadTemplates(true)"
+      >
+        {{ t('store.refreshCatalog') }}
+      </n-button>
     </n-space>
 
+    <n-space
+      v-if="sources.length"
+      style="margin-bottom:12px"
+      :wrap="true"
+    >
+      <n-space
+        v-for="source in sources"
+        :key="source.id"
+        align="center"
+      >
+        <n-tag
+          size="small"
+          :type="source.sync?.errorKind?'warning':'default'"
+        >
+          {{ source.name }} · {{ t(`catalogState.${source.sync?.state || 'unknown'}`) }}<template v-if="source.sync?.errorKind">
+            ({{ source.sync.errorKind }})
+          </template>
+        </n-tag>
+        <small style="opacity:.65">{{ t('catalogState.lastSuccess') }} {{ source.sync?.lastSuccessAt ? formatCN(source.sync.lastSuccessAt) : '—' }}</small>
+        <n-button
+          text
+          size="tiny"
+          @click="refreshSource(source.id)"
+        >
+          {{ t('common.refresh') }}
+        </n-button>
+      </n-space>
+    </n-space>
     <!-- Category Nav -->
     <StoreCategoryNav
       :types="typeCounts"
@@ -36,8 +69,19 @@
 
     <!-- Template Cards -->
     <n-spin :show="loading">
-      <n-grid v-if="filteredTemplates.length > 0" :cols="isMobile ? 1 : 3" :x-gap="12" :y-gap="12" responsive="screen" item-responsive>
-        <n-gi v-for="item in filteredTemplates" :key="item.template.id" span="1 m:1 l:1">
+      <n-grid
+        v-if="filteredTemplates.length > 0"
+        :cols="isMobile ? 1 : 3"
+        :x-gap="12"
+        :y-gap="12"
+        responsive="screen"
+        item-responsive
+      >
+        <n-gi
+          v-for="item in filteredTemplates"
+          :key="item.template.id"
+          span="1 m:1 l:1"
+        >
           <StoreCard
             :item="item"
             @detail="showDetail"
@@ -46,27 +90,68 @@
           />
         </n-gi>
       </n-grid>
-      <n-empty v-else-if="!loading" :description="t('store.noTemplates')" style="padding: 40px" />
+      <n-empty
+        v-else-if="!loading"
+        :description="t('store.noTemplates')"
+        style="padding: 40px"
+      />
     </n-spin>
 
     <!-- Detail Drawer -->
-    <n-drawer v-model:show="detailVisible" :width="isMobile ? '100%' : 720" placement="right">
-      <n-drawer-content :title="detailItem?.template.name || t('store.detail')" :native-scrollbar="true" body-content-style="height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden;" closable>
+    <n-drawer
+      v-model:show="detailVisible"
+      :width="isMobile ? '100%' : 720"
+      placement="right"
+    >
+      <n-drawer-content
+        :title="detailItem?.template.name || t('store.detail')"
+        :native-scrollbar="true"
+        body-content-style="height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden;"
+        closable
+      >
         <template v-if="detailItem">
           <div class="detail-layout">
             <!-- 头部：描述信息 + 按钮（不滚动） -->
             <div class="detail-header">
-              <n-descriptions label-placement="left" :column="1" size="small" bordered>
-                <n-descriptions-item :label="t('common.version')">{{ detailItem.template.version }}</n-descriptions-item>
-                <n-descriptions-item :label="t('common.type')">{{ detailItem.template.type }}</n-descriptions-item>
+              <n-descriptions
+                label-placement="left"
+                :column="1"
+                size="small"
+                bordered
+              >
+                <n-descriptions-item :label="t('common.version')">
+                  {{ detailItem.template.version }}
+                </n-descriptions-item>
+                <n-descriptions-item :label="t('common.type')">
+                  {{ detailItem.template.type }}
+                </n-descriptions-item>
                 <n-descriptions-item :label="t('store.author')">
-                  <a v-if="detailItem.template.author?.url" :href="detailItem.template.author.url" target="_blank" rel="noopener noreferrer">{{ detailItem.template.author.name }}</a>
+                  <a
+                    v-if="detailItem.template.author?.url"
+                    :href="detailItem.template.author.url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >{{ detailItem.template.author.name }}</a>
                   <span v-else>{{ detailItem.template.author?.name || '-' }}</span>
                 </n-descriptions-item>
-                <n-descriptions-item :label="t('store.source')">{{ detailItem.sourceName }}</n-descriptions-item>
-                <n-descriptions-item v-if="detailItem.sourceCount > 1" :label="t('store.multiSource', { count: detailItem.sourceCount })">{{ t('store.multiSource', { count: detailItem.sourceCount }) }}</n-descriptions-item>
-                <n-descriptions-item v-if="detailItem.template.homepage" :label="t('store.homepage')">
-                  <a :href="detailItem.template.homepage" target="_blank" rel="noopener noreferrer">{{ detailItem.template.homepage }}</a>
+                <n-descriptions-item :label="t('store.source')">
+                  {{ detailItem.sourceName }}
+                </n-descriptions-item>
+                <n-descriptions-item
+                  v-if="detailItem.sourceCount > 1"
+                  :label="t('store.multiSource', { count: detailItem.sourceCount })"
+                >
+                  {{ t('store.multiSource', { count: detailItem.sourceCount }) }}
+                </n-descriptions-item>
+                <n-descriptions-item
+                  v-if="detailItem.template.homepage"
+                  :label="t('store.homepage')"
+                >
+                  <a
+                    :href="detailItem.template.homepage"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >{{ detailItem.template.homepage }}</a>
                 </n-descriptions-item>
               </n-descriptions>
 
@@ -79,7 +164,9 @@
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  <template #icon><n-icon :component="LogoGithub" /></template>
+                  <template #icon>
+                    <n-icon :component="LogoGithub" />
+                  </template>
                   {{ t('store.goToRepo') }}
                 </n-button>
                 <n-button
@@ -98,33 +185,74 @@
 
             <!-- 中部：README 独立滚动 -->
             <div class="detail-readme">
-              <n-spin v-if="readmeLoading" size="small" style="padding: 8px 0">{{ t('store.loadingReadme') }}</n-spin>
-              <MarkdownRenderer v-else :content="readmeContent || detailItem.template.description || t('store.noReadme')" :base-url="readmeBaseUrl" :repo-url="repoRootUrl" />
+              <n-spin
+                v-if="readmeLoading"
+                size="small"
+                style="padding: 8px 0"
+              >
+                {{ t('store.loadingReadme') }}
+              </n-spin>
+              <MarkdownRenderer
+                v-else
+                :content="readmeContent || detailItem.template.description || t('store.noReadme')"
+                :base-url="readmeBaseUrl"
+                :repo-url="repoRootUrl"
+              />
             </div>
 
             <!-- 底部：绑定 + 环境变量 + 部署按钮（不滚动） -->
             <div class="detail-footer">
               <div v-if="detailItem.template.bindings?.length">
-                <n-h4 style="margin: 8px 0">{{ t('store.bindings') }}</n-h4>
-                <n-list size="small" bordered>
-                  <n-list-item v-for="b in detailItem.template.bindings" :key="b.name">
-                    <n-tag size="tiny" :type="bindingTagType(b.type)">{{ b.type }}</n-tag>
+                <n-h4 style="margin: 8px 0">
+                  {{ t('store.bindings') }}
+                </n-h4>
+                <n-list
+                  size="small"
+                  bordered
+                >
+                  <n-list-item
+                    v-for="b in detailItem.template.bindings"
+                    :key="b.name"
+                  >
+                    <n-tag
+                      size="tiny"
+                      :type="bindingTagType(b.type)"
+                    >
+                      {{ b.type }}
+                    </n-tag>
                     <span style="margin-left: 8px">{{ b.name }}</span>
-                    <span v-if="b.title" style="color: var(--text-color-3); margin-left: 8px">→ {{ b.title }}</span>
+                    <span
+                      v-if="b.title"
+                      style="color: var(--text-color-3); margin-left: 8px"
+                    >→ {{ b.title }}</span>
                   </n-list-item>
                 </n-list>
               </div>
 
               <div v-if="detailItem.template.env && Object.keys(detailItem.template.env).length">
-                <n-h4 style="margin: 8px 0">{{ t('store.envVars') }}</n-h4>
-                <n-list size="small" bordered>
-                  <n-list-item v-for="(v, k) in detailItem.template.env" :key="k">
+                <n-h4 style="margin: 8px 0">
+                  {{ t('store.envVars') }}
+                </n-h4>
+                <n-list
+                  size="small"
+                  bordered
+                >
+                  <n-list-item
+                    v-for="(v, k) in detailItem.template.env"
+                    :key="k"
+                  >
                     <span style="font-family: monospace">{{ k }}</span> = <span style="color: var(--text-color-3)">{{ v }}</span>
                   </n-list-item>
                 </n-list>
               </div>
 
-              <n-button type="primary" block @click="openDeploy(detailItem)">{{ t('store.deployTemplate') }}</n-button>
+              <n-button
+                type="primary"
+                block
+                @click="openDeploy(detailItem)"
+              >
+                {{ t('store.deployTemplate') }}
+              </n-button>
             </div>
           </div>
         </template>
@@ -141,8 +269,12 @@
 </template>
 
 <script setup lang="ts">
+import {formatCN} from '../utils/dateFormat';
+import { onUnmounted, watch } from 'vue';
+import { ReadmeLoader } from '../utils/readmeLoader';
+import { createRequestScope } from '../utils/requestScope';
 import { ref, computed, onMounted, h } from 'vue';
-import { CheckmarkCircle, CloseCircle, TimeOutline, LogoGithub } from '@vicons/ionicons5';
+import { LogoGithub } from '@vicons/ionicons5';
 import { NSpace, NA } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 import { storeApi } from '../api/store';
@@ -160,6 +292,8 @@ const loading = ref(false);
 const refreshing = ref(false);
 const templates = ref<TemplateItem[]>([]);
 const sources = ref<any[]>([]);
+const requestScope=createRequestScope();const sessionController=new AbortController();const readmes=new ReadmeLoader();let readmeRevision=0;
+const sourceTemplates=new Map<number,TemplateItem[]>();const sourceRevisions=new Map<number,number>();
 
 const searchText = ref('');
 const selectedType = ref<string | null>(null);
@@ -279,20 +413,16 @@ function clearFilters() {
   favOnly.value = false;
 }
 
+function mergeTemplates(){const merged=new Map<string,TemplateItem>();for(const source of sources.value){for(const item of sourceTemplates.get(source.id)??[]){const previous=merged.get(item.template.id);if(previous)previous.sourceCount++;else merged.set(item.template.id,{...item,sourceCount:1});}}templates.value=[...merged.values()];}
 async function loadTemplates(force = false) {
-  loading.value = !force;
-  refreshing.value = force;
-  try {
-    if (force) await storeApi.refresh();
-    const { data } = await storeApi.getTemplates();
-    templates.value = (data as any).templates || [];
-    sources.value = (data as any).sources || [];
-  } catch {
-  } finally {
-    loading.value = false;
-    refreshing.value = false;
-  }
+  requestScope.invalidate();const request=requestScope.begin('templates');loading.value=!templates.value.length;refreshing.value=force;
+  try{
+    const {data}=await storeApi.getTemplates({cacheOnly:true},sessionController.signal);if(!request.current())return;
+    sources.value=data.sources||[];sourceTemplates.clear();for(const source of sources.value)sourceTemplates.set(source.id,(data.templates||[]).filter((item:TemplateItem)=>item.sourceId===source.id));mergeTemplates();loading.value=false;
+    let index=0;await Promise.all(Array.from({length:Math.min(3,sources.value.length)},async()=>{while(index<sources.value.length){const source=sources.value[index++],sourceRevision=sourceRevisions.get(source.id)??0;try{if(force)await storeApi.refresh(source.id);const {data}=await storeApi.getTemplates({sourceId:source.id},sessionController.signal);if(!request.current())return;if(sourceRevision!==(sourceRevisions.get(source.id)??0))continue;sourceTemplates.set(source.id,data.templates||[]);const next=data.sources?.[0];if(next)sources.value=sources.value.map(s=>s.id===source.id?next:s);mergeTemplates();}catch{/* keep other successful sources */}}}));
+  }catch{/* preserve last successful display */}finally{if(request.current()){loading.value=false;refreshing.value=false;}}
 }
+async function refreshSource(id:number){sourceRevisions.set(id,(sourceRevisions.get(id)??0)+1);const request=requestScope.begin(`source-${id}`);try{await storeApi.refresh(id);const {data}=await storeApi.getTemplates({sourceId:id,cacheOnly:true},sessionController.signal);if(!request.current())return;sourceTemplates.set(id,data.templates||[]);if(data.sources?.[0])sources.value=sources.value.map(s=>s.id===id?data.sources[0]:s);mergeTemplates();}catch{/* preserve snapshot */}}
 
 // 从 GitHub 仓库地址推断 README 原始地址（支持 main/master 分支回退）
 function githubReadmeCandidates(url?: string): string[] {
@@ -306,46 +436,14 @@ function githubReadmeCandidates(url?: string): string[] {
 }
 
 async function showDetail(item: TemplateItem) {
-  detailItem.value = item;
-  detailVisible.value = true;
-  readmeContent.value = '';
-  readmeBaseUrl.value = '';
-  readmeLoading.value = true;
-  try {
-    // 优先使用 catalog 配置的 readmeUrl；未配置时从 homepage / source.url 推断
-    const urls: string[] = [];
-    if (item.template.readmeUrl) {
-      urls.push(item.template.readmeUrl);
-    } else {
-      const repoCandidates = githubReadmeCandidates(
-        item.template.homepage || item.template.source?.url,
-      );
-      urls.push(...repoCandidates);
-      // 如果上面没匹配到，再用 author.url 补试
-      if (repoCandidates.length === 0 && item.template.author?.url) {
-        urls.push(...githubReadmeCandidates(item.template.author?.url));
-      }
-    }
-    for (const url of urls) {
-      try {
-        const resp = await fetch(url);
-        if (resp.ok) {
-          const text = await resp.text();
-          if (text && !text.startsWith('404: Not Found')) {
-            readmeContent.value = text;
-            // 记录 README 所在目录，用于把相对图片/链接转成绝对地址
-            readmeBaseUrl.value = url.replace(/[^/]*$/, '');
-            break;
-          }
-        }
-      } catch {
-        // 尝试下一个候选地址
-      }
-    }
-  } finally {
-    readmeLoading.value = false;
-  }
+  const revision=++readmeRevision;detailItem.value=item;detailVisible.value=true;readmeContent.value='';readmeBaseUrl.value='';readmeLoading.value=true;
+  const urls=item.template.readmeUrl?[item.template.readmeUrl]:githubReadmeCandidates(item.template.homepage||item.template.source?.url||item.template.author?.url);
+  try{const result=await readmes.load(urls);if(revision===readmeRevision&&detailVisible.value){readmeContent.value=result.content;readmeBaseUrl.value=result.baseUrl;}}
+  catch{/* description remains available */}finally{if(revision===readmeRevision)readmeLoading.value=false;}
 }
+watch(detailVisible,visible=>{if(!visible){readmeRevision++;readmes.cancel();readmeContent.value='';readmeBaseUrl.value='';readmeLoading.value=false;}});
+function clearSession(){requestScope.invalidate();sessionController.abort();readmes.clear();sourceTemplates.clear();templates.value=[];sources.value=[];detailItem.value=null;detailVisible.value=false;deployItem.value=null;deployVisible.value=false;}
+onUnmounted(()=>{clearSession();window.removeEventListener('auth-expired',clearSession);});
 
 function openDeploy(item: TemplateItem) {
   deployItem.value = item;
@@ -391,10 +489,7 @@ function onDeployed(result: any) {
 onMounted(async () => {
   await storeApi.init();
   await loadTemplates();
-  // 已配置目录源但模板为空时，自动刷新拉取数据
-  if (sources.value.length > 0 && templates.value.length === 0) {
-    await loadTemplates(true);
-  }
+  window.addEventListener('auth-expired',clearSession);
 });
 </script>
 
