@@ -33,3 +33,6 @@ describe('DNS binding safety and precise access', () => {
     await expect(findAccountByDomain('same.test')).rejects.toMatchObject({ statusCode: 503, code: 'INCOMPLETE_ACCOUNT_SCAN' });
   });
 });
+
+// This resource-only fixture has no local SQL database; persistence has dedicated HTTP/isolate integration coverage.
+vi.mock('../src/services/dashboardCollector',async importOriginal=>({...await importOriginal<object>(),inventorySink:()=>async()=>{}}));

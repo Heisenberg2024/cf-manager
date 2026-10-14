@@ -1608,8 +1608,8 @@
     "unknownOrAbnormal": "Abnormal or unknown",
     "moduleError": "This module failed; refresh independently",
     "resourceCollection": "Resource snapshot collection",
-    "collectionHint": "Read-only background inventory. Leaving this page retains the job. Snapshots are not live health checks.",
-    "collectMissing": "Collect missing / stale snapshots",
+    "collectionHint": "Collection runs on the server and can continue after leaving this page. Refresh reads saved statistics only.",
+    "collectMissing": "Collect missing resources",
     "forceCollect": "Force selected scope",
     "pause": "Pause",
     "collectionDone": "Batch reads finished",
@@ -1624,7 +1624,7 @@
     "operations": "operations",
     "noHistory": "No recorded history",
     "dataTable": "View values",
-    "noKnownIssues": "No recorded attention items",
+    "noKnownIssues": "No confirmed issues",
     "remoteHealthNotice": "Local service health does not establish remote Cloudflare account or resource health. Collect unknown resources to check them.",
     "accountSummary": "Account summary",
     "searchAccounts": "Search account, credential or CF ID",
@@ -1640,7 +1640,7 @@
       "partial": "Partial coverage",
       "unknown": "Unknown",
       "loading": "Loading",
-      "error": "Read failed"
+      "error": "Sync failed"
     },
     "severity": {
       "critical": "Critical",
@@ -1657,7 +1657,8 @@
       "zonePending": "Zone pending",
       "unknownWrite": "Recorded unknown remote write outcome",
       "recentAuditFailure": "Recorded operation failure in last 7 days",
-      "staleSnapshot": "Resource snapshot is stale"
+      "staleSnapshot": "Resource snapshot is stale",
+      "tunnelHealth": "Known Tunnel health issue"
     },
     "metrics": {
       "zones": "Zones",
@@ -1694,7 +1695,30 @@
         "completed_with_errors": "Completed with read errors",
         "failed": "Scan failed"
       }
-    }
+    },
+    "subtitle": "Resources and operations across your accounts",
+    "more": "More actions",
+    "lastConfirmed": "Last confirmed",
+    "lastFailed": "Last failed collection",
+    "longUnupdated": "Not updated for an extended period",
+    "pendingSync": "Awaiting sync",
+    "historical": "Historical data awaiting confirmation",
+    "syncFailed": "Recent sync failed",
+    "pendingIssues": "Open issues",
+    "disabledOrUnverified": "Disabled or unverified",
+    "abnormal": "Known issues",
+    "resourceDistribution": "Resource distribution",
+    "entities": "entities",
+    "distributionHint": "Resource entity counts; unknown categories are excluded. Partial counts are confirmed lower bounds.",
+    "storageEntities": "KV Namespaces / D1 Databases / R2 Buckets",
+    "usageMetric": "Usage metric",
+    "forceCurrent": "Force scan selected account",
+    "lastSuccessfulScan": "Last successful full scan",
+    "lastError": "Last error",
+    "noCredential": "No credential",
+    "credentialError": "Credential error",
+    "accountAvailable": "Recently available",
+    "accountUnavailable": "Access error"
   },
   "audit": {
     "title": "Audit logs",

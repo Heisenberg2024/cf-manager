@@ -7,7 +7,7 @@ import {errorDetails} from './cfErrors';
 const base=(account:DnsBinding)=>`/accounts/${encodeURIComponent(account.account_id!)}/d1/database`;
 const path=(account:DnsBinding,db:string)=>`${base(account)}/${encodeURIComponent(db)}`;
 async function query(request:CfRequest,url:string,sql:string,params:unknown[]=[],signal?:AbortSignal){return boundQueryResult(await request(`${url}/query`,{method:'POST',body:JSON.stringify({sql,params}),signal,retry:false,maxResponseBytes:4*1024*1024}));}
-type Options={refresh?:boolean;background?:boolean;signal?:AbortSignal};
+type Options={refresh?:boolean;background?:boolean;signal?:AbortSignal;inventory?:boolean};
 export class D1Resources {
  constructor(private cache:Pick<BoundReadCache,'read'|'invalidate'|'uncached'>){}
  async databases(account:DnsBinding,request:CfRequest,options:Options={}){

@@ -1,0 +1,256 @@
+{
+  "synthetic": true,
+  "baseline": "dd0e3a3",
+  "limitations": "8 viewport/theme browser samples and 40 local HTTP samples per size; system load not isolated; not production P95",
+  "sizes": [
+    {
+      "n": 20,
+      "before": {
+        "firstMs": {
+          "samples": 8,
+          "p50": 197.54566599999998,
+          "p95": 224.35062499999913
+        },
+        "renderMs": {
+          "samples": 8,
+          "p50": 65.496,
+          "p95": 71.844
+        },
+        "scriptMs": {
+          "samples": 8,
+          "p50": 26.946,
+          "p95": 30.474
+        },
+        "heapBytes": {
+          "samples": 8,
+          "p50": 9758568,
+          "p95": 12154668
+        },
+        "http": {
+          "n": 20,
+          "samples": 40,
+          "p50": 4.110290999999961,
+          "p95": 6.951915999999983
+        },
+        "consistency": {
+          "n": 20,
+          "crossBrowser": true,
+          "cfOnNewBrowser": 0,
+          "successfulProducts": 118,
+          "ageCorrectProducts": 76,
+          "moduleReadPersisted": false,
+          "metadataPreserved": false
+        }
+      },
+      "after": {
+        "firstMs": {
+          "samples": 8,
+          "p50": 180.47054200000093,
+          "p95": 213.29020800000035
+        },
+        "renderMs": {
+          "samples": 8,
+          "p50": 56.830000000000005,
+          "p95": 66.605
+        },
+        "scriptMs": {
+          "samples": 8,
+          "p50": 26.856,
+          "p95": 30.038
+        },
+        "heapBytes": {
+          "samples": 8,
+          "p50": 9748832,
+          "p95": 12864008
+        },
+        "http": {
+          "n": 20,
+          "samples": 40,
+          "p50": 1.808708999999908,
+          "p95": 5.576458999999886
+        },
+        "consistency": {
+          "n": 20,
+          "crossBrowser": true,
+          "cfOnNewBrowser": 0,
+          "successfulProducts": 118,
+          "ageCorrectProducts": 118,
+          "moduleReadPersisted": true,
+          "metadataPreserved": true
+        }
+      },
+      "cold": {
+        "n": 20,
+        "firstMs": 181.55170799999905,
+        "completedAtFirstPaint": 0,
+        "total": 119
+      }
+    },
+    {
+      "n": 60,
+      "before": {
+        "firstMs": {
+          "samples": 8,
+          "p50": 203.8589580000007,
+          "p95": 220.12120800000048
+        },
+        "renderMs": {
+          "samples": 8,
+          "p50": 62.099000000000004,
+          "p95": 67.542
+        },
+        "scriptMs": {
+          "samples": 8,
+          "p50": 26.798,
+          "p95": 29.059
+        },
+        "heapBytes": {
+          "samples": 8,
+          "p50": 10957300,
+          "p95": 13377644
+        },
+        "http": {
+          "n": 60,
+          "samples": 40,
+          "p50": 11.27087500000016,
+          "p95": 12.62225000000035
+        },
+        "consistency": {
+          "n": 60,
+          "crossBrowser": true,
+          "cfOnNewBrowser": 0,
+          "successfulProducts": 338,
+          "ageCorrectProducts": 220,
+          "moduleReadPersisted": false,
+          "metadataPreserved": false
+        }
+      },
+      "after": {
+        "firstMs": {
+          "samples": 8,
+          "p50": 185.45808300000135,
+          "p95": 210.96925000000192
+        },
+        "renderMs": {
+          "samples": 8,
+          "p50": 57.725,
+          "p95": 63.678
+        },
+        "scriptMs": {
+          "samples": 8,
+          "p50": 26.564,
+          "p95": 29.44
+        },
+        "heapBytes": {
+          "samples": 8,
+          "p50": 10471004,
+          "p95": 13599908
+        },
+        "http": {
+          "n": 60,
+          "samples": 40,
+          "p50": 5.57562500000131,
+          "p95": 7.4904590000005555
+        },
+        "consistency": {
+          "n": 60,
+          "crossBrowser": true,
+          "cfOnNewBrowser": 0,
+          "successfulProducts": 338,
+          "ageCorrectProducts": 338,
+          "moduleReadPersisted": true,
+          "metadataPreserved": true
+        }
+      },
+      "cold": {
+        "n": 60,
+        "firstMs": 177.42216599999665,
+        "completedAtFirstPaint": 0,
+        "total": 343
+      }
+    },
+    {
+      "n": 120,
+      "before": {
+        "firstMs": {
+          "samples": 8,
+          "p50": 193.15000000000146,
+          "p95": 211.25150000000212
+        },
+        "renderMs": {
+          "samples": 8,
+          "p50": 58.495,
+          "p95": 64.227
+        },
+        "scriptMs": {
+          "samples": 8,
+          "p50": 26.188,
+          "p95": 27.524
+        },
+        "heapBytes": {
+          "samples": 8,
+          "p50": 11190900,
+          "p95": 13904088
+        },
+        "http": {
+          "n": 120,
+          "samples": 40,
+          "p50": 27.34245799999917,
+          "p95": 31.71229200000016
+        },
+        "consistency": {
+          "n": 120,
+          "crossBrowser": true,
+          "cfOnNewBrowser": 0,
+          "successfulProducts": 678,
+          "ageCorrectProducts": 443,
+          "moduleReadPersisted": false,
+          "metadataPreserved": false
+        }
+      },
+      "after": {
+        "firstMs": {
+          "samples": 8,
+          "p50": 186.9164579999997,
+          "p95": 211.14633400000093
+        },
+        "renderMs": {
+          "samples": 8,
+          "p50": 55.382,
+          "p95": 62.080999999999996
+        },
+        "scriptMs": {
+          "samples": 8,
+          "p50": 26.037000000000003,
+          "p95": 27.848000000000003
+        },
+        "heapBytes": {
+          "samples": 8,
+          "p50": 12251792,
+          "p95": 14359436
+        },
+        "http": {
+          "n": 120,
+          "samples": 40,
+          "p50": 15.541791999999987,
+          "p95": 17.65229100000215
+        },
+        "consistency": {
+          "n": 120,
+          "crossBrowser": true,
+          "cfOnNewBrowser": 0,
+          "successfulProducts": 678,
+          "ageCorrectProducts": 678,
+          "moduleReadPersisted": true,
+          "metadataPreserved": true
+        }
+      },
+      "cold": {
+        "n": 120,
+        "firstMs": 173.52779100000043,
+        "completedAtFirstPaint": 0,
+        "total": 686
+      }
+    }
+  ]
+}

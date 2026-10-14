@@ -52,3 +52,12 @@ export function errorDetails(error: unknown): { message: string; code: string; s
     kind,
   };
 }
+
+/** Only for an R2 bucket read: unavailable product/scope is expected on multi-account dashboards. */
+export function isR2Unavailable(error:unknown):boolean {
+  const detail=errorDetails(error);
+  if(detail.kind==='invalid'||detail.statusCode===401)return false;
+  const e=error as {cfCodes?:Array<string|number>;body?:string;message?:string};
+  if(/authentication error|unauthorized|invalid (?:api |access )?token|invalid credentials|unable to authenticate/i.test(`${e?.body??''} ${e?.message??''}`))return false;
+  return detail.kind==='permission'||e?.cfCodes?.some(code=>String(code)==='10042')===true||/\b10042\b|(?:please\s+)?enable R2/i.test(`${e?.body??''} ${e?.message??''}`);
+}

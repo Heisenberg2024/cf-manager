@@ -12,7 +12,7 @@ router.get('/resources',async c=>c.json(await dashboardResources(dashboardRuntim
 router.get('/trends',async c=>c.json(await dashboardTrends(dashboardRuntime(c.env).db,c.req.query())));
 router.get('/activity',async c=>c.json(await auditPage(dashboardRuntime(c.env).db,{accountId:c.req.query('accountId'),limit:6})));
 router.post('/collect',async c=>{const body=await c.req.json();return c.json(await dashboardScan(c.env).collectOne(positive(body.accountId),body.metric as ResourceMetric,body.refresh===true));});
-router.get('/scan/status',async c=>{const state=await dashboardScan(c.env).status();if(['queued','running'].includes(state.state))c.executionCtx.waitUntil(runDashboardScanBatch(c.env));return c.json(state);});
+router.get('/scan/status',async c=>{const state=await dashboardScan(c.env).status();const due=state.autoCollect&&state.state!=='paused'&&(state.pendingChanges||state.nextScanAt!==null&&state.nextScanAt<=Date.now());if(['queued','running'].includes(state.state)||due)c.executionCtx.waitUntil(runDashboardScanBatch(c.env,!!due));return c.json(state);});
 router.post('/scan/start',async c=>{const body=await c.req.json();const state=await dashboardScan(c.env).start({reason:body.reason??'manual',accountId:body.accountId!==undefined&&body.accountId!==null?positive(body.accountId):undefined,metrics:body.metrics,force:body.force===true});c.executionCtx.waitUntil(runDashboardScanBatch(c.env));return c.json(state);});
 router.post('/scan/pause',async c=>c.json(await dashboardScan(c.env).pause()));
 router.post('/scan/resume',async c=>{const state=await dashboardScan(c.env).resume();c.executionCtx.waitUntil(runDashboardScanBatch(c.env));return c.json(state);});

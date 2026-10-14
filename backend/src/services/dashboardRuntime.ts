@@ -5,5 +5,7 @@ import { dnsDirectory } from './dnsDirectory';
 import { workerResources } from './workerResourcesRuntime';
 import { tunnelResources } from './tunnelService';
 import { storageResources, d1Resources } from './storageRuntime';
+import {config} from '../config';
+import {scanConfig} from './dashboardScanTypes';
 import type { DashboardRuntime } from './dashboardCollector';
-export const dashboardRuntime:DashboardRuntime={db:localSql,accounts:async()=>getAllAccounts(),request:async a=>accountRequest(a as ReturnType<typeof getAllAccounts>[number]),zones:dnsDirectory,workers:workerResources,tunnels:tunnelResources,storage:storageResources,d1:d1Resources};
+export const dashboardRuntime:DashboardRuntime={recordWorkersUsage:true,intervalHours:scanConfig(config.dashboardScan).intervalHours,db:localSql,accounts:async()=>getAllAccounts(),request:async a=>accountRequest(a as ReturnType<typeof getAllAccounts>[number]),zones:dnsDirectory,workers:workerResources,tunnels:tunnelResources,storage:storageResources,d1:d1Resources};

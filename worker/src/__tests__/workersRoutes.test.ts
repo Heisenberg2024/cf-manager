@@ -59,3 +59,6 @@ describe('Worker Workers read HTTP parity',()=>{
   const result=await app.request('/workers/summary?accountId=1',{},env);expect(await result.json()).toMatchObject([{workerCount:null,pagesCount:1,requests:null,states:{workers:'permission'}}]);
  });
 });
+
+// This resource-only fixture has no local SQL database; persistence has dedicated HTTP/isolate integration coverage.
+vi.mock('../services/dashboardCollector',async importOriginal=>({...await importOriginal<object>(),inventorySink:()=>async()=>{}}));

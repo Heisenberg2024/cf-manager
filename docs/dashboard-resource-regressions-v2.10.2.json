@@ -1,0 +1,35 @@
+{
+  "synthetic": true,
+  "report": [
+    {
+      "name": "workers-pages-dns",
+      "script": "test-v2.7-ui.mjs",
+      "exitCode": 0,
+      "ms": 8217
+    },
+    {
+      "name": "zone-storage-d1",
+      "script": "test-v2.8-ui.mjs",
+      "exitCode": 0,
+      "ms": 7714
+    },
+    {
+      "name": "tunnels-rules",
+      "script": "test-tunnels-rules-ui.mjs",
+      "exitCode": 0,
+      "ms": 30594
+    },
+    {
+      "name": "catalog",
+      "script": "test-catalog-ui.mjs",
+      "exitCode": 0,
+      "ms": 15505
+    },
+    {
+      "name": "automatic",
+      "script": "test-dashboard-auto-ui.mjs",
+      "exitCode": 0,
+      "ms": 68178
+    }
+  ]
+}

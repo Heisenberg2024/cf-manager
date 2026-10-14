@@ -1591,7 +1591,7 @@
     "allAccounts": "全部账号",
     "allProducts": "全部产品",
     "days": "天",
-    "accounts": "Cloudflare Accounts",
+    "accounts": "Cloudflare 账号",
     "realAccounts": "去重 CF Account",
     "enabled": "本地活跃且启用",
     "disabled": "停用",
@@ -1608,8 +1608,8 @@
     "unknownOrAbnormal": "异常或未知",
     "moduleError": "此模块读取失败，可独立刷新",
     "resourceCollection": "资源快照采集",
-    "collectionHint": "后台只读扫描资源目录，离开本页后任务仍保留。快照不代表实时健康状态。",
-    "collectMissing": "采集缺失 / 过期快照",
+    "collectionHint": "采集在服务器后台运行，关闭抽屉或离开页面后仍可继续。普通刷新只读取已保存的统计。",
+    "collectMissing": "手动扫描缺失资源",
     "forceCollect": "强制采集所选范围",
     "pause": "暂停采集",
     "collectionDone": "本批读取已结束",
@@ -1624,7 +1624,7 @@
     "operations": "次操作",
     "noHistory": "暂无真实历史数据",
     "dataTable": "查看数值",
-    "noKnownIssues": "暂无已记录的关注事项",
+    "noKnownIssues": "暂无已确认异常",
     "remoteHealthNotice": "本地服务健康不代表全部 Cloudflare 账号及远端资源健康。未知资源需采集后确认。",
     "accountSummary": "账号概况",
     "searchAccounts": "搜索账号、凭证或 CF ID",
@@ -1640,7 +1640,7 @@
       "partial": "部分覆盖",
       "unknown": "未知",
       "loading": "读取中",
-      "error": "读取失败"
+      "error": "同步失败"
     },
     "severity": {
       "critical": "严重",
@@ -1657,7 +1657,8 @@
       "zonePending": "Zone 待生效",
       "unknownWrite": "已记录的远端写入结果未知",
       "recentAuditFailure": "最近 7 天已记录的操作失败",
-      "staleSnapshot": "资源统计快照已过期"
+      "staleSnapshot": "资源统计快照已过期",
+      "tunnelHealth": "Tunnel 已知异常"
     },
     "metrics": {
       "zones": "Zones",
@@ -1694,7 +1695,30 @@
         "completed_with_errors": "扫描完成，部分读取失败",
         "failed": "扫描失败"
       }
-    }
+    },
+    "subtitle": "多账号资源与运行概况",
+    "more": "更多操作",
+    "lastConfirmed": "上次成功确认",
+    "lastFailed": "最近同步失败",
+    "longUnupdated": "较长时间未更新",
+    "pendingSync": "等待同步",
+    "historical": "历史数据待确认",
+    "syncFailed": "最近同步失败",
+    "pendingIssues": "待处理问题",
+    "disabledOrUnverified": "停用或未验证",
+    "abnormal": "已知异常",
+    "resourceDistribution": "资源分布",
+    "entities": "个资源",
+    "distributionHint": "资源实体数量分布；未知类别不参与比例，部分统计为已确认数量下限。",
+    "storageEntities": "KV Namespaces / D1 Databases / R2 Buckets",
+    "usageMetric": "用量指标",
+    "forceCurrent": "强制扫描当前账号",
+    "lastSuccessfulScan": "最近成功的完整扫描",
+    "lastError": "上次错误",
+    "noCredential": "未绑定凭证",
+    "credentialError": "凭证异常",
+    "accountAvailable": "最近可用",
+    "accountUnavailable": "访问异常"
   },
   "audit": {
     "title": "审计日志",

@@ -35,6 +35,8 @@
           y="108"
         >0</text>
         <polyline
+          v-for="(path,index) in paths"
+          :key="index"
           :points="path"
           fill="none"
           stroke="var(--primary-color, #18a058)"
@@ -47,14 +49,16 @@
           :cy="y(point.count)"
           r="3"
           fill="currentColor"
+          tabindex="0"
+          :aria-label="`${point.date}: ${point.count.toLocaleString()} ${unit}`"
         ><title>{{ point.date }}: {{ point.count.toLocaleString() }} {{ unit }}</title></circle>
         <text
           x="40"
           y="127"
-        >{{ points[0]?.date.slice(5) }}</text><text
+        >{{ (startDate??points[0]?.date)?.slice(5) }}</text><text
           x="400"
           y="127"
-        >{{ points.at(-1)?.date.slice(5) }}</text>
+        >{{ (endDate??points.at(-1)?.date)?.slice(5) }}</text>
       </svg>
       <details>
         <summary>{{ t('overview.dataTable') }}</summary><div class="trend-values">
@@ -70,12 +74,14 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-const props=defineProps<{title:string;unit:string;points:Array<{date:string;count:number}>}>();
+const props=defineProps<{title:string;unit:string;points:Array<{date:string;count:number}>;startDate?:string;endDate?:string}>();
 const {t}=useI18n();
 const max=computed(()=>Math.max(1,...props.points.map(p=>p.count)));
-const x=(i:number)=>40+(props.points.length<2?205:i/(props.points.length-1)*410);
+const domain=computed(()=>[Date.parse(props.startDate??props.points[0]?.date??''),Date.parse(props.endDate??props.points.at(-1)?.date??'')]);
+const x=(i:number)=>40+(domain.value[1]===domain.value[0]?205:(Date.parse(props.points[i]!.date)-domain.value[0]!)/(domain.value[1]!-domain.value[0]!)*410);
 const y=(n:number)=>106-n/max.value*94;
-const path=computed(()=>props.points.map((p,i)=>`${x(i)},${y(p.count)}`).join(' '));
+// Missing dates are gaps, not fabricated zeroes or interpolated observations.
+const paths=computed(()=>{const segments:string[][]=[];props.points.forEach((p,i)=>{if(i===0||Date.parse(p.date)-Date.parse(props.points[i-1]!.date)>86400000)segments.push([]);segments.at(-1)!.push(`${x(i)},${y(p.count)}`);});return segments.filter(s=>s.length>1).map(s=>s.join(' '));});
 </script>
 <style scoped>
 .usage-trend{min-width:0}.trend-title{display:flex;justify-content:space-between;gap:12px;margin-bottom:12px}.trend-title span,summary{font-size:12px;opacity:.65}svg{width:100%;max-height:180px;color:var(--n-text-color);overflow:visible}svg text{fill:currentColor;font-size:10px;opacity:.6}.axis{stroke:currentColor;opacity:.15}.trend-values{display:grid;font-size:12px;gap:4px;max-height:140px;overflow:auto}

@@ -1,0 +1,118 @@
+{
+  "synthetic": true,
+  "date": "2026-10-14",
+  "baseline": "dd0e3a3f0b145bde5042562d416a00422eabbaef",
+  "version": "2.10.2",
+  "baselineRecordedTests": 981,
+  "tests": {
+    "backend": 483,
+    "worker": 428,
+    "frontend": 123
+  },
+  "totalTests": 1034,
+  "lint": {
+    "backend": {
+      "errors": 0,
+      "warnings": 446
+    },
+    "worker": {
+      "errors": 0,
+      "warnings": 383
+    },
+    "frontend": {
+      "errors": 0,
+      "warnings": 3839
+    }
+  },
+  "typecheck": {
+    "backend": true,
+    "worker": true,
+    "frontend": true
+  },
+  "builds": {
+    "backend": true,
+    "frontend": true,
+    "worker": true,
+    "zip": true,
+    "scheduler": true
+  },
+  "schema": true,
+  "docker": {
+    "image": "cf-manager:codex-2102-audit",
+    "architecture": "ARM64",
+    "build": true,
+    "runtimeMatrix": true,
+    "recovery": {
+      "synthetic": true,
+      "image": "cf-manager:codex-2102-audit",
+      "accounts": 4,
+      "total": 28,
+      "crash": {
+        "jobId": "0944e705-41a9-4373-b1a6-95d2b6f9c67a",
+        "completedBeforeKill": 2,
+        "recoveredState": "completed",
+        "resumeMs": 116860,
+        "completedResourcesNotReread": true,
+        "leaseMs": 90000
+      },
+      "graceful": {
+        "jobId": "cb863d00-67d0-464d-b94a-cc35ec68074e",
+        "completedBeforeStop": 0,
+        "completed": 28,
+        "resumeMs": 28714
+      },
+      "simulatedCloudflareCalls": 30,
+      "realCloudflareCalls": 0
+    }
+  },
+  "d1Local": {
+    "allStatementsSucceeded": true,
+    "preservedCount": 25,
+    "epochAfterRename": 0,
+    "epochAfterSecurityChange": 1,
+    "countAfterSecurityChange": 0
+  },
+  "browser": {
+    "consistencyCases": 32,
+    "originalDashboardCases": 32,
+    "scrollCases": 16,
+    "resourceModules": [
+      {
+        "name": "workers-pages-dns",
+        "script": "test-v2.7-ui.mjs",
+        "exitCode": 0,
+        "ms": 8217
+      },
+      {
+        "name": "zone-storage-d1",
+        "script": "test-v2.8-ui.mjs",
+        "exitCode": 0,
+        "ms": 7714
+      },
+      {
+        "name": "tunnels-rules",
+        "script": "test-tunnels-rules-ui.mjs",
+        "exitCode": 0,
+        "ms": 30594
+      },
+      {
+        "name": "catalog",
+        "script": "test-catalog-ui.mjs",
+        "exitCode": 0,
+        "ms": 15505
+      },
+      {
+        "name": "automatic",
+        "script": "test-dashboard-auto-ui.mjs",
+        "exitCode": 0,
+        "ms": 68178
+      }
+    ]
+  },
+  "boundaries": [
+    "No real Cloudflare credentials or provider writes",
+    "No remote D1 migration or production deployment",
+    "No native AMD64 acceptance",
+    "Existing lint warnings and frontend large chunk warning retained"
+  ]
+}

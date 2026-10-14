@@ -1,8 +1,9 @@
 import type { CfEnvelope, CfRequest } from './accountDiscovery';
 import { errorDetails } from './cfErrors';
 import { ReadScheduler, type ReadMetric } from './readScheduler';
+import type { InventorySink, UsageSink } from './snapshotIdentity';
 
-export interface DnsBinding { id: number; name: string; account_id: string | null; credential_id?: number; is_enabled?: number; is_active: number; enabled_features: string; updated_at?: string; auth_type?: string; api_token?: string | null; api_key?: string | null; email?: string | null; proxy_url?: string; proxy_enabled?: number }
+export interface DnsBinding { snapshot_epoch?:number; id: number; name: string; account_id: string | null; credential_id?: number; is_enabled?: number; is_active: number; enabled_features: string; updated_at?: string; auth_type?: string; api_token?: string | null; api_key?: string | null; email?: string | null; proxy_url?: string; proxy_enabled?: number }
 export interface DnsZone { id: string; name: string; status: string; paused?: boolean; account: { id: string; name?: string }; plan?: unknown; name_servers?: string[]; cfAccountId: number; credentialId?: number; accountName: string }
 export interface ZoneSnapshot { zones: DnsZone[]; meta: { accountId: number; state: 'fresh' | 'miss' | 'stale' | 'error'; fetchedAt?: number; error?: string; durationMs?: number } }
 export function parseZoneContext(query: { accountId?: unknown; zoneId?: unknown }): { accountId?: number; zoneId?: string } {
@@ -40,6 +41,8 @@ export class ZoneDirectory {
   private revision = 0;
   private revisions = new Map<number, number>();
   readonly scheduler: ReadScheduler;
+  inventory?:InventorySink;
+  usage?:UsageSink;
   constructor(private metric: (value: ReadMetric) => void = () => {}, private freshMs = 30000, private staleMs = 300000, private capacity = 500) { this.scheduler = new ReadScheduler(metric); }
   private epoch(accountId: number) { return `${this.revision}:${this.revisions.get(accountId) || 0}`; }
   invalidate(accountId?: number, cloudflareAccountId?: string | null) {
@@ -64,7 +67,7 @@ export class ZoneDirectory {
     const signature = await bindingSignature(account);
     return this.scheduler.run(`${revision}:${signature}:${path}`, account.id, signal => request(path, { signal }), options);
   }
-  async list(account: DnsBinding, request: CfRequest, options: { refresh?: boolean; background?:boolean; waitUntil?: (promise: Promise<unknown>) => void; signal?:AbortSignal } = {}): Promise<ZoneSnapshot> {
+  async list(account: DnsBinding, request: CfRequest, options: { refresh?: boolean; background?:boolean; waitUntil?: (promise: Promise<unknown>) => void; signal?:AbortSignal; inventory?:boolean } = {}): Promise<ZoneSnapshot> {
     requireDnsBinding(account);
     this.metric({ event: 'zone_lookup', accountId: account.id });
     const revision = this.epoch(account.id);
@@ -82,10 +85,11 @@ export class ZoneDirectory {
         const raw = await this.all(account, request, `/zones?account.id=${encodeURIComponent(account.account_id!)}`, 50, { background, revision, signal:options.signal });
         const zones = (raw as DnsZone[]).filter(z => z.account?.id === account.account_id).map(z => ({ id: z.id, name: z.name, status: z.paused ? 'paused' : z.status, paused: z.paused, account: z.account, plan: z.plan, name_servers: z.name_servers, cfAccountId: account.id, credentialId: account.credential_id, accountName: account.name }));
         const snapshot: ZoneSnapshot = { zones, meta: { accountId: account.id, state: 'miss', fetchedAt: Date.now(), durationMs: Date.now() - started } };
+        if (this.entries.get(account.id) === current && options.inventory!==false) await this.inventory?.(account,'zones',zones,started,snapshot.meta.fetchedAt!);
         if (this.entries.get(account.id) === current) { current.snapshot = snapshot; current.failed = undefined; current.failedAt = undefined; }
         this.metric({ event: 'zone_loaded', accountId: account.id, durationMs: Date.now() - started });
         return snapshot;
-      })().catch(error => { current.failed = errorDetails(error).kind; current.failedAt=Date.now(); this.metric({ event: 'zone_failed', accountId: account.id, durationMs: Date.now() - started }); throw error; }).finally(() => { if (current.flight === pending) current.flight = undefined; });
+      })().catch(async error => { if(this.entries.get(account.id)===current&&options.inventory!==false&&!options.signal?.aborted)await this.inventory?.(account,'zones',null,started,Date.now(),error); current.failed = errorDetails(error).kind; current.failedAt=Date.now(); this.metric({ event: 'zone_failed', accountId: account.id, durationMs: Date.now() - started }); throw error; }).finally(() => { if (current.flight === pending) current.flight = undefined; });
       current.flight = pending; return pending;
     };
     if (!options.refresh && entry.snapshot && age < this.freshMs && !entry.failed) { this.metric({ event: 'zone_hit', accountId: account.id }); return { zones: entry.snapshot.zones, meta: { ...entry.snapshot.meta, state: 'fresh' } }; }
@@ -114,7 +118,7 @@ export class ZoneDirectory {
     if (!Array.isArray(data.result)) throw Object.assign(new Error('Unexpected Cloudflare record page'), { statusCode: 502 });
     return { records: data.result, meta: { ...data.result_info, scope: 'page' as const } };
   }
-  async all(account: DnsBinding, request: CfRequest, path: string, perPage: number, options: { background?: boolean; signal?: AbortSignal; revision?: string } = {}): Promise<unknown[]> {
+  async all(account: DnsBinding, request: CfRequest, path: string, perPage: number, options: { background?: boolean; signal?: AbortSignal; revision?: string; inventory?:boolean } = {}): Promise<unknown[]> {
     const rows: unknown[] = [];
     for (let page = 1; page <= 1000; page++) {
       const data = await this.request(account, request, `${path}${path.includes('?') ? '&' : '?'}page=${page}&per_page=${perPage}`, options);

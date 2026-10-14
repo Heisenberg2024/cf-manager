@@ -126,3 +126,6 @@ describe('Worker DNS routes', () => {
     expect(mocks.cfFetch).toHaveBeenCalledWith(account, '/zones/zone-a/dns_records/record-1', 'test-key', { method: 'DELETE' });
   });
 });
+
+// This resource-only fixture has no local SQL database; persistence has dedicated HTTP/isolate integration coverage.
+vi.mock('../services/dashboardCollector',async importOriginal=>({...await importOriginal<object>(),inventorySink:()=>async()=>{}}));

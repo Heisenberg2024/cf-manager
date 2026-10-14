@@ -148,3 +148,9 @@ backend/src/services/dashboardScanTypes.ts
 worker/src/services/dashboardScan.ts
 worker/src/services/dashboardScanTypes.ts
 worker/scheduler-dist/
+# Inventory identity is generated from shared/snapshotIdentity.ts
+backend/src/services/snapshotIdentity.ts
+worker/src/services/snapshotIdentity.ts
+
+# Local Wrangler build/cache artifacts
+/.wrangler/

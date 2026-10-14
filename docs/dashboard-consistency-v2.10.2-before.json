@@ -1,0 +1,607 @@
+{
+  "synthetic": true,
+  "backend": "real Express / better-sqlite3, isolated temporary DB",
+  "baseline": true,
+  "viewportCases": [
+    {
+      "n": 0,
+      "width": 1440,
+      "dark": false,
+      "firstMs": 241.8850409999999,
+      "heapBytes": 10789992,
+      "renderMs": 71.497,
+      "scriptMs": 47.785000000000004,
+      "taskMs": 230.069,
+      "cfOnOpen": 0,
+      "scanCF": 0,
+      "maxActive": 0,
+      "scroll": {
+        "desktop": 650,
+        "mobile": 0
+      }
+    },
+    {
+      "n": 0,
+      "width": 1440,
+      "dark": true,
+      "firstMs": 195.29933299999993,
+      "heapBytes": 10514348,
+      "renderMs": 62.233999999999995,
+      "scriptMs": 29.791,
+      "taskMs": 188.021,
+      "cfOnOpen": 0,
+      "scanCF": 0,
+      "maxActive": 0,
+      "scroll": {
+        "desktop": 650,
+        "mobile": 0
+      }
+    },
+    {
+      "n": 0,
+      "width": 1024,
+      "dark": false,
+      "firstMs": 182.1997919999999,
+      "heapBytes": 10473992,
+      "renderMs": 59.625,
+      "scriptMs": 26.82,
+      "taskMs": 175.71200000000002,
+      "cfOnOpen": 0,
+      "scanCF": 0,
+      "maxActive": 0,
+      "scroll": {
+        "desktop": 650,
+        "mobile": 0
+      }
+    },
+    {
+      "n": 0,
+      "width": 1024,
+      "dark": true,
+      "firstMs": 187.22020900000007,
+      "heapBytes": 10516676,
+      "renderMs": 64.681,
+      "scriptMs": 25.846,
+      "taskMs": 183.637,
+      "cfOnOpen": 0,
+      "scanCF": 0,
+      "maxActive": 0,
+      "scroll": {
+        "desktop": 650,
+        "mobile": 0
+      }
+    },
+    {
+      "n": 0,
+      "width": 768,
+      "dark": false,
+      "firstMs": 163.60500000000002,
+      "heapBytes": 9918180,
+      "renderMs": 57.56700000000001,
+      "scriptMs": 25.069000000000003,
+      "taskMs": 155.04100000000003,
+      "cfOnOpen": 0,
+      "scanCF": 0,
+      "maxActive": 0,
+      "scroll": {
+        "desktop": 0,
+        "mobile": 660
+      }
+    },
+    {
+      "n": 0,
+      "width": 768,
+      "dark": true,
+      "firstMs": 158.74541599999975,
+      "heapBytes": 9938644,
+      "renderMs": 51.56,
+      "scriptMs": 27.577,
+      "taskMs": 145.614,
+      "cfOnOpen": 0,
+      "scanCF": 0,
+      "maxActive": 0,
+      "scroll": {
+        "desktop": 0,
+        "mobile": 660
+      }
+    },
+    {
+      "n": 0,
+      "width": 390,
+      "dark": false,
+      "firstMs": 154.40479200000027,
+      "heapBytes": 9952004,
+      "renderMs": 54.146,
+      "scriptMs": 24.642,
+      "taskMs": 144.40800000000002,
+      "cfOnOpen": 0,
+      "scanCF": 0,
+      "maxActive": 0,
+      "scroll": {
+        "desktop": 0,
+        "mobile": 660
+      }
+    },
+    {
+      "n": 0,
+      "width": 390,
+      "dark": true,
+      "firstMs": 159.81104199999936,
+      "heapBytes": 9990840,
+      "renderMs": 57.785000000000004,
+      "scriptMs": 26.116,
+      "taskMs": 151.7,
+      "cfOnOpen": 0,
+      "scanCF": 0,
+      "maxActive": 0,
+      "scroll": {
+        "desktop": 0,
+        "mobile": 660
+      }
+    },
+    {
+      "n": 20,
+      "width": 1440,
+      "dark": false,
+      "firstMs": 205.33562500000062,
+      "heapBytes": 12136476,
+      "renderMs": 64.883,
+      "scriptMs": 27.336,
+      "taskMs": 199.211,
+      "cfOnOpen": 0,
+      "scanCF": 119,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 650,
+        "mobile": 0
+      }
+    },
+    {
+      "n": 20,
+      "width": 1440,
+      "dark": true,
+      "firstMs": 196.72500000000036,
+      "heapBytes": 11941036,
+      "renderMs": 61.223,
+      "scriptMs": 25.413999999999998,
+      "taskMs": 191.945,
+      "cfOnOpen": 0,
+      "scanCF": 119,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 650,
+        "mobile": 0
+      }
+    },
+    {
+      "n": 20,
+      "width": 1024,
+      "dark": false,
+      "firstMs": 205.48624999999993,
+      "heapBytes": 12113184,
+      "renderMs": 65.496,
+      "scriptMs": 26.946,
+      "taskMs": 196.78300000000002,
+      "cfOnOpen": 0,
+      "scanCF": 119,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 650,
+        "mobile": 0
+      }
+    },
+    {
+      "n": 20,
+      "width": 1024,
+      "dark": true,
+      "firstMs": 224.35062499999913,
+      "heapBytes": 12154668,
+      "renderMs": 71.432,
+      "scriptMs": 29.842,
+      "taskMs": 215.909,
+      "cfOnOpen": 0,
+      "scanCF": 119,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 650,
+        "mobile": 0
+      }
+    },
+    {
+      "n": 20,
+      "width": 768,
+      "dark": false,
+      "firstMs": 197.54566599999998,
+      "heapBytes": 9700828,
+      "renderMs": 65.95200000000001,
+      "scriptMs": 28.035,
+      "taskMs": 193.852,
+      "cfOnOpen": 0,
+      "scanCF": 119,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 0,
+        "mobile": 660
+      }
+    },
+    {
+      "n": 20,
+      "width": 768,
+      "dark": true,
+      "firstMs": 197.34033399999862,
+      "heapBytes": 9758568,
+      "renderMs": 65.544,
+      "scriptMs": 26.43,
+      "taskMs": 188.20999999999998,
+      "cfOnOpen": 0,
+      "scanCF": 119,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 0,
+        "mobile": 660
+      }
+    },
+    {
+      "n": 20,
+      "width": 390,
+      "dark": false,
+      "firstMs": 192.77437500000087,
+      "heapBytes": 9701116,
+      "renderMs": 65.43,
+      "scriptMs": 26.519000000000002,
+      "taskMs": 187.89700000000002,
+      "cfOnOpen": 0,
+      "scanCF": 119,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 0,
+        "mobile": 660
+      }
+    },
+    {
+      "n": 20,
+      "width": 390,
+      "dark": true,
+      "firstMs": 212.66775000000052,
+      "heapBytes": 9757676,
+      "renderMs": 71.844,
+      "scriptMs": 30.474,
+      "taskMs": 203.00799999999998,
+      "cfOnOpen": 0,
+      "scanCF": 119,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 0,
+        "mobile": 660
+      }
+    },
+    {
+      "n": 60,
+      "width": 1440,
+      "dark": false,
+      "firstMs": 201.52170800000022,
+      "heapBytes": 12945148,
+      "renderMs": 62.099000000000004,
+      "scriptMs": 26.554000000000002,
+      "taskMs": 193.56799999999998,
+      "cfOnOpen": 0,
+      "scanCF": 343,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 650,
+        "mobile": 0
+      }
+    },
+    {
+      "n": 60,
+      "width": 1440,
+      "dark": true,
+      "firstMs": 203.8589580000007,
+      "heapBytes": 13165020,
+      "renderMs": 59.923,
+      "scriptMs": 26.22,
+      "taskMs": 194.12199999999999,
+      "cfOnOpen": 0,
+      "scanCF": 343,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 650,
+        "mobile": 0
+      }
+    },
+    {
+      "n": 60,
+      "width": 1024,
+      "dark": false,
+      "firstMs": 205.51024999999936,
+      "heapBytes": 12637516,
+      "renderMs": 63.861000000000004,
+      "scriptMs": 25.336000000000002,
+      "taskMs": 196.889,
+      "cfOnOpen": 0,
+      "scanCF": 343,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 650,
+        "mobile": 0
+      }
+    },
+    {
+      "n": 60,
+      "width": 1024,
+      "dark": true,
+      "firstMs": 220.12120800000048,
+      "heapBytes": 13377644,
+      "renderMs": 67.542,
+      "scriptMs": 27.861,
+      "taskMs": 210.19199999999998,
+      "cfOnOpen": 0,
+      "scanCF": 343,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 650,
+        "mobile": 0
+      }
+    },
+    {
+      "n": 60,
+      "width": 768,
+      "dark": false,
+      "firstMs": 188.8004579999979,
+      "heapBytes": 10004560,
+      "renderMs": 56.92999999999999,
+      "scriptMs": 27.973000000000003,
+      "taskMs": 177.651,
+      "cfOnOpen": 0,
+      "scanCF": 343,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 0,
+        "mobile": 660
+      }
+    },
+    {
+      "n": 60,
+      "width": 768,
+      "dark": true,
+      "firstMs": 192.65412500000093,
+      "heapBytes": 10956216,
+      "renderMs": 60.975,
+      "scriptMs": 26.798,
+      "taskMs": 183.60399999999998,
+      "cfOnOpen": 0,
+      "scanCF": 343,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 0,
+        "mobile": 660
+      }
+    },
+    {
+      "n": 60,
+      "width": 390,
+      "dark": false,
+      "firstMs": 204.6740839999984,
+      "heapBytes": 10005704,
+      "renderMs": 63.337,
+      "scriptMs": 29.059,
+      "taskMs": 192.185,
+      "cfOnOpen": 0,
+      "scanCF": 343,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 0,
+        "mobile": 660
+      }
+    },
+    {
+      "n": 60,
+      "width": 390,
+      "dark": true,
+      "firstMs": 208.96491599999717,
+      "heapBytes": 10957300,
+      "renderMs": 64.999,
+      "scriptMs": 28.998,
+      "taskMs": 196.691,
+      "cfOnOpen": 0,
+      "scanCF": 343,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 0,
+        "mobile": 660
+      }
+    },
+    {
+      "n": 120,
+      "width": 1440,
+      "dark": false,
+      "firstMs": 196.46729200000118,
+      "heapBytes": 13842976,
+      "renderMs": 60.484,
+      "scriptMs": 24.514,
+      "taskMs": 190.743,
+      "cfOnOpen": 0,
+      "scanCF": 687,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 650,
+        "mobile": 0
+      }
+    },
+    {
+      "n": 120,
+      "width": 1440,
+      "dark": true,
+      "firstMs": 211.25150000000212,
+      "heapBytes": 13904088,
+      "renderMs": 60.967,
+      "scriptMs": 27.091,
+      "taskMs": 201.047,
+      "cfOnOpen": 0,
+      "scanCF": 687,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 650,
+        "mobile": 0
+      }
+    },
+    {
+      "n": 120,
+      "width": 1024,
+      "dark": false,
+      "firstMs": 200.48545900000317,
+      "heapBytes": 13841624,
+      "renderMs": 60.452000000000005,
+      "scriptMs": 25.522,
+      "taskMs": 194.995,
+      "cfOnOpen": 0,
+      "scanCF": 687,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 650,
+        "mobile": 0
+      }
+    },
+    {
+      "n": 120,
+      "width": 1024,
+      "dark": true,
+      "firstMs": 197.35854099999779,
+      "heapBytes": 13102532,
+      "renderMs": 57.89900000000001,
+      "scriptMs": 25.205000000000002,
+      "taskMs": 186.785,
+      "cfOnOpen": 0,
+      "scanCF": 687,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 650,
+        "mobile": 0
+      }
+    },
+    {
+      "n": 120,
+      "width": 768,
+      "dark": false,
+      "firstMs": 181.66916600000332,
+      "heapBytes": 11190900,
+      "renderMs": 56.139,
+      "scriptMs": 26.188,
+      "taskMs": 174.30100000000002,
+      "cfOnOpen": 0,
+      "scanCF": 687,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 0,
+        "mobile": 660
+      }
+    },
+    {
+      "n": 120,
+      "width": 768,
+      "dark": true,
+      "firstMs": 185.0670829999981,
+      "heapBytes": 10222160,
+      "renderMs": 56.301,
+      "scriptMs": 26.591,
+      "taskMs": 175.481,
+      "cfOnOpen": 0,
+      "scanCF": 687,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 0,
+        "mobile": 660
+      }
+    },
+    {
+      "n": 120,
+      "width": 390,
+      "dark": false,
+      "firstMs": 193.15000000000146,
+      "heapBytes": 9994456,
+      "renderMs": 64.227,
+      "scriptMs": 27.524,
+      "taskMs": 185.459,
+      "cfOnOpen": 0,
+      "scanCF": 687,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 0,
+        "mobile": 660
+      }
+    },
+    {
+      "n": 120,
+      "width": 390,
+      "dark": true,
+      "firstMs": 186.71787499999846,
+      "heapBytes": 10783524,
+      "renderMs": 58.495,
+      "scriptMs": 26.532,
+      "taskMs": 177.313,
+      "cfOnOpen": 0,
+      "scanCF": 687,
+      "maxActive": 2,
+      "scroll": {
+        "desktop": 0,
+        "mobile": 660
+      }
+    }
+  ],
+  "http": [
+    {
+      "n": 0,
+      "samples": 40,
+      "p50": 0.41066699999998946,
+      "p95": 2.1361249999999927
+    },
+    {
+      "n": 20,
+      "samples": 40,
+      "p50": 4.110290999999961,
+      "p95": 6.951915999999983
+    },
+    {
+      "n": 60,
+      "samples": 40,
+      "p50": 11.27087500000016,
+      "p95": 12.62225000000035
+    },
+    {
+      "n": 120,
+      "samples": 40,
+      "p50": 27.34245799999917,
+      "p95": 31.71229200000016
+    }
+  ],
+  "consistency": [
+    {
+      "n": 20,
+      "crossBrowser": true,
+      "cfOnNewBrowser": 0,
+      "successfulProducts": 118,
+      "ageCorrectProducts": 76,
+      "moduleReadPersisted": false,
+      "metadataPreserved": false
+    },
+    {
+      "n": 60,
+      "crossBrowser": true,
+      "cfOnNewBrowser": 0,
+      "successfulProducts": 338,
+      "ageCorrectProducts": 220,
+      "moduleReadPersisted": false,
+      "metadataPreserved": false
+    },
+    {
+      "n": 120,
+      "crossBrowser": true,
+      "cfOnNewBrowser": 0,
+      "successfulProducts": 678,
+      "ageCorrectProducts": 443,
+      "moduleReadPersisted": false,
+      "metadataPreserved": false
+    }
+  ],
+  "cold": []
+}

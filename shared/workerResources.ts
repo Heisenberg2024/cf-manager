@@ -1,3 +1,4 @@
+import type { InventorySink, UsageSink } from './snapshotIdentity';
 import type { CfRequest } from './accountDiscovery';
 import { bindingSignature, type DnsBinding } from './zoneDirectory';
 import type { ReadMetric, ReadScheduler } from './readScheduler';
@@ -21,7 +22,7 @@ export class WorkerResources {
   private entries = new Map<string, Entry>();
   private generations = new Map<number, number>();
   private globalGeneration = 0;
-  constructor(private directory: { scheduler: Pick<ReadScheduler, 'run'> }, private metric: (metric: ReadMetric) => void = () => {}, private listMs = 30000, private usageMs = 120000, private maxBytes = 8 * 1024 * 1024) {}
+  constructor(private directory: { scheduler: Pick<ReadScheduler, 'run'>; inventory?:InventorySink;usage?:UsageSink }, private metric: (metric: ReadMetric) => void = () => {}, private listMs = 30000, private usageMs = 120000, private maxBytes = 8 * 1024 * 1024) {}
   invalidate(accountId?: number, cfAccountId?: string | null) {
     if (accountId === undefined) { this.globalGeneration++; this.entries.clear(); this.generations.clear(); return; }
     const ids = new Set([accountId]);
@@ -37,7 +38,7 @@ export class WorkerResources {
     if(!Array.isArray(entry.value))return;
     return { value: structuredClone(entry.value), fetchedAt: entry.expires - this.listMs };
   }
-  async read<T>(account: DnsBinding, request: CfRequest, kind: ResourceKind, options: { refresh?: boolean; signal?: AbortSignal; background?: boolean } = {}): Promise<T> {
+  async read<T>(account: DnsBinding, request: CfRequest, kind: ResourceKind, options: { refresh?: boolean; signal?: AbortSignal; background?: boolean; inventory?:boolean } = {}): Promise<T> {
     requireWorkerBinding(account);
     options.signal?.throwIfAborted();
     const generation = `${this.globalGeneration}:${kind === 'usage' ? 0 : this.generations.get(account.id) || 0}`;
@@ -54,11 +55,14 @@ export class WorkerResources {
     }
     const started = Date.now();
     try {
-      const value = await this.directory.scheduler.run<unknown>(`workers:${generation}:${key}`, account.id, signal => kind === 'usage' ? readUsage(account, request, signal) : readList(account, request, kind, signal), options);
+      const value = await this.directory.scheduler.run<unknown>(`workers:${generation}:${key}`, account.id, signal => kind === 'usage' ? readUsage(account, request, signal,date) : readList(account, request, kind, signal), options);
+      if(kind==='usage')await this.directory.usage?.(account,date,(value as ResourceUsage).requests);
+      if (generation === `${this.globalGeneration}:${kind === 'usage' ? 0 : this.generations.get(account.id) || 0}` && kind!=='usage' && options.inventory!==false) await this.directory.inventory?.(account,kind,value as unknown[],started,Date.now());
       if (generation === `${this.globalGeneration}:${kind === 'usage' ? 0 : this.generations.get(account.id) || 0}`) this.put(key, { accountId: account.id, cfAccountId: account.account_id!, value, expires: Date.now() + (kind === 'usage' ? this.usageMs : this.listMs) });
       this.metric({ event: 'resource_loaded', accountId: account.id, durationMs: Date.now() - started }); return value as T;
     } catch (error) {
       const detail = errorDetails(error);
+      if(generation===`${this.globalGeneration}:${kind === 'usage' ? 0 : this.generations.get(account.id) || 0}`&&kind!=='usage'&&options.inventory!==false&&!options.signal?.aborted)await this.directory.inventory?.(account,kind,null,started,Date.now(),error);
       // Short negative caching dampens cold-cache storms. No false successful empty array.
       if (generation === `${this.globalGeneration}:${kind === 'usage' ? 0 : this.generations.get(account.id) || 0}` && !options.signal?.aborted) this.put(key, { accountId: account.id, cfAccountId: account.account_id!, error, expires: Date.now() + (detail.statusCode === 429 ? 300000 : 5000) });
       this.metric({ event: 'resource_failed', accountId: account.id, durationMs: Date.now() - started, status: detail.statusCode }); throw error;
@@ -125,8 +129,8 @@ async function readList(account: DnsBinding, request: CfRequest, kind: 'workers'
   }
   throw Object.assign(new Error('Resource pagination limit exceeded'), { statusCode: 502 });
 }
-async function readUsage(account: DnsBinding, request: CfRequest, signal: AbortSignal): Promise<ResourceUsage> {
-  const now = new Date(), todayDate = now.toISOString().slice(0, 10);
+async function readUsage(account: DnsBinding, request: CfRequest, signal: AbortSignal,todayDate:string): Promise<ResourceUsage> {
+  const now = new Date();
   const query = 'query($accountTag:string!,$datetimeStart:Time!,$datetimeEnd:Time!,$todayDate:Date!){viewer{accounts(filter:{accountTag:$accountTag}){workers:workersInvocationsAdaptive(filter:{datetime_geq:$datetimeStart,datetime_leq:$datetimeEnd},limit:10000){sum{requests,errors,subrequests,cpuTimeUs}}pages:pagesFunctionsInvocationsAdaptiveGroups(filter:{date:$todayDate},limit:1){sum{requests,errors}}}}}';
   const json = await request('/graphql', { method: 'POST', signal, body: JSON.stringify({ query, variables: { accountTag: account.account_id, datetimeStart: `${todayDate}T00:00:00.000Z`, datetimeEnd: now.toISOString(), todayDate } }) }) as { errors?: unknown[]; data?: { viewer?: { accounts?: Array<{ workers?: Array<{ sum?: any }>; pages?: Array<{ sum?: any }> }> } } };
   const accountData = json.data?.viewer?.accounts?.[0];

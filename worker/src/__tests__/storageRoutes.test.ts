@@ -13,3 +13,6 @@ const app=new Hono<any>();app.use('*',responseWrapper);app.route('/storage',rout
 let fixture:ReturnType<typeof storageHttpFixture>;
 beforeEach(()=>{vi.clearAllMocks();getStorageResources(env.DB).invalidate();env.DEMO_ACCOUNT_IDS='';fixture=storageHttpFixture();mock.account.mockResolvedValue({id:1,name:'fixture',account_id:'cf-a',credential_id:10,api_token:'synthetic',is_active:1,is_enabled:1,enabled_features:'storage',available_features:'r2'});mock.request.mockResolvedValue(fixture.request);});
 storageRoutesContract('Worker',{send:async(method,path,body)=>{const result=await app.request('/storage'+path,{method,...(body?{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})},env);const json:any=await result.json();return {status:result.status,data:json.data || json,cache:result.headers.get('Cache-Control')};},demo:value=>{env.DEMO_ACCOUNT_IDS=value?'1':'';},denyR2:()=>fixture.denyR2(),calls:()=>fixture.calls,audits:()=>mock.audit.mock.calls},{describe,it,expect,vi});
+
+// This resource-only fixture has no local SQL database; persistence has dedicated HTTP/isolate integration coverage.
+vi.mock('../services/dashboardCollector',async importOriginal=>({...await importOriginal<object>(),inventorySink:()=>async()=>{}}));

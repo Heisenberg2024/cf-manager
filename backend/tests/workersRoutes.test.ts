@@ -74,3 +74,6 @@ describe('Docker Workers read routes and redacted Pages edits',()=>{
   await editPagesProject(accounts[0] as any,'project',{deployment_configs:{production:{env_vars:{TOKEN:{value:'submitted-secret'}}}}});expect(edit).toHaveBeenCalledOnce();expect(log).not.toHaveBeenCalled();expect(appLogger.info).not.toHaveBeenCalled();log.mockRestore();
  });
 });
+
+// This resource-only fixture has no local SQL database; persistence has dedicated HTTP/isolate integration coverage.
+vi.mock('../src/services/dashboardCollector',async importOriginal=>({...await importOriginal<object>(),inventorySink:()=>async()=>{}}));

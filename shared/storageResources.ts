@@ -1,9 +1,10 @@
+import type { InventorySink } from './snapshotIdentity';
 import type {CfRequest} from './accountDiscovery';
 import type {DnsBinding} from './zoneDirectory';
 import type {ReadMetric,ReadScheduler} from './readScheduler';
 import {BoundReadCache} from './resourceCache';
 export interface StoragePage {items:any[];prefixes:string[];cursor?:string;is_truncated:boolean}
-export interface PageOptions {prefix?:string;delimiter?:string;cursor?:string;limit?:number;refresh?:boolean;background?:boolean;signal?:AbortSignal}
+export interface PageOptions {prefix?:string;delimiter?:string;cursor?:string;limit?:number;refresh?:boolean;background?:boolean;signal?:AbortSignal;inventory?:boolean}
 const invalid=(message:string)=>Object.assign(new Error(message),{statusCode:502,code:'CF_INVALID_PAGINATION'});
 export function requireStorageBinding<T extends DnsBinding>(account:T):T {
  if(!account.account_id||account.is_active===0||account.is_enabled===0||!account.enabled_features.split(',').includes('storage'))throw Object.assign(new Error('Account unavailable or Storage feature disabled'),{statusCode:409});return account;
@@ -33,9 +34,9 @@ export function normalizeStoragePage(data:any,kind:'kv'|'objects'|'buckets',prev
 }
 export class StorageResources {
  readonly cache:BoundReadCache;
- constructor(directory:{scheduler:Pick<ReadScheduler,'run'>},metric:(event:ReadMetric)=>void=()=>{}){this.cache=new BoundReadCache(directory,metric,30000,30000,300,8*1024*1024);}
+ constructor(private directory:{scheduler:Pick<ReadScheduler,'run'>;inventory?:InventorySink},metric:(event:ReadMetric)=>void=()=>{}){this.cache=new BoundReadCache(directory,metric,30000,30000,300,8*1024*1024);}
  async page(account:DnsBinding,request:CfRequest,kind:'kv'|'objects'|'buckets',resource:string,options:PageOptions={}){
-  requireStorageBinding(account);options={...pageOptions(options as Record<string,unknown>),signal:options.signal,background:options.background};
+  requireStorageBinding(account);options={...pageOptions(options as Record<string,unknown>),signal:options.signal,background:options.background,inventory:options.inventory};
   const base=`/accounts/${encodeURIComponent(account.account_id!)}`;
   const path=kind==='kv'?`${base}/storage/kv/namespaces/${encodeURIComponent(resource)}/keys`:kind==='objects'?`${base}/r2/buckets/${encodeURIComponent(resource)}/objects`:`${base}/r2/buckets`;
   const query=new URLSearchParams({[kind==='kv'?'limit':'per_page']:String(options.limit)});
@@ -45,9 +46,19 @@ export class StorageResources {
   return {...value,meta:cache};
  }
  async allBuckets(account:DnsBinding,request:CfRequest,options:PageOptions={}) {
-  const buckets=new Map<string,any>();let cursor:string|undefined;const seen=new Set<string>();
-  for(let page=0;page<1000;page++){const result=await this.page(account,request,'buckets','',{...options,cursor,limit:1000});for(const row of result.items)buckets.set(row.name,row);if(!result.is_truncated)return [...buckets.values()];if(seen.has(result.cursor!))throw invalid('Repeated bucket cursor');seen.add(result.cursor!);cursor=result.cursor;}
-  throw invalid('Bucket pagination limit exceeded');
+  const started=Date.now(),buckets=new Map<string,any>();let cursor:string|undefined;const seen=new Set<string>();let confirmedAt=Infinity,oldestStart=started,stale=false;
+  try {
+   for(let page=0;page<1000;page++){
+    const result=await this.page(account,request,'buckets','',{...options,cursor,limit:1000});
+    stale ||= result.meta.state==='stale';
+    confirmedAt=Math.min(confirmedAt,result.meta.fetchedAt);
+    oldestStart=Math.min(oldestStart,result.meta.startedAt??result.meta.fetchedAt);
+    for(const row of result.items)buckets.set(row.name,row);
+    if(!result.is_truncated){const rows=[...buckets.values()];if(options.inventory!==false&&!stale)await this.directory.inventory?.(account,'r2',rows,oldestStart,confirmedAt);return rows;}
+    if(seen.has(result.cursor!))throw invalid('Repeated bucket cursor');seen.add(result.cursor!);cursor=result.cursor;
+   }
+   throw invalid('Bucket pagination limit exceeded');
+  }catch(error){if(options.inventory!==false&&!options.signal?.aborted)await this.directory.inventory?.(account,'r2',null,started,Date.now(),error);throw error;}
  }
  invalidate(accountId?:number,cfAccountId?:string|null,kind?:'kv'|'objects'|'buckets',resource=''){this.cache.invalidate(accountId,cfAccountId,kind?`${kind}:${encodeURIComponent(resource)}`:undefined);}
 }

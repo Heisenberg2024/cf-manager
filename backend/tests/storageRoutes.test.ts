@@ -18,3 +18,6 @@ beforeAll(async()=>{const app=express();app.use(express.json());app.use(response
 afterAll(()=>new Promise<void>(r=>server.close(()=>r())));
 beforeEach(()=>{vi.clearAllMocks();storageResources.invalidate();mock.config.demoAccountIds='';fixture=storageHttpFixture();mock.account.mockReturnValue({id:1,name:'fixture',account_id:'cf-a',credential_id:10,api_token:'synthetic',is_active:1,is_enabled:1,enabled_features:'storage',available_features:'r2'});mock.request.mockReturnValue(fixture.request);});
 storageRoutesContract('Docker',{send:async(method,path,body)=>{const result=await fetch(base+path,{method,...(body?{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});const json=await result.json();return {status:result.status,data:json.data || json,cache:result.headers.get('Cache-Control')};},demo:value=>{mock.config.demoAccountIds=value?'1':'';},denyR2:()=>fixture.denyR2(),calls:()=>fixture.calls,audits:()=>mock.audit.mock.calls},{describe,it,expect,vi});
+
+// This resource-only fixture has no local SQL database; persistence has dedicated HTTP/isolate integration coverage.
+vi.mock('../src/services/dashboardCollector',async importOriginal=>({...await importOriginal<object>(),inventorySink:()=>async()=>{}}));

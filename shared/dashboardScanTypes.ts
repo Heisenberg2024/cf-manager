@@ -10,6 +10,7 @@ export interface ScanJob {
 export interface ScanStatus {
   state:ScanState; job:ScanJob|null; latestFullScan:ScanJob|null;
   nextScanAt:number|null; autoCollect:boolean; execution:'background'|'request_batches';
+  snapshotVersion?:string; lastSuccessfulScanAt?:number|null; pendingChanges?:boolean;
 }
 export interface ScanConfig {autoCollect:boolean;intervalHours:number;concurrency:number;startupDelayMs:number;windowUtc:string}
 const number=(value:unknown,fallback:number,min:number,max:number)=>Number.isFinite(Number(value))&&value!==''&&value!==undefined?Math.max(min,Math.min(max,Math.floor(Number(value)))):fallback;

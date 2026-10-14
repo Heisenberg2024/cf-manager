@@ -1,0 +1,22 @@
+{
+  "synthetic": true,
+  "image": "cf-manager:codex-2102-audit",
+  "accounts": 4,
+  "total": 28,
+  "crash": {
+    "jobId": "0944e705-41a9-4373-b1a6-95d2b6f9c67a",
+    "completedBeforeKill": 2,
+    "recoveredState": "completed",
+    "resumeMs": 116860,
+    "completedResourcesNotReread": true,
+    "leaseMs": 90000
+  },
+  "graceful": {
+    "jobId": "cb863d00-67d0-464d-b94a-cc35ec68074e",
+    "completedBeforeStop": 0,
+    "completed": 28,
+    "resumeMs": 28714
+  },
+  "simulatedCloudflareCalls": 30,
+  "realCloudflareCalls": 0
+}

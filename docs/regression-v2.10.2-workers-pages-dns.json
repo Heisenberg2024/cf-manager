@@ -1,0 +1,86 @@
+{
+  "source": "Local isolated Chromium simulation, not production latency or P95",
+  "baseline": false,
+  "dns": [
+    {
+      "width": 1440,
+      "records": 100,
+      "firstScreenMs": 129,
+      "interactionMs": 62,
+      "firstPayloadRows": 100,
+      "jsHeapUsedBytes": 19195072,
+      "recordRequests": 1
+    },
+    {
+      "width": 1440,
+      "records": 1000,
+      "firstScreenMs": 121,
+      "interactionMs": 64,
+      "firstPayloadRows": 500,
+      "jsHeapUsedBytes": 19229416,
+      "recordRequests": 1
+    },
+    {
+      "width": 1440,
+      "records": 10000,
+      "firstScreenMs": 117,
+      "interactionMs": 65,
+      "firstPayloadRows": 500,
+      "jsHeapUsedBytes": 19245604,
+      "recordRequests": 3
+    },
+    {
+      "width": 390,
+      "records": 100,
+      "firstScreenMs": 113,
+      "interactionMs": 61,
+      "firstPayloadRows": 100,
+      "jsHeapUsedBytes": 17571132,
+      "recordRequests": 1
+    },
+    {
+      "width": 390,
+      "records": 1000,
+      "firstScreenMs": 119,
+      "interactionMs": 63,
+      "firstPayloadRows": 500,
+      "jsHeapUsedBytes": 17606736,
+      "recordRequests": 1
+    },
+    {
+      "width": 390,
+      "records": 10000,
+      "firstScreenMs": 115,
+      "interactionMs": 57,
+      "firstPayloadRows": 500,
+      "jsHeapUsedBytes": 17624264,
+      "recordRequests": 3
+    }
+  ],
+  "workers": [
+    {
+      "accounts": 20,
+      "firstScreenMs": 193,
+      "initialDrawerReads": [
+        "/workers/1/workers/worker-0/settings",
+        "/workers/1/workers/worker-0/secrets"
+      ],
+      "initialPagesReads": [
+        "/workers/1/pages/project-0/project"
+      ],
+      "upstreamCallsAtCapture": 60
+    },
+    {
+      "accounts": 60,
+      "firstScreenMs": 213,
+      "initialDrawerReads": [
+        "/workers/1/workers/worker-0/settings",
+        "/workers/1/workers/worker-0/secrets"
+      ],
+      "initialPagesReads": [
+        "/workers/1/pages/project-0/project"
+      ],
+      "upstreamCallsAtCapture": 86
+    }
+  ]
+}

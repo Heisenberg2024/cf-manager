@@ -44,3 +44,6 @@ it('measures cold/warm/concurrent reads with 20 and 60 synthetic Accounts',async
  if(process.env.WORKERS_PERFORMANCE_OUTPUT)writeFileSync(process.env.WORKERS_PERFORMANCE_OUTPUT,JSON.stringify(result,null,2));
  expect(result.samples).toHaveLength(2);
 },30000);
+
+// This resource-only fixture has no local SQL database; persistence has dedicated HTTP/isolate integration coverage.
+vi.mock('../src/services/dashboardCollector',async importOriginal=>({...await importOriginal<object>(),inventorySink:()=>async()=>{}}));

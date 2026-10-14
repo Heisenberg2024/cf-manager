@@ -24,3 +24,6 @@ it('measures 20 Accounts / 600 Zones with cold, warm, precise and stampede reads
   if (process.env.DNS_PERFORMANCE_OUTPUT) writeFileSync(process.env.DNS_PERFORMANCE_OUTPUT, JSON.stringify({ accounts: 20, zones: 600, pageLatencyMs: 5, measurements }, null, 2));
   console.log('DNS_PERFORMANCE', JSON.stringify(measurements));
 });
+
+// This resource-only fixture has no local SQL database; persistence has dedicated HTTP/isolate integration coverage.
+vi.mock('../src/services/dashboardCollector',async importOriginal=>({...await importOriginal<object>(),inventorySink:()=>async()=>{}}));

@@ -3,6 +3,7 @@ import { ACCOUNT_SELECT, ensureCredential, getCredential, updateCredential } fro
 import { safeAuditEvent } from '../services/auditQueries';
 import { redact } from '../services/cfErrors';
 export interface Account {
+  snapshot_epoch?:number;
   id: number;
   name: string;
   auth_type: 'token' | 'global_key';

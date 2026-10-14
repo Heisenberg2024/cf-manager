@@ -7,6 +7,7 @@ export type AccountFeature = 'ai' | 'workers' | 'browser_render' | 'dns' | 'stor
 export const ALL_FEATURES: AccountFeature[] = ['ai', 'workers', 'browser_render', 'dns', 'storage'];
 
 export interface Account {
+  snapshot_epoch?:number;
   id: number;
   name: string;
   auth_type: 'token' | 'global_key';

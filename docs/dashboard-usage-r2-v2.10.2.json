@@ -1,0 +1,18 @@
+{
+  "synthetic": true,
+  "source": "current TypeScript Express routes / isolated on-disk SQLite",
+  "accounts": 10,
+  "r2ReadableAccounts": 2,
+  "r2Buckets": 4,
+  "usage": [
+    {
+      "date": "2026-10-14",
+      "resource": "workers_requests",
+      "count": 375
+    }
+  ],
+  "observedAccounts": 10,
+  "scanFailures": 0,
+  "r2Failures": 0,
+  "extraCfCallsAfterReload": 0
+}
