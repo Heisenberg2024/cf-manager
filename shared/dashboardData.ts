@@ -96,8 +96,8 @@ export async function dashboardTrends(db: LocalSql, query: Record<string, unknow
   const audit = await auditStats(db,{...query,startDate,endDate});
   return {days,startDate,endDate,timezone:'UTC',usage,usageSource:'quota_usage: recorded local/synchronized usage; provenance unavailable; MAX per real Account',limits:null,audit};
 }
-export async function saveResourceSnapshot(db:LocalSql, row:ResourceSnapshot) {
-  await db.run(`INSERT INTO resource_summaries (account_id,cf_account_id,metric,identity,value,breakdown,fetched_at,last_success_at,error_kind) VALUES (?,?,?,?,?,?,?,?,?)
+export async function saveResourceSnapshot(db:LocalSql, row:ResourceSnapshot,guard?:{sql:string;params:unknown[]}) {
+  await db.run(`INSERT INTO resource_summaries (account_id,cf_account_id,metric,identity,value,breakdown,fetched_at,last_success_at,error_kind) SELECT ?,?,?,?,?,?,?,?,? ${guard?`WHERE ${guard.sql}`:''}
     ON CONFLICT(account_id,metric) DO UPDATE SET cf_account_id=excluded.cf_account_id,identity=excluded.identity,value=excluded.value,breakdown=excluded.breakdown,fetched_at=excluded.fetched_at,last_success_at=excluded.last_success_at,error_kind=excluded.error_kind
-    WHERE resource_summaries.fetched_at <= excluded.fetched_at`,[row.account_id,row.cf_account_id,row.metric,row.identity,row.value,row.breakdown,row.fetched_at,row.last_success_at,row.error_kind]);
+    WHERE resource_summaries.fetched_at <= excluded.fetched_at`,[row.account_id,row.cf_account_id,row.metric,row.identity,row.value,row.breakdown,row.fetched_at,row.last_success_at,row.error_kind,...(guard?.params??[])]);
 }

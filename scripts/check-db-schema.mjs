@@ -89,6 +89,9 @@ let errors = 0;
 const backend = extractTables(readFileSync(BACKEND_DB, 'utf8'));
 const worker = extractTables(readFileSync(WORKER_SCHEMA, 'utf8'));
 
+const backendOnly=new Set(['scheduled_tasks','task_executions','_migrations']);
+for(const t of backend.keys())if(!worker.has(t)&&!backendOnly.has(t)){errors++;console.error(`::error::backend 表 ${t} 缺少 worker schema 对应表`);}
+for(const t of worker.keys())if(!backend.has(t)){errors++;console.error(`::error::worker 表 ${t} 缺少 backend base CREATE 对应表`);}
 const shared = [...backend.keys()].filter((k) => worker.has(k));
 console.log('比对共享表（backend ∩ worker）：');
 for (const t of shared) {
@@ -111,6 +114,7 @@ if (existsSync(WORKER_MIGRATIONS)) {
   const re = /ALTER TABLE ([A-Za-z_]\w*)\s+ADD COLUMN (?:IF NOT EXISTS )?([A-Za-z_]\w*)/gi;
   for (const f of files) {
     const content = readFileSync(join(WORKER_MIGRATIONS, f), 'utf8');
+    for(const [t,cols] of extractTables(content))if(!worker.has(t)||[...cols].some(c=>!worker.get(t).has(c))){errors++;console.error(`::error::迁移 ${f} 的 CREATE TABLE ${t} 超出 worker schema`);}
     let mm;
     while ((mm = re.exec(content))) {
       const t = mm[1];

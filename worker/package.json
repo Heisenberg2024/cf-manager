@@ -11,7 +11,8 @@
     "deploy": "node build.js && wrangler pages deploy public/ --project-name cf-manager",
     "db:init": "wrangler d1 execute cf-manager --file=src/db/schema.sql --remote",
     "db:migrate": "node scripts/migrate.mjs",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "build:scheduler": "esbuild dashboard-scheduler.ts --bundle --outfile=scheduler-dist/index.js --format=esm --target=es2022 --minify"
   },
   "dependencies": {
     "@noble/hashes": "^1.5.0",

@@ -35,9 +35,9 @@ export class TunnelResources {
   private busy = new Set<string>();
   constructor(private directory: ZoneDirectory, metric: (event: ReadMetric) => void = () => {}) { this.cache = new BoundReadCache(directory, metric, 30000, 30000, 200); }
   invalidate(account: DnsBinding, tunnelId?: string) { this.cache.invalidate(account.id, account.account_id, tunnelId ? `tunnel/${tunnelId}` : 'tunnel'); }
-  async list(account: DnsBinding, request: CfRequest, refresh = false, background = false) {
+  async list(account: DnsBinding, request: CfRequest, refresh = false, background = false, signal?:AbortSignal) {
     const base = tunnelBase(account);
-    return this.cache.read(account, 'tunnel/list', signal => readAll(request, `${base}?is_deleted=false`, signal), { refresh,background });
+    return this.cache.read(account, 'tunnel/list', signal => readAll(request, `${base}?is_deleted=false`, signal), { refresh,background,signal });
   }
   async detail(account: DnsBinding, request: CfRequest, id: string) {
     const result = (await request(`${tunnelBase(account)}/${segment(id)}`)).result;

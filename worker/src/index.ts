@@ -163,6 +163,8 @@ export { app };
 export default {
   fetch: app.fetch,
   async scheduled(controller: ScheduledController, env: Env, _ctx: ExecutionContext) {
+    // This handler runs only on an independently configured Workers deployment with Cron.
+    // Pages Advanced Mode does not enable Scheduled events. Dashboard uses its separate optional scheduler.
     // Periodic catalog refresh every 6 hours
     try {
       const sources = await getEnabledCatalogSources(env.DB);

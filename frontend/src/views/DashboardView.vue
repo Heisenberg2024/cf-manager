@@ -1,5 +1,5 @@
 <template>
-  <div class="overview-page">
+  <div class="overview-page" tabindex="0" @keydown="pageScrollKey">
     <header class="overview-header">
       <div>
         <h2>{{ t('overview.title') }}</h2><div class="muted">
@@ -8,7 +8,7 @@
       </div>
       <n-button
         :loading="busy.overview"
-        @click="reload"
+        @click="reload();scanAction(()=>dashboardApi.scanStatus(controller.signal))"
       >
         {{ t('common.refresh') }}
       </n-button>
@@ -104,28 +104,38 @@
           </p>
         </div><n-space>
           <n-button
-            v-if="!collecting"
+            v-if="!collecting && scan?.state!=='paused'"
             size="small"
-            :disabled="!overview"
+            :disabled="!overview || busy.scan"
             @click="collect(false)"
           >
             {{ t('overview.collectMissing') }}
           </n-button><n-button
-            v-if="!collecting"
+            v-if="!collecting && scan?.state!=='paused'"
             size="small"
-            :disabled="!overview"
+            :disabled="!overview || busy.scan"
             @click="collect(true)"
           >
             {{ t('overview.forceCollect') }}
           </n-button><n-button
-            v-else
+            v-else-if="collecting"
             size="small"
+            :loading="busy.scan"
             @click="pauseCollection"
           >
             {{ t('overview.pause') }}
-          </n-button><span v-if="progress.total">{{ progress.done }}/{{ progress.total }} · {{ progress.label }}</span>
+          </n-button><n-button v-if="scan?.state==='paused'" size="small" :loading="busy.scan" @click="resumeCollection">{{ t('overview.scan.resume') }}</n-button><n-button v-if="accountId && !collecting && scan?.state!=='paused'" size="small" :disabled="busy.scan" @click="collect(true,true)">{{ t('overview.scan.forceAll') }}</n-button>
         </n-space>
       </div>
+      <div v-if="scan?.job" class="scan-progress" aria-live="polite">
+        <strong>{{ t(`overview.scan.states.${scan.state}`) }} · {{ scan.job.completed }} / {{ scan.job.total }}</strong>
+        <p>{{ t('overview.success') }} {{ scan.job.succeeded }} · {{ t('overview.failure') }} {{ scan.job.failed }} · {{ t('overview.scan.skipped') }} {{ scan.job.skipped }} · {{ t('overview.scan.global') }}</p>
+        <p v-for="current in scan.job.currentResource" :key="`${current.accountId}:${current.metric}`">{{ current.accountName }} / {{ t(`overview.metrics.${current.metric}`) }}</p>
+        <p v-if="scan.job.nextEligibleAt && scan.job.nextEligibleAt>Date.now()">{{ t('overview.scan.cooldown') }} {{ time(scan.job.nextEligibleAt) }}</p>
+      </div>
+      <p class="muted">{{ t('overview.scan.lastFull') }}: {{ time(scan?.latestFullScan?.finishedAt) }}<template v-if="scan?.latestFullScan"> · {{ t(`overview.scan.states.${scan.latestFullScan.state}`) }}</template> · {{ t('overview.scan.next') }}: {{ time(scan?.nextScanAt) }}</p>
+      <p v-if="scan?.execution==='request_batches'" class="muted">{{ t('overview.scan.pagesHint') }}</p>
+      <n-alert v-if="errors.scan" type="warning">{{ errors.scan }}</n-alert>
     </n-card>
     <section>
       <div class="section-heading">
@@ -325,16 +335,18 @@
   </div>
 </template>
 <script setup lang="ts">
+import {pageScrollKey} from '../utils/pageScrolling';
 import { inject, type Ref, computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { NButton } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { dashboardApi, type Overview, type ResourceOverview, type Trends } from '../api/dashboard';
-import { RESOURCE_METRICS, supports, type ResourceMetric, type DashboardAccount, type Attention } from '../shared/dashboardData';
+import { type ResourceMetric, type DashboardAccount, type Attention } from '../shared/dashboardData';
 import type { AuditEvent } from '../shared/auditQueries';
 import { formatCN } from '../utils/dateFormat';
 import { createRequestScope } from '../utils/requestScope';
-import { confirmedResourceKeys, collectionKey } from '../utils/dashboardCollection';
+import { createScanPoller, scanIsRunning } from '../utils/dashboardCollection';
+import type {ScanStatus} from '../shared/dashboardScanTypes';
 import UsageTrend from '../components/UsageTrend.vue';
 const {t,te}=useI18n(), router=useRouter();
 const overview=ref<Overview>(),resources=ref<ResourceOverview>(),trends=ref<Trends>(),activity=ref<AuditEvent[]>([]);
@@ -344,8 +356,10 @@ const detailAccountId=ref<number|null>(null);
 const detailAccount=computed(()=>overview.value?.accounts.find(a=>a.id===detailAccountId.value));
 const detailMetrics=computed(()=>resources.value?.accounts.find(a=>a.accountId===detailAccountId.value)?.metrics??[]);
 const busy=reactive<Record<string,boolean>>({}),errors=reactive<Record<string,string>>({});
-const requests=createRequestScope(()=>String(accountId.value));let controller=new AbortController(),collectionEpoch=0;
-const collecting=ref(false),progress=reactive({done:0,total:0,label:''}),attentionElement=ref<HTMLElement>();
+const requests=createRequestScope(()=>String(accountId.value));let controller=new AbortController();
+const scan=ref<ScanStatus>(),collecting=computed(()=>!!scan.value&&scanIsRunning(scan.value.state)),attentionElement=ref<HTMLElement>();
+let lastScanProgress='';
+const scanPoller=createScanPoller({read:async signal=>(await dashboardApi.scanStatus(signal)).data,update:async state=>{scan.value=state;const key=`${state.job?.jobId}:${state.job?.completed}`;if(key!==lastScanProgress){lastScanProgress=key;await load('resources');}},error:e=>{errors.scan=(e as Error).message;}});
 const groups=[{key:'zones',route:'/dns',metrics:['zones']},{key:'workersPages',route:'/workers',metrics:['workers','pages']},{key:'tunnels',route:'/tunnels',metrics:['tunnels']},{key:'storage',route:'/storage',metrics:['kv','d1','r2']}];
 const visibleGroups=computed(()=>groups.filter(g=>product.value==='all'||g.key===product.value));
 const productOptions=computed(()=>[{label:t('overview.allProducts'),value:'all'},...groups.map(g=>({label:t(`overview.${g.key}`),value:g.key}))]);
@@ -373,15 +387,17 @@ async function load(module:'overview'|'resources'|'trends'|'activity'){
   }catch(e){if(request.current()&&!controller.signal.aborted)errors[module]=(e as Error).message;}finally{if(request.current())busy[module]=false;}
 }
 function reload(){void Promise.allSettled(['overview','resources','trends','activity'].map(m=>load(m as 'overview')));}
-function pauseCollection(){collectionEpoch++;collecting.value=false;}
-async function collect(refresh:boolean){
-  const epoch=++collectionEpoch;collecting.value=true;
-  const keys=visibleGroups.value.flatMap(g=>g.metrics) as ResourceMetric[];
-  const jobs=(overview.value?.accounts??[]).flatMap(a=>RESOURCE_METRICS.filter(m=>keys.includes(m)&&supports(a,m)).map(metric=>({account:a,metric})));
-  progress.done=0;progress.total=jobs.length;
-  const confirmed=refresh?new Set<string>():confirmedResourceKeys(overview.value?.accounts??[],resources.value?.accounts??[]);
-  try{for(const job of jobs){if(epoch!==collectionEpoch)break;const key=collectionKey(job.account,job.metric);if(confirmed.has(key)){progress.done++;continue;}progress.label=`${job.account.name} · ${t(`overview.metrics.${job.metric}`)}`;try{const {data}=await dashboardApi.collect(job.account.id,job.metric,refresh,controller.signal);if(!data.error_kind&&data.value!==null)confirmed.add(key);}catch{/* independent failures remain visible in local summaries */}if(epoch!==collectionEpoch)break;progress.done++;await load('resources');}}
-  finally{if(epoch===collectionEpoch){collecting.value=false;progress.label=t('overview.collectionDone');}}
+async function scanAction(action:()=>ReturnType<typeof dashboardApi.scanStatus>){
+  const request=requests.begin('scan');errors.scan='';busy.scan=true;
+  try{const {data}=await action();if(request.current())await scanPoller.observe(data);}
+  catch(e){if(request.current()&&!controller.signal.aborted)errors.scan=(e as Error).message;}
+  finally{if(request.current())busy.scan=false;}
+}
+function pauseCollection(){return scanAction(()=>dashboardApi.scanPause(controller.signal));}
+function resumeCollection(){return scanAction(()=>dashboardApi.scanResume(controller.signal));}
+function collect(refresh:boolean,all=false){
+  const metrics=visibleGroups.value.flatMap(g=>g.metrics) as ResourceMetric[];
+  return scanAction(()=>dashboardApi.scanStart({reason:'manual',force:refresh,...(!all&&accountId.value?{accountId:accountId.value}:{}),...(!all&&product.value!=='all'?{metrics}:{})},controller.signal));
 }
 const filteredAccounts=computed(()=>(overview.value?.accounts??[]).filter(a=>`${a.name} ${a.account_id} ${a.credential_name}`.toLowerCase().includes(search.value.toLowerCase())));
 const rowCount=(id:number,key:string)=>{const m=resources.value?.accounts.find(a=>a.accountId===id)?.metrics.find(m=>m.metric===key);return m?.value??'—';};
@@ -394,15 +410,17 @@ const accountColumns=computed(()=>[
   {title:t('overview.todayRecorded'),key:'usage',width:220,render:(a:DashboardAccount)=>(overview.value?.quota??[]).filter(q=>q.account_id===a.id).map(q=>`${t(`overview.metrics.${q.resource}`)}: ${q.count.toLocaleString()}`).join(' · ')||'—'},
   {title:t('overview.lastCheck'),key:'last_checked_at',width:170,render:(a:DashboardAccount)=>a.access_status==='available'?time(a.last_checked_at):'—'},
 ]);
-watch(accountId,()=>{detailAccountId.value=null;requests.invalidate();pauseCollection();progress.done=0;progress.total=0;progress.label='';overview.value=undefined;resources.value=undefined;trends.value=undefined;activity.value=[];reload();});
+watch(accountId,()=>{detailAccountId.value=null;requests.invalidate();scanPoller.stop();overview.value=undefined;resources.value=undefined;trends.value=undefined;activity.value=[];reload();void scanAction(()=>dashboardApi.scanStatus(controller.signal));});
 watch(days,()=>{trends.value=undefined;void load('trends');});
-function clearSession(){detailAccountId.value=null;requests.invalidate();controller.abort();controller=new AbortController();pauseCollection();overview.value=undefined;resources.value=undefined;trends.value=undefined;activity.value=[];allAccounts.value=[];}
-onMounted(()=>{reload();window.addEventListener('auth-expired',clearSession);});
-onUnmounted(()=>{clearSession();window.removeEventListener('auth-expired',clearSession);});
+function clearSession(){detailAccountId.value=null;requests.invalidate();controller.abort();controller=new AbortController();scanPoller.stop();scan.value=undefined;lastScanProgress='';overview.value=undefined;resources.value=undefined;trends.value=undefined;activity.value=[];allAccounts.value=[];}
+onMounted(()=>{reload();void scanAction(()=>dashboardApi.scanStart({reason:'auto'},controller.signal));window.addEventListener('auth-expired',clearSession);window.addEventListener('session-cleared',clearSession);});
+onUnmounted(()=>{clearSession();window.removeEventListener('auth-expired',clearSession);window.removeEventListener('session-cleared',clearSession);});
 </script>
 <style scoped>
-.overview-page{width:100%;max-width:100%;grid-template-columns:minmax(0,1fr);box-sizing:border-box}
+.overview-page{width:100%;max-width:100%;grid-template-columns:minmax(0,1fr);box-sizing:border-box;flex:1 1 0%;height:100%;min-height:0;overflow-y:auto;overflow-x:hidden;align-content:start;grid-auto-rows:max-content}
+.overview-page:focus-visible{outline:2px solid var(--primary-color,#18a058);outline-offset:-2px}
+@media(max-width:768px){.overview-page{height:auto;flex:none;overflow:visible}}
 .overview-page>*{min-width:0;max-width:100%;box-sizing:border-box}
 
-.overview-page{display:grid;gap:22px;min-width:0;padding-bottom:20px}.overview-header,.section-heading,.collection-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}h2,h3,p{margin:0}h2{font-size:24px}h3{font-size:17px}.muted,.metric-coverage{font-size:12px;opacity:.65}.overview-filters{display:grid;grid-template-columns:minmax(180px,320px) minmax(150px,220px) auto;gap:12px;align-items:center}.overview-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.overview-card{font:inherit;color:inherit;text-align:left;border:1px solid var(--border-color,rgba(128,128,128,.2));border-radius:10px;background:var(--glass-card-bg);padding:18px;display:flex;flex-direction:column;gap:10px;cursor:pointer;min-width:0}.overview-card:hover{border-color:var(--primary-color,#18a058)}.overview-card>strong{font-size:30px;font-weight:650}.overview-card>span{font-weight:600}.overview-card small,.metric-coverage{font-size:11px;opacity:.65;overflow-wrap:anywhere}.metric-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.metric-line b{font-size:12px;opacity:.7}.metric-line strong{font-size:22px;margin-left:auto}.trend-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.trend-grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}.section-heading{margin-bottom:12px}.action-distribution{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.attention-list{display:grid;gap:8px}.attention-item{font:inherit;color:inherit;background:transparent;border:1px solid rgba(128,128,128,.18);border-radius:8px;display:flex;gap:10px;align-items:center;text-align:left;padding:12px;cursor:pointer;flex-wrap:wrap}.attention-item span{overflow-wrap:anywhere}.attention-item small{margin-left:auto;opacity:.6}.activity-list{display:grid;gap:1px}.activity-list>div{display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(128,128,128,.15);padding:12px 0;flex-wrap:wrap}.activity-target{min-width:0;flex:1;overflow-wrap:anywhere}.activity-list small{opacity:.65}.collection-toolbar p{margin-top:4px}@media(max-width:1100px){.overview-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.trend-grid{grid-template-columns:1fr}.overview-filters{grid-template-columns:1fr 1fr}.overview-filters>*:last-child{grid-column:1/-1}}@media(max-width:600px){.overview-cards,.trend-grid.two,.overview-filters{grid-template-columns:1fr}.overview-header h2{font-size:21px}.overview-card{padding:15px}.overview-page{gap:18px}}
+.overview-page{display:grid;gap:22px;min-width:0;padding-bottom:20px}.overview-header,.section-heading,.collection-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}h2,h3,p{margin:0}h2{font-size:24px}h3{font-size:17px}.muted,.metric-coverage{font-size:12px;opacity:.65}.overview-filters{display:grid;grid-template-columns:minmax(180px,320px) minmax(150px,220px) auto;gap:12px;align-items:center}.overview-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.overview-card{font:inherit;color:inherit;text-align:left;border:1px solid var(--border-color,rgba(128,128,128,.2));border-radius:10px;background:var(--glass-card-bg);padding:18px;display:flex;flex-direction:column;gap:10px;cursor:pointer;min-width:0}.overview-card:hover{border-color:var(--primary-color,#18a058)}.overview-card>strong{font-size:30px;font-weight:650}.overview-card>span{font-weight:600}.overview-card small,.metric-coverage{font-size:11px;opacity:.65;overflow-wrap:anywhere}.metric-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.metric-line b{font-size:12px;opacity:.7}.metric-line strong{font-size:22px;margin-left:auto}.trend-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.trend-grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}.section-heading{margin-bottom:12px}.action-distribution{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.attention-list{display:grid;gap:8px}.attention-item{font:inherit;color:inherit;background:transparent;border:1px solid rgba(128,128,128,.18);border-radius:8px;display:flex;gap:10px;align-items:center;text-align:left;padding:12px;cursor:pointer;flex-wrap:wrap}.attention-item span{overflow-wrap:anywhere}.attention-item small{margin-left:auto;opacity:.6}.activity-list{display:grid;gap:1px}.activity-list>div{display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(128,128,128,.15);padding:12px 0;flex-wrap:wrap}.activity-target{min-width:0;flex:1 1 220px;overflow-wrap:anywhere}.activity-list small{opacity:.65}.collection-toolbar p{margin-top:4px}.scan-progress{margin:12px 0;font-size:12px;overflow-wrap:anywhere}.scan-progress p{margin-top:4px}@media(max-width:1100px){.overview-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.trend-grid{grid-template-columns:1fr}.overview-filters{grid-template-columns:1fr 1fr}.overview-filters>*:last-child{grid-column:1/-1}}@media(max-width:600px){.activity-target{flex-basis:100%;width:100%;order:1}.overview-cards,.trend-grid.two,.overview-filters{grid-template-columns:1fr}.overview-header h2{font-size:21px}.overview-card{padding:15px}.overview-page{gap:18px}}
 </style>

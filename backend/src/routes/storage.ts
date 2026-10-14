@@ -1,3 +1,5 @@
+import {recordInventoryList} from '../services/dashboardCollector';
+import {localSql} from '../services/localSql';
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { createAuditLog } from '../models/auditLog';
@@ -33,7 +35,8 @@ router.get('/:accountId/kv', async (req: Request, res: Response, next: NextFunct
   try {
     const account = getAccountOr404(req, res);
     if (!account) return;
-    const result = await listKvNamespaces(account);
+    const started=Date.now();const result = await listKvNamespaces(account);
+    await recordInventoryList(localSql,account,'kv',result,started);
     res.json(result);
   } catch (err) { next(err); }
 });

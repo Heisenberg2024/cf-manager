@@ -22,6 +22,7 @@ export function redactDiagnostic(value: unknown): unknown {
 
 export type CfFailureKind = 'invalid' | 'permission' | 'network' | 'timeout' | 'rate_limited' | 'error';
 export class CloudflareError extends Error {
+  retryAfterMs?: number;
   readonly code: string;
   readonly statusCode: number;
   readonly kind: CfFailureKind;

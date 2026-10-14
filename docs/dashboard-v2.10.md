@@ -161,3 +161,7 @@ node scripts/test-docker.mjs cf-manager:codex-dashboard-v210
 ![桌面总览](dashboard-v2.10-desktop.png)
 
 ![手机审计中心](audit-v2.10-mobile.png)
+
+## v2.10.1 后续完善
+
+本文描述 v2.10.0 基线；默认不自动扫描、前端驱动采集和当时的滚动结论由 [v2.10.1 自动扫描与滚动修复](dashboard-v2.10.1.md) 更新。原统计/缓存模型保留，新增服务端持久化执行器与真实纵向交互验收。

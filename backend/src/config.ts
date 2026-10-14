@@ -16,4 +16,11 @@ export const config = {
   logDir: process.env.LOG_DIR || path.join(path.dirname(dbPath), 'logs'),
   fileLogging: process.env.FILE_LOGGING !== 'false',
   workerDeployUrlAllowlist: process.env.WORKER_DEPLOY_URL_ALLOWLIST || '',
+  dashboardScan: {
+    DASHBOARD_AUTO_COLLECT: process.env.DASHBOARD_AUTO_COLLECT,
+    DASHBOARD_SCAN_INTERVAL_HOURS: process.env.DASHBOARD_SCAN_INTERVAL_HOURS,
+    DASHBOARD_SCAN_CONCURRENCY: process.env.DASHBOARD_SCAN_CONCURRENCY,
+    DASHBOARD_SCAN_STARTUP_DELAY: process.env.DASHBOARD_SCAN_STARTUP_DELAY,
+    DASHBOARD_SCAN_WINDOW_UTC: process.env.DASHBOARD_SCAN_WINDOW_UTC,
+  },
 };

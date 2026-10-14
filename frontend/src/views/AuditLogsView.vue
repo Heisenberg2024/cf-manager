@@ -1,5 +1,5 @@
 <template>
-  <div class="audit-page">
+  <div class="audit-page" tabindex="0" @keydown="pageScrollKey">
     <div class="audit-heading">
       <div><h2>{{ t('audit.title') }}</h2><p>{{ t('audit.description') }}</p></div><n-button
         :loading="loading"
@@ -123,7 +123,7 @@
       <n-drawer-content
         :title="t('audit.details')"
         closable
-        body-content-style="overflow-wrap:anywhere"
+        body-content-style="min-width:0;overflow-wrap:anywhere"
       >
         <n-descriptions
           v-if="selected"
@@ -150,6 +150,7 @@
   </div>
 </template>
 <script setup lang="ts">
+import {pageScrollKey} from '../utils/pageScrolling';
 import { computed, h, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { NButton, NTag } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
@@ -173,7 +174,7 @@ const actionLabel=(action:string)=>te(`dashboard.actions.${action}`)?t(`dashboar
 const statusOptions=computed(()=>[{label:t('overview.success'),value:'success'},{label:t('overview.failure'),value:'error'}]);
 const columns=computed(()=>[
  {title:t('audit.time'),key:'created_at',width:170,render:(r:AuditEvent)=>formatCN(r.created_at)},
- {title:t('overview.accounts'),key:'account_name',width:180},
+ {title:t('overview.accounts'),key:'account_name',width:180,ellipsis:{tooltip:true}},
  {title:t('audit.action'),key:'action',width:200,render:(r:AuditEvent)=>actionLabel(r.action)},
  {title:t('audit.target'),key:'target',width:260,ellipsis:{tooltip:true}},
  {title:t('overview.status'),key:'status',width:90,render:(r:AuditEvent)=>h(NTag,{type:r.status==='success'?'success':'error',size:'small'},()=>r.status==='success'?t('overview.success'):t('overview.failure'))},
@@ -194,7 +195,9 @@ onMounted(()=>{query();const request=requests.begin('metadata');void Promise.all
 onUnmounted(()=>{clear();window.removeEventListener('auth-expired',clear);});
 </script>
 <style scoped>
-.audit-page{width:100%;max-width:100%;grid-template-columns:minmax(0,1fr);box-sizing:border-box}
+.audit-page{width:100%;max-width:100%;grid-template-columns:minmax(0,1fr);box-sizing:border-box;flex:1 1 0%;height:100%;min-height:0;overflow-y:auto;overflow-x:hidden;align-content:start;grid-auto-rows:max-content;padding-bottom:20px}
+.audit-page:focus-visible{outline:2px solid var(--primary-color,#18a058);outline-offset:-2px}
+@media(max-width:768px){.audit-page{height:auto;flex:none;overflow:visible}}
 .audit-page>*{min-width:0;max-width:100%;box-sizing:border-box}
 
 .audit-page{display:grid;gap:18px;min-width:0}.audit-heading,.audit-pagination{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}h2,p{margin:0}.audit-heading p,.detail-hint,.audit-pagination>span{font-size:12px;opacity:.65;margin-top:6px}.audit-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:end}.audit-filters label{display:grid;font-size:12px;gap:4px;min-width:0}.audit-filters input[type=date]{font:inherit;background:transparent;color:inherit;border:1px solid rgba(128,128,128,.3);border-radius:4px;padding:6px;min-width:0}.audit-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.audit-distribution{display:flex;gap:6px;flex-wrap:wrap}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}@media(max-width:800px){.audit-filters{grid-template-columns:1fr 1fr}}@media(max-width:500px){.audit-filters{grid-template-columns:1fr}.audit-stats{gap:6px}}

@@ -13,7 +13,7 @@ const directories = [];
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const docker = (...args) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 function logs(name) { const result = spawnSync('docker', ['logs', name], { encoding: 'utf8' }); return `${result.stdout || ''}${result.stderr || ''}`; }
-const env = ['-e', 'ENCRYPTION_KEY=test-key', '-e', 'API_SECRET=test-secret', '-e', 'TZ=Asia/Singapore'];
+const env = ['-e', 'ENCRYPTION_KEY=test-key', '-e', 'API_SECRET=test-secret', '-e', 'TZ=Asia/Singapore', '-e', 'DASHBOARD_AUTO_COLLECT=false'];
 const hardened = ['--user', '1000:1000', '--init', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--tmpfs', '/tmp:size=64m,noexec,nosuid,nodev', '--pids-limit', '200'];
 async function start(label, flags = [], variables = []) {
   const name = `${prefix}-${label}`;
@@ -49,7 +49,7 @@ async function api(url, path, method = 'GET') {
 try {
   const normal = await start('default');
   assertRuntime(normal.name);
-  if((await api(normal.url,'/settings')).version==='2.10.0'){
+  if((await api(normal.url,'/settings')).version.startsWith('2.10.')){
     assert.equal((await api(normal.url,'/dashboard/overview')).counts.bindings,0);
     assert.ok((await api(normal.url,'/dashboard/resources')).metrics.every(m=>m.value===0&&m.complete));
     assert.equal((await api(normal.url,'/audit-log/stats')).total,0);

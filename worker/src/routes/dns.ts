@@ -1,3 +1,5 @@
+import {markScanDirty} from '../services/dashboardScan';
+import {localSql} from '../services/localSql';
 import { Hono } from 'hono';
 import { getDnsDirectory } from '../services/dnsDirectory';
 import { requireDnsBinding, recordPageQuery, parseZoneContext } from '../services/zoneDirectory';
@@ -227,7 +229,7 @@ app.delete('/domains', async (c) => {
       if (isDemoAccount(account.id, c.env.DEMO_ACCOUNT_IDS)) {
         throw new Error('DEMO_PROTECTED: 演示账户不可删除 Zone');
       }
-      try { await cfFetch(account, `/zones/${zoneId}`, c.env.ENCRYPTION_KEY, { method: 'DELETE' }); } finally { await invalidateZonesCache(c.env.DB, account.id, account.account_id); }
+      try { await cfFetch(account, `/zones/${zoneId}`, c.env.ENCRYPTION_KEY, { method: 'DELETE' }); } finally { await invalidateZonesCache(c.env.DB, account.id, account.account_id);await markScanDirty(localSql(c.env.DB),account.id,'zones'); }
       return { domain, account };
     }
   );

@@ -1,0 +1,158 @@
+{
+  "synthetic": true,
+  "version": "2.10.1",
+  "baseline": "b146cf84e5d25dde327c61161d854f2d239b5a28",
+  "tests": {
+    "backend": 458,
+    "worker": 403,
+    "frontend": 120,
+    "total": 981,
+    "baseline": 879
+  },
+  "checks": {
+    "typecheck": "all passed",
+    "lintErrors": 0,
+    "schema": "passed",
+    "backendBuild": "passed",
+    "frontendBuild": "passed",
+    "workerZip": "passed",
+    "schedulerBuild": "passed",
+    "schedulerDryRun": "passed",
+    "localD1": "passed",
+    "dockerArm64Build": "passed",
+    "dockerStartupMatrix": "passed",
+    "npmAuditProduction": 0
+  },
+  "browser": {
+    "scrollCases": 16,
+    "automaticCases": 6,
+    "automaticExtra": 2,
+    "dashboardRegressionCases": 32,
+    "resourcesRegression": "Workers/Pages, Zone/Storage/D1, Tunnels/Rules, Catalog and independent scrolling passed"
+  },
+  "performance": [
+    {
+      "accounts": 20,
+      "firstBeforeMs": 201.13,
+      "firstAfterMs": 178.08,
+      "enqueueMs": [
+        8.09,
+        8.17,
+        10.32,
+        8.02,
+        6.31
+      ],
+      "scanCompletionMs": [
+        4352,
+        4390
+      ],
+      "cfCalls": 140,
+      "beforeHttp": [
+        {
+          "samples": 40,
+          "p50": 0.45116700000005494,
+          "p95": 1.591083000000026
+        },
+        {
+          "samples": 40,
+          "p50": 0.44412499999998545,
+          "p95": 0.8305409999999256
+        }
+      ],
+      "backgroundHttp": [
+        {
+          "samples": 40,
+          "p50": 0.445083000000011,
+          "p95": 1.4553750000000036
+        },
+        {
+          "samples": 40,
+          "p50": 0.4836670000004233,
+          "p95": 0.9882080000006681
+        }
+      ]
+    },
+    {
+      "accounts": 60,
+      "firstBeforeMs": 165.54,
+      "firstAfterMs": 162.03,
+      "enqueueMs": [
+        17.94,
+        17.42
+      ],
+      "scanCompletionMs": [
+        7427,
+        7470
+      ],
+      "cfCalls": 420,
+      "beforeHttp": [
+        {
+          "samples": 40,
+          "p50": 0.6168750000001637,
+          "p95": 1.1697909999998046
+        },
+        {
+          "samples": 40,
+          "p50": 0.4937090000000808,
+          "p95": 0.8099580000000515
+        }
+      ],
+      "backgroundHttp": [
+        {
+          "samples": 40,
+          "p50": 0.543666999999914,
+          "p95": 1.1019169999999576
+        },
+        {
+          "samples": 40,
+          "p50": 0.5600000000013097,
+          "p95": 1.0187910000022384
+        }
+      ]
+    },
+    {
+      "accounts": 120,
+      "firstBeforeMs": 168.87,
+      "firstAfterMs": 199.81,
+      "enqueueMs": [
+        42.98,
+        42.12
+      ],
+      "scanCompletionMs": [
+        12755,
+        13215
+      ],
+      "cfCalls": 840,
+      "beforeHttp": [
+        {
+          "samples": 40,
+          "p50": 0.7865409999999429,
+          "p95": 1.2075419999998758
+        },
+        {
+          "samples": 40,
+          "p50": 0.7357500000000528,
+          "p95": 1.4231250000000273
+        }
+      ],
+      "backgroundHttp": [
+        {
+          "samples": 40,
+          "p50": 0.8466670000016165,
+          "p95": 1.3245829999978014
+        },
+        {
+          "samples": 40,
+          "p50": 0.949125000006461,
+          "p95": 3.131083000000217
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    "no production credentials or deployment",
+    "real CF/D1 permissions, network and Free CPU not accepted",
+    "native AMD64 not accepted",
+    "existing lint and chunk warnings retained"
+  ]
+}

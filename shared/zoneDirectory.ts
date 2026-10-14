@@ -64,7 +64,7 @@ export class ZoneDirectory {
     const signature = await bindingSignature(account);
     return this.scheduler.run(`${revision}:${signature}:${path}`, account.id, signal => request(path, { signal }), options);
   }
-  async list(account: DnsBinding, request: CfRequest, options: { refresh?: boolean; background?:boolean; waitUntil?: (promise: Promise<unknown>) => void } = {}): Promise<ZoneSnapshot> {
+  async list(account: DnsBinding, request: CfRequest, options: { refresh?: boolean; background?:boolean; waitUntil?: (promise: Promise<unknown>) => void; signal?:AbortSignal } = {}): Promise<ZoneSnapshot> {
     requireDnsBinding(account);
     this.metric({ event: 'zone_lookup', accountId: account.id });
     const revision = this.epoch(account.id);
@@ -79,7 +79,7 @@ export class ZoneDirectory {
       if (current.flight) { this.metric({ event: 'zone_merged', accountId: account.id }); return current.flight; }
       const started = Date.now();
       const pending = (async () => {
-        const raw = await this.all(account, request, `/zones?account.id=${encodeURIComponent(account.account_id!)}`, 50, { background, revision });
+        const raw = await this.all(account, request, `/zones?account.id=${encodeURIComponent(account.account_id!)}`, 50, { background, revision, signal:options.signal });
         const zones = (raw as DnsZone[]).filter(z => z.account?.id === account.account_id).map(z => ({ id: z.id, name: z.name, status: z.paused ? 'paused' : z.status, paused: z.paused, account: z.account, plan: z.plan, name_servers: z.name_servers, cfAccountId: account.id, credentialId: account.credential_id, accountName: account.name }));
         const snapshot: ZoneSnapshot = { zones, meta: { accountId: account.id, state: 'miss', fetchedAt: Date.now(), durationMs: Date.now() - started } };
         if (this.entries.get(account.id) === current) { current.snapshot = snapshot; current.failed = undefined; current.failedAt = undefined; }

@@ -16,6 +16,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {sqlStatements} from './sqlStatements.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = join(__dirname, '..', 'src', 'db', 'migrations');
@@ -109,10 +110,7 @@ function main() {
       continue;
     }
     const content = readFileSync(join(MIGRATIONS_DIR, file), 'utf8');
-    const statements = content
-      .split(';')
-      .map((s) => s.replace(/--.*$/gm, '').trim())
-      .filter(Boolean);
+    const statements = sqlStatements(content);
     console.log(`  ▶ ${version} (${statements.length} 条语句)`);
     for (const stmt of statements) {
       const r = runStatement(stmt);

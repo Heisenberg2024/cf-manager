@@ -4,6 +4,7 @@ import { redact } from './cfErrors';
 export interface LocalSql {
   all<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>;
   run(sql: string, params?: unknown[]): Promise<void>;
+  batch?(statements: Array<{sql:string;params?:unknown[]}>): Promise<void>;
 }
 export function invalid(message: string): never {
   throw Object.assign(new Error(message), { statusCode: 400, code: 'VALIDATION_ERROR' });

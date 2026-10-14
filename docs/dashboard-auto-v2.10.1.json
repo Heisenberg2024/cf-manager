@@ -1,0 +1,497 @@
+{
+  "synthetic": true,
+  "baseline": false,
+  "baselineCommit": null,
+  "report": [
+    {
+      "n": 20,
+      "dark": false,
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "firstContentMs": 173.75854099999998,
+      "enqueueMs": [
+        8.093250000000012,
+        8.171709000000078,
+        10.318708000000015,
+        8.02008400000068
+      ],
+      "upstreamStartedMs": 153.14049999999997,
+      "autoCloudflareCalls": 140,
+      "resources": [
+        {
+          "metric": "d1",
+          "total": 20,
+          "succeeded": 20,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "kv",
+          "total": 20,
+          "succeeded": 20,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "pages",
+          "total": 20,
+          "succeeded": 20,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "r2",
+          "total": 20,
+          "succeeded": 20,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "tunnels",
+          "total": 20,
+          "succeeded": 20,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "workers",
+          "total": 20,
+          "succeeded": 20,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "zones",
+          "total": 20,
+          "succeeded": 20,
+          "failed": 0,
+          "skipped": 0
+        }
+      ],
+      "maxConcurrency": 2,
+      "scanCompletionMs": 4352,
+      "overviewHttp": {
+        "samples": 40,
+        "p50": 0.35825000000022555,
+        "p95": 0.9561670000002778
+      },
+      "duringBackgroundHttp": {
+        "samples": 40,
+        "p50": 0.445083000000011,
+        "p95": 1.4553750000000036
+      },
+      "localGetCloudflareCalls": 0,
+      "rateLimited": 0
+    },
+    {
+      "n": 20,
+      "dark": true,
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "firstContentMs": 182.39987500000007,
+      "enqueueMs": [
+        6.308250000000044
+      ],
+      "upstreamStartedMs": 151.4131669999997,
+      "autoCloudflareCalls": 140,
+      "resources": [
+        {
+          "metric": "d1",
+          "total": 20,
+          "succeeded": 20,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "kv",
+          "total": 20,
+          "succeeded": 20,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "pages",
+          "total": 20,
+          "succeeded": 20,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "r2",
+          "total": 20,
+          "succeeded": 20,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "tunnels",
+          "total": 20,
+          "succeeded": 20,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "workers",
+          "total": 20,
+          "succeeded": 20,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "zones",
+          "total": 20,
+          "succeeded": 20,
+          "failed": 0,
+          "skipped": 0
+        }
+      ],
+      "maxConcurrency": 2,
+      "scanCompletionMs": 4390,
+      "overviewHttp": {
+        "samples": 40,
+        "p50": 0.539082999999664,
+        "p95": 1.0569169999998849
+      },
+      "duringBackgroundHttp": {
+        "samples": 40,
+        "p50": 0.4836670000004233,
+        "p95": 0.9882080000006681
+      },
+      "localGetCloudflareCalls": 0,
+      "rateLimited": 0
+    },
+    {
+      "n": 60,
+      "dark": false,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "firstContentMs": 161.47579100000075,
+      "enqueueMs": [
+        17.941375000000335
+      ],
+      "upstreamStartedMs": 145.9628330000014,
+      "autoCloudflareCalls": 420,
+      "resources": [
+        {
+          "metric": "d1",
+          "total": 60,
+          "succeeded": 60,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "kv",
+          "total": 60,
+          "succeeded": 60,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "pages",
+          "total": 60,
+          "succeeded": 60,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "r2",
+          "total": 60,
+          "succeeded": 60,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "tunnels",
+          "total": 60,
+          "succeeded": 60,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "workers",
+          "total": 60,
+          "succeeded": 60,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "zones",
+          "total": 60,
+          "succeeded": 60,
+          "failed": 0,
+          "skipped": 0
+        }
+      ],
+      "maxConcurrency": 2,
+      "scanCompletionMs": 7427,
+      "overviewHttp": {
+        "samples": 40,
+        "p50": 0.7436669999988226,
+        "p95": 1.5362920000006852
+      },
+      "duringBackgroundHttp": {
+        "samples": 40,
+        "p50": 0.543666999999914,
+        "p95": 1.1019169999999576
+      },
+      "localGetCloudflareCalls": 0,
+      "rateLimited": 0
+    },
+    {
+      "n": 60,
+      "dark": true,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "firstContentMs": 162.58191699999952,
+      "enqueueMs": [
+        17.41675000000032
+      ],
+      "upstreamStartedMs": 145.28129199999967,
+      "autoCloudflareCalls": 420,
+      "resources": [
+        {
+          "metric": "d1",
+          "total": 60,
+          "succeeded": 60,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "kv",
+          "total": 60,
+          "succeeded": 60,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "pages",
+          "total": 60,
+          "succeeded": 60,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "r2",
+          "total": 60,
+          "succeeded": 60,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "tunnels",
+          "total": 60,
+          "succeeded": 60,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "workers",
+          "total": 60,
+          "succeeded": 60,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "zones",
+          "total": 60,
+          "succeeded": 60,
+          "failed": 0,
+          "skipped": 0
+        }
+      ],
+      "maxConcurrency": 2,
+      "scanCompletionMs": 7470,
+      "overviewHttp": {
+        "samples": 40,
+        "p50": 0.8576670000002196,
+        "p95": 1.8634999999994761
+      },
+      "duringBackgroundHttp": {
+        "samples": 40,
+        "p50": 0.5600000000013097,
+        "p95": 1.0187910000022384
+      },
+      "localGetCloudflareCalls": 0,
+      "rateLimited": 0
+    },
+    {
+      "n": 120,
+      "dark": false,
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "firstContentMs": 204.3909590000003,
+      "enqueueMs": [
+        42.97816700000112
+      ],
+      "upstreamStartedMs": 202.27999999999884,
+      "autoCloudflareCalls": 840,
+      "resources": [
+        {
+          "metric": "d1",
+          "total": 120,
+          "succeeded": 120,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "kv",
+          "total": 120,
+          "succeeded": 120,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "pages",
+          "total": 120,
+          "succeeded": 120,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "r2",
+          "total": 120,
+          "succeeded": 120,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "tunnels",
+          "total": 120,
+          "succeeded": 120,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "workers",
+          "total": 120,
+          "succeeded": 120,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "zones",
+          "total": 120,
+          "succeeded": 120,
+          "failed": 0,
+          "skipped": 0
+        }
+      ],
+      "maxConcurrency": 2,
+      "scanCompletionMs": 12755,
+      "overviewHttp": {
+        "samples": 40,
+        "p50": 0.8322499999994761,
+        "p95": 1.3650409999972908
+      },
+      "duringBackgroundHttp": {
+        "samples": 40,
+        "p50": 0.8466670000016165,
+        "p95": 1.3245829999978014
+      },
+      "localGetCloudflareCalls": 0,
+      "rateLimited": 0
+    },
+    {
+      "n": 120,
+      "dark": true,
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "firstContentMs": 195.2379579999979,
+      "enqueueMs": [
+        42.11837500000547
+      ],
+      "upstreamStartedMs": 194.6506670000017,
+      "autoCloudflareCalls": 840,
+      "resources": [
+        {
+          "metric": "d1",
+          "total": 120,
+          "succeeded": 120,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "kv",
+          "total": 120,
+          "succeeded": 120,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "pages",
+          "total": 120,
+          "succeeded": 120,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "r2",
+          "total": 120,
+          "succeeded": 120,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "tunnels",
+          "total": 120,
+          "succeeded": 120,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "workers",
+          "total": 120,
+          "succeeded": 120,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "metric": "zones",
+          "total": 120,
+          "succeeded": 120,
+          "failed": 0,
+          "skipped": 0
+        }
+      ],
+      "maxConcurrency": 2,
+      "scanCompletionMs": 13215,
+      "overviewHttp": {
+        "samples": 40,
+        "p50": 0.7595839999994496,
+        "p95": 1.6734160000050906
+      },
+      "duringBackgroundHttp": {
+        "samples": 40,
+        "p50": 0.949125000006461,
+        "p95": 3.131083000000217
+      },
+      "localGetCloudflareCalls": 0,
+      "rateLimited": 0
+    }
+  ],
+  "extra": [
+    {
+      "case": "three_tabs_and_browser_closed",
+      "jobs": 1,
+      "completed": 140,
+      "passed": true
+    },
+    {
+      "case": "auth_expiry_clears_frontend_without_cancelling_job",
+      "passed": true,
+      "completed": 140
+    }
+  ]
+}

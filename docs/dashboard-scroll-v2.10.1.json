@@ -1,0 +1,310 @@
+{
+  "synthetic": true,
+  "baseline": false,
+  "results": [
+    {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "dark": false,
+      "route": "dashboard",
+      "metric": {
+        "height": 780,
+        "total": 3168,
+        "overflow": "auto"
+      },
+      "wheelTop": 650,
+      "pageDownTop": 740,
+      "endTop": 2388,
+      "nextPage": false,
+      "drawerTop": null,
+      "touchTop": null
+    },
+    {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "dark": false,
+      "route": "audit-logs",
+      "metric": {
+        "height": 780,
+        "total": 2531,
+        "overflow": "auto"
+      },
+      "wheelTop": 650,
+      "pageDownTop": 740,
+      "endTop": 1751,
+      "nextPage": true,
+      "drawerTop": 650,
+      "touchTop": null
+    },
+    {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "dark": true,
+      "route": "dashboard",
+      "metric": {
+        "height": 780,
+        "total": 3168,
+        "overflow": "auto"
+      },
+      "wheelTop": 650,
+      "pageDownTop": 740,
+      "endTop": 2388,
+      "nextPage": false,
+      "drawerTop": null,
+      "touchTop": null
+    },
+    {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "dark": true,
+      "route": "audit-logs",
+      "metric": {
+        "height": 780,
+        "total": 2531,
+        "overflow": "auto"
+      },
+      "wheelTop": 650,
+      "pageDownTop": 740,
+      "endTop": 1751,
+      "nextPage": true,
+      "drawerTop": 650,
+      "touchTop": null
+    },
+    {
+      "viewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "dark": false,
+      "route": "dashboard",
+      "metric": {
+        "height": 648,
+        "total": 4297,
+        "overflow": "auto"
+      },
+      "wheelTop": 650,
+      "pageDownTop": 608,
+      "endTop": 3649,
+      "nextPage": false,
+      "drawerTop": null,
+      "touchTop": null
+    },
+    {
+      "viewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "dark": false,
+      "route": "audit-logs",
+      "metric": {
+        "height": 648,
+        "total": 2531,
+        "overflow": "auto"
+      },
+      "wheelTop": 650,
+      "pageDownTop": 608,
+      "endTop": 1883,
+      "nextPage": true,
+      "drawerTop": 650,
+      "touchTop": null
+    },
+    {
+      "viewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "dark": true,
+      "route": "dashboard",
+      "metric": {
+        "height": 648,
+        "total": 4297,
+        "overflow": "auto"
+      },
+      "wheelTop": 650,
+      "pageDownTop": 608,
+      "endTop": 3649,
+      "nextPage": false,
+      "drawerTop": null,
+      "touchTop": null
+    },
+    {
+      "viewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "dark": true,
+      "route": "audit-logs",
+      "metric": {
+        "height": 648,
+        "total": 2531,
+        "overflow": "auto"
+      },
+      "wheelTop": 650,
+      "pageDownTop": 608,
+      "endTop": 1883,
+      "nextPage": true,
+      "drawerTop": 650,
+      "touchTop": null
+    },
+    {
+      "viewport": {
+        "width": 768,
+        "height": 1024
+      },
+      "dark": false,
+      "route": "dashboard",
+      "metric": {
+        "height": 1024,
+        "total": 4437,
+        "overflow": "auto"
+      },
+      "wheelTop": 650,
+      "pageDownTop": 994,
+      "endTop": 3413,
+      "nextPage": false,
+      "drawerTop": null,
+      "touchTop": 541
+    },
+    {
+      "viewport": {
+        "width": 768,
+        "height": 1024
+      },
+      "dark": false,
+      "route": "audit-logs",
+      "metric": {
+        "height": 1024,
+        "total": 2656,
+        "overflow": "auto"
+      },
+      "wheelTop": 650,
+      "pageDownTop": 994,
+      "endTop": 1632,
+      "nextPage": true,
+      "drawerTop": 650,
+      "touchTop": 315
+    },
+    {
+      "viewport": {
+        "width": 768,
+        "height": 1024
+      },
+      "dark": true,
+      "route": "dashboard",
+      "metric": {
+        "height": 1024,
+        "total": 4437,
+        "overflow": "auto"
+      },
+      "wheelTop": 650,
+      "pageDownTop": 994,
+      "endTop": 3413,
+      "nextPage": false,
+      "drawerTop": null,
+      "touchTop": 527
+    },
+    {
+      "viewport": {
+        "width": 768,
+        "height": 1024
+      },
+      "dark": true,
+      "route": "audit-logs",
+      "metric": {
+        "height": 1024,
+        "total": 2656,
+        "overflow": "auto"
+      },
+      "wheelTop": 650,
+      "pageDownTop": 994,
+      "endTop": 1632,
+      "nextPage": true,
+      "drawerTop": 650,
+      "touchTop": 315
+    },
+    {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "dark": false,
+      "route": "dashboard",
+      "metric": {
+        "height": 844,
+        "total": 5956,
+        "overflow": "auto"
+      },
+      "wheelTop": 650,
+      "pageDownTop": 814,
+      "endTop": 5112,
+      "nextPage": false,
+      "drawerTop": null,
+      "touchTop": 315
+    },
+    {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "dark": false,
+      "route": "audit-logs",
+      "metric": {
+        "height": 844,
+        "total": 2896,
+        "overflow": "auto"
+      },
+      "wheelTop": 650,
+      "pageDownTop": 814,
+      "endTop": 2052,
+      "nextPage": true,
+      "drawerTop": 650,
+      "touchTop": 527
+    },
+    {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "dark": true,
+      "route": "dashboard",
+      "metric": {
+        "height": 844,
+        "total": 5956,
+        "overflow": "auto"
+      },
+      "wheelTop": 650,
+      "pageDownTop": 814,
+      "endTop": 5112,
+      "nextPage": false,
+      "drawerTop": null,
+      "touchTop": 536
+    },
+    {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "dark": true,
+      "route": "audit-logs",
+      "metric": {
+        "height": 844,
+        "total": 2896,
+        "overflow": "auto"
+      },
+      "wheelTop": 650,
+      "pageDownTop": 814,
+      "endTop": 2052,
+      "nextPage": true,
+      "drawerTop": 650,
+      "touchTop": 536
+    }
+  ]
+}

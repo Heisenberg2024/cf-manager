@@ -1608,7 +1608,7 @@
     "unknownOrAbnormal": "Abnormal or unknown",
     "moduleError": "This module failed; refresh independently",
     "resourceCollection": "Resource snapshot collection",
-    "collectionHint": "Opening this page does not scan Cloudflare. Read one account and product at a time using valid caches. Pause stops the next item. Forced collection reads remote resources.",
+    "collectionHint": "Read-only background inventory. Leaving this page retains the job. Snapshots are not live health checks.",
     "collectMissing": "Collect missing / stale snapshots",
     "forceCollect": "Force selected scope",
     "pause": "Pause",
@@ -1675,7 +1675,26 @@
     "accountDetails": "Account details",
     "credential": "Credential",
     "features": "Enabled features",
-    "manageAccount": "Manage account"
+    "manageAccount": "Manage account",
+    "scan": {
+      "resume": "Resume scan",
+      "forceAll": "Force all accounts",
+      "skipped": "Skipped",
+      "global": "Global background job",
+      "lastFull": "Last full scan",
+      "next": "Next scheduled scan",
+      "cooldown": "Cooling down until",
+      "pagesHint": "Pages executes bounded request batches. An independent Scheduled Worker is needed to continue reliably after closing the browser.",
+      "states": {
+        "idle": "No scan",
+        "queued": "Scan queued",
+        "running": "Background inventory scan",
+        "paused": "Scan paused",
+        "completed": "Scan completed",
+        "completed_with_errors": "Completed with read errors",
+        "failed": "Scan failed"
+      }
+    }
   },
   "audit": {
     "title": "Audit logs",

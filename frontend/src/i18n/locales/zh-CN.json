@@ -1608,7 +1608,7 @@
     "unknownOrAbnormal": "异常或未知",
     "moduleError": "此模块读取失败，可独立刷新",
     "resourceCollection": "资源快照采集",
-    "collectionHint": "首页不会自动扫描 Cloudflare。按账号与产品逐项读取，复用有效缓存；暂停后不再发出下一项请求。强制采集会访问远端。",
+    "collectionHint": "后台只读扫描资源目录，离开本页后任务仍保留。快照不代表实时健康状态。",
     "collectMissing": "采集缺失 / 过期快照",
     "forceCollect": "强制采集所选范围",
     "pause": "暂停采集",
@@ -1675,7 +1675,26 @@
     "accountDetails": "账号详情",
     "credential": "凭证",
     "features": "已启用功能",
-    "manageAccount": "进入账号管理"
+    "manageAccount": "进入账号管理",
+    "scan": {
+      "resume": "恢复扫描",
+      "forceAll": "强制扫描全部账号",
+      "skipped": "跳过",
+      "global": "全局后台任务",
+      "lastFull": "最近完整扫描",
+      "next": "下次计划扫描",
+      "cooldown": "冷却至",
+      "pagesHint": "Pages 每次请求有界分批执行；浏览器关闭后需独立 Scheduled Worker 持续触发。",
+      "states": {
+        "idle": "暂无扫描",
+        "queued": "等待后台扫描",
+        "running": "后台资源扫描中",
+        "paused": "扫描已暂停",
+        "completed": "扫描已完成",
+        "completed_with_errors": "扫描完成，部分读取失败",
+        "failed": "扫描失败"
+      }
+    }
   },
   "audit": {
     "title": "审计日志",

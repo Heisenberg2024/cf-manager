@@ -487,3 +487,9 @@ cd worker && npm run deploy
 Free 计划的 10ms CPU 限制可能导致复杂操作（如批量部署）失败。解决方案：
 - 升级到 Workers Paid 计划（$5/月）
 - 减少单次请求的并发账户数量
+
+## v2.10.1 Dashboard 自动资源扫描
+
+Docker 在服务监听后延迟启动持久化只读扫描，配置见 `.env.example` 的 `DASHBOARD_*`。Pages 用认证请求和 D1 分批推进；Pages 本身没有 Cron，如需无人访问时仍持续运行，可选独立 `worker/wrangler.dashboard-scheduler.toml`，绑定同一 D1 并配置相同 ENCRYPTION_KEY。
+
+升级需先备份，D1 应用 `0014_dashboard_scan.sql` 后整体发布前后端；Docker 自动幂等升级。不改变现有凭据密文/Account 主键。扫描策略、运行时限制、验收与回滚详见 [v2.10.1 技术说明](dashboard-v2.10.1.md)。

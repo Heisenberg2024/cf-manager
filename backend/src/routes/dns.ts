@@ -1,3 +1,5 @@
+import {markScanDirty} from '../services/dashboardScan';
+import {localSql} from '../services/localSql';
 import { Router, Request, Response, NextFunction } from 'express';
 import { findAccountByDomain, getZoneSnapshots, getAccountZones } from '../services/accountRouter';
 import { listDnsRecords, createDnsRecord, updateDnsRecord, deleteDnsRecord } from '../services/dnsService';
@@ -218,7 +220,7 @@ router.delete('/domains', async (req: Request, res: Response, next: NextFunction
         if (isDemoAccountId(account.id)) {
           throw new Error('DEMO_PROTECTED: 演示账户不可删除 Zone');
         }
-        try { await deleteZone(account, zoneId); } finally { invalidateZonesCache(account.id, account.account_id); }
+        try { await deleteZone(account, zoneId); } finally { invalidateZonesCache(account.id, account.account_id);await markScanDirty(localSql,account.id,'zones'); }
         return { domain, account };
       }
     );

@@ -141,3 +141,10 @@ worker/src/services/catalogReader.ts
 
 backend/src/services/accountOptions.ts
 worker/src/services/accountOptions.ts
+
+# Shared dashboard scan generated copies
+backend/src/services/dashboardScan.ts
+backend/src/services/dashboardScanTypes.ts
+worker/src/services/dashboardScan.ts
+worker/src/services/dashboardScanTypes.ts
+worker/scheduler-dist/

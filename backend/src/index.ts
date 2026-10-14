@@ -37,6 +37,7 @@ import { appLogger } from './services/logger';
 import cron from 'node-cron';
 import { getEnabledCatalogSources } from './models/catalogSource';
 import { refreshCatalogSource } from './routes/store';
+import { dashboardScanExecutor } from './services/dashboardScanRuntime';
 
 const app = express();
 
@@ -175,6 +176,7 @@ async function start() {
   });
   app.listen(config.port, () => {
     appLogger.info(`Server running on port ${config.port} (ready)`);
+    dashboardScanExecutor.start();
   });
 }
 
@@ -185,6 +187,10 @@ process.on('uncaughtException', (err) => {
 });
 process.on('unhandledRejection', (err) => {
   appLogger.error(`[UNHANDLED_REJECTION] ${err}`);
+});
+for(const signal of ['SIGTERM','SIGINT'] as const)process.once(signal,()=>{
+  const deadline=setTimeout(()=>process.exit(0),28000);
+  dashboardScanExecutor.stop().finally(()=>{clearTimeout(deadline);process.exit(0);});
 });
 
 start().catch((err) => {

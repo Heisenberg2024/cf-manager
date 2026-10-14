@@ -1,0 +1,44 @@
+{
+  "synthetic": true,
+  "runtime": "Wrangler 4.151.0 / local workerd",
+  "schemaCommands": 28,
+  "sqlResults": [
+    [
+      {
+        "metric": "*",
+        "revision": 1
+      },
+      {
+        "metric": "kv",
+        "revision": 1
+      }
+    ],
+    [
+      {
+        "job_id": "local-test",
+        "metric": "kv",
+        "state": "queued"
+      }
+    ],
+    [
+      {
+        "id": 1,
+        "executor_token": "local-owner",
+        "executor_until": 90000
+      }
+    ],
+    [
+      {
+        "metric": "*",
+        "revision": 1
+      },
+      {
+        "metric": "kv",
+        "revision": 1
+      }
+    ]
+  ],
+  "remoteAccess": false,
+  "schedulerDryRun": "passed",
+  "deployed": false
+}

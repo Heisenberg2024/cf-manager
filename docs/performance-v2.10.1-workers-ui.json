@@ -1,0 +1,88 @@
+{
+  "synthetic": true,
+  "source": "Local isolated Chromium simulation, not production latency or P95",
+  "baseline": false,
+  "dns": [
+    {
+      "width": 1440,
+      "records": 100,
+      "firstScreenMs": 124,
+      "interactionMs": 60,
+      "firstPayloadRows": 100,
+      "jsHeapUsedBytes": 19194852,
+      "recordRequests": 1
+    },
+    {
+      "width": 1440,
+      "records": 1000,
+      "firstScreenMs": 114,
+      "interactionMs": 56,
+      "firstPayloadRows": 500,
+      "jsHeapUsedBytes": 19226004,
+      "recordRequests": 1
+    },
+    {
+      "width": 1440,
+      "records": 10000,
+      "firstScreenMs": 107,
+      "interactionMs": 52,
+      "firstPayloadRows": 500,
+      "jsHeapUsedBytes": 19244876,
+      "recordRequests": 3
+    },
+    {
+      "width": 390,
+      "records": 100,
+      "firstScreenMs": 103,
+      "interactionMs": 57,
+      "firstPayloadRows": 100,
+      "jsHeapUsedBytes": 17570160,
+      "recordRequests": 1
+    },
+    {
+      "width": 390,
+      "records": 1000,
+      "firstScreenMs": 104,
+      "interactionMs": 54,
+      "firstPayloadRows": 500,
+      "jsHeapUsedBytes": 17599784,
+      "recordRequests": 1
+    },
+    {
+      "width": 390,
+      "records": 10000,
+      "firstScreenMs": 100,
+      "interactionMs": 54,
+      "firstPayloadRows": 500,
+      "jsHeapUsedBytes": 17619744,
+      "recordRequests": 3
+    }
+  ],
+  "workers": [
+    {
+      "accounts": 20,
+      "firstScreenMs": 184,
+      "initialDrawerReads": [
+        "/workers/1/workers/worker-0/settings",
+        "/workers/1/workers/worker-0/secrets"
+      ],
+      "initialPagesReads": [
+        "/workers/1/pages/project-0/project"
+      ],
+      "upstreamCallsAtCapture": 60
+    },
+    {
+      "accounts": 60,
+      "firstScreenMs": 229,
+      "initialDrawerReads": [
+        "/workers/1/workers/worker-0/settings",
+        "/workers/1/workers/worker-0/secrets",
+        "/workers/summary"
+      ],
+      "initialPagesReads": [
+        "/workers/1/pages/project-0/project"
+      ],
+      "upstreamCallsAtCapture": 88
+    }
+  ]
+}

@@ -1,3 +1,6 @@
+import {markScanDirty} from '../dashboardScan';
+import {localSql} from '../localSql';
+import type {ResourceMetric} from '../dashboardData';
 /**
  * Deploy Service 统一入口（Worker 端）— 编排 preflight + workerDeploy + pagesDeploy + triggers + rollback。
  *
@@ -399,5 +402,11 @@ export async function deployTemplate(opts: DeployOptions): Promise<DeployResult>
       await addAuditLog(opts.db, { account_id: account.id, action: 'store_deploy', target: name, detail: `error: ${detail}`, status: 'error' });
     }
     return { success: false, error: detail, warnings, bindings: resolvedBindings, rolledBack: true, rollbackErrors: rollbackErrors.length > 0 ? rollbackErrors : undefined };
+  } finally {
+    const metrics=new Set<ResourceMetric>();
+    if(template.type==='worker'||template.type==='hybrid'&&deployType!=='pages')metrics.add('workers');
+    if(template.type==='pages'||template.type==='hybrid'&&(deployType==='pages'||deployType==='both'))metrics.add('pages');
+    for(const b of resolvedBindings)if(b.created&&b.resourceType)metrics.add(b.resourceType);
+    if(opts.db)for(const metric of metrics)await markScanDirty(localSql(opts.db),account.id,metric);
   }
 }

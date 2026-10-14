@@ -1,9 +1,12 @@
+import {recordInventoryList} from '../services/dashboardCollector';
+import {localSql} from '../services/localSql';
+import {getDnsDirectory} from '../services/dnsDirectory';
 import { mapConcurrent } from '../utils/concurrent';
 import { errorDetails } from '../services/cfErrors';
 import { Hono } from 'hono';
 import type { Env } from '../types';
 import { getAccountById, addAuditLog } from '../db/models';
-import { cfFetch, cfFetchRaw, cfFetchAll, accountRequest } from '../services/cfApi';
+import { cfFetch, cfFetchRaw, accountRequest } from '../services/cfApi';
 import { isDemoAccount, demoDestructiveGuard } from '../services/demo';
 
 import {getStorageResources,getD1Resources} from '../services/storageRuntime';
@@ -35,7 +38,8 @@ const acctPath = (a: any) => `/accounts/${a.account_id}`;
 // ============ KV Namespaces ============
 app.get('/:accountId/kv', async (c) => {
   const account = await requireAccount(c);
-  return c.json(await cfFetchAll(account, `${acctPath(account)}/storage/kv/namespaces`, c.env.ENCRYPTION_KEY));
+  const started=Date.now();const result=await getDnsDirectory(c.env.DB).all(account,await accountRequest(account,c.env.ENCRYPTION_KEY),`${acctPath(account)}/storage/kv/namespaces`,50);
+  await recordInventoryList(localSql(c.env.DB),account,'kv',result,started);return c.json(result);
 });
 
 app.post('/:accountId/kv', async (c) => {

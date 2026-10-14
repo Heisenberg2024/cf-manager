@@ -1,0 +1,15 @@
+# Optional deployment; use the SAME D1 database and ENCRYPTION_KEY as Pages.
+name = "cf-manager-dashboard-scheduler"
+main = "dashboard-scheduler.ts"
+compatibility_date = "2024-12-01"
+[triggers]
+crons = ["* * * * *"]
+[[d1_databases]]
+binding = "DB"
+database_name = "cf-manager"
+database_id = "YOUR_D1_DATABASE_ID"
+[vars]
+DASHBOARD_AUTO_COLLECT = "true"
+DASHBOARD_SCAN_INTERVAL_HOURS = "24"
+DASHBOARD_SCAN_CONCURRENCY = "1"
+# Set ENCRYPTION_KEY via wrangler secret put; never save it in this file.

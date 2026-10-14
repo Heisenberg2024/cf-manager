@@ -1,3 +1,6 @@
+import {markScanDirty} from '../dashboardScan';
+import {localSql} from '../localSql';
+import type {ResourceMetric} from '../dashboardData';
 /**
  * Deploy Service 统一入口 — 编排 preflight + workerDeploy + pagesDeploy + triggers + rollback。
  *
@@ -461,6 +464,12 @@ export async function deployTemplate(opts: DeployOptions): Promise<DeployResult>
       success: false, error: detail, warnings, bindings: resolvedBindings,
       rolledBack: true, rollbackErrors: rollbackErrors.length > 0 ? rollbackErrors : undefined,
     };
+  } finally {
+    const metrics=new Set<ResourceMetric>();
+    if(template.type==='worker'||template.type==='hybrid'&&deployType!=='pages')metrics.add('workers');
+    if(template.type==='pages'||template.type==='hybrid'&&(deployType==='pages'||deployType==='both'))metrics.add('pages');
+    for(const b of resolvedBindings)if(b.created&&b.resourceType)metrics.add(b.resourceType);
+    for(const metric of metrics)await markScanDirty(localSql,account.id,metric);
   }
 }
 

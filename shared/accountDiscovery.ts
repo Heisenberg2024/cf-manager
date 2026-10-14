@@ -45,7 +45,7 @@ export function createCfRequest(transport: Transport, headers: Record<string, st
         const retry = response.headers.get('retry-after');
         const seconds = retry && /^\d+(\.\d+)?$/.test(retry) ? Number(retry) : retry ? Math.max(0, (Date.parse(retry) - Date.now()) / 1000) : NaN;
         // Long limits are returned to the caller rather than retried earlier than CF requested.
-        if (Number.isFinite(seconds) && seconds > 5) throw new CloudflareError(429, `Rate limited; retry after ${Math.ceil(seconds)}s`, [], context);
+        if (Number.isFinite(seconds) && seconds > 5) throw Object.assign(new CloudflareError(429, `Rate limited; retry after ${Math.ceil(seconds)}s`, [], context),{retryAfterMs:seconds*1000});
         await sleep(Number.isFinite(seconds) ? seconds * 1000 : 500 * 2 ** attempt);
         continue;
       }
@@ -68,7 +68,9 @@ export function createCfRequest(transport: Transport, headers: Record<string, st
         body = {};
       }
       if (!response.ok || body.success === false) {
-        throw new CloudflareError(response.status, body.errors?.map(e => e.message).join('; ') || 'Upstream request failed', body.errors?.map(e => e.code), context);
+        const error=new CloudflareError(response.status, body.errors?.map(e => e.message).join('; ') || 'Upstream request failed', body.errors?.map(e => e.code), context);
+        if(response.status===429){const retry=response.headers.get('retry-after');const ms=retry&&/^\d+(\.\d+)?$/.test(retry)?Number(retry)*1000:retry?Date.parse(retry)-Date.now():NaN;if(Number.isFinite(ms))error.retryAfterMs=Math.max(0,ms);}
+        throw error;
       }
       return body;
     }

@@ -1,0 +1,67 @@
+{
+  "synthetic": true,
+  "simulated": true,
+  "runtime": "v24.21.0",
+  "matrix": [
+    {
+      "width": 1440,
+      "dark": false,
+      "accounts": 60,
+      "zones": 1000,
+      "r2Objects": 10000,
+      "kvKeys": 10000,
+      "d1Rows": 10000,
+      "zoneInteractionMs": 636,
+      "settingsRequestCount": 1,
+      "patchCount": 1,
+      "apiRequests": 24,
+      "cfRequests": 18,
+      "heapBytes": 50997460
+    },
+    {
+      "width": 1440,
+      "dark": true,
+      "accounts": 60,
+      "zones": 1000,
+      "r2Objects": 10000,
+      "kvKeys": 10000,
+      "d1Rows": 10000,
+      "zoneInteractionMs": 575,
+      "settingsRequestCount": 1,
+      "patchCount": 1,
+      "apiRequests": 24,
+      "cfRequests": 18,
+      "heapBytes": 37325428
+    },
+    {
+      "width": 390,
+      "dark": false,
+      "accounts": 20,
+      "zones": 1000,
+      "r2Objects": 10000,
+      "kvKeys": 10000,
+      "d1Rows": 10000,
+      "zoneInteractionMs": 570,
+      "settingsRequestCount": 1,
+      "patchCount": 1,
+      "apiRequests": 24,
+      "cfRequests": 18,
+      "heapBytes": 44883496
+    },
+    {
+      "width": 390,
+      "dark": true,
+      "accounts": 20,
+      "zones": 1000,
+      "r2Objects": 10000,
+      "kvKeys": 10000,
+      "d1Rows": 10000,
+      "zoneInteractionMs": 827,
+      "settingsRequestCount": 1,
+      "patchCount": 1,
+      "apiRequests": 24,
+      "cfRequests": 18,
+      "heapBytes": 29493100
+    }
+  ]
+}

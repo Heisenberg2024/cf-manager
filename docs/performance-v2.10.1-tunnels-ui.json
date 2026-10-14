@@ -1,0 +1,56 @@
+{
+  "synthetic": true,
+  "simulated": true,
+  "baseline": false,
+  "runtime": "v24.21.0",
+  "report": [
+    {
+      "width": 1440,
+      "dark": false,
+      "firstMs": 221.26854200000008,
+      "initialApi": 4,
+      "initialCF": 1,
+      "initialHeapBytes": 10873684,
+      "safetyChecks": "pass",
+      "allZoneScans": 0,
+      "configPuts": 1,
+      "heapBytes": 14862792
+    },
+    {
+      "width": 1440,
+      "dark": true,
+      "firstMs": 227.8199169999998,
+      "initialApi": 4,
+      "initialCF": 1,
+      "initialHeapBytes": 11003896,
+      "safetyChecks": "pass",
+      "allZoneScans": 0,
+      "configPuts": 1,
+      "heapBytes": 25509420
+    },
+    {
+      "width": 390,
+      "dark": false,
+      "firstMs": 189.06445800000074,
+      "initialApi": 4,
+      "initialCF": 1,
+      "initialHeapBytes": 10433376,
+      "safetyChecks": "pass",
+      "allZoneScans": 0,
+      "configPuts": 1,
+      "heapBytes": 15547408
+    },
+    {
+      "width": 390,
+      "dark": true,
+      "firstMs": 214.83233299999847,
+      "initialApi": 4,
+      "initialCF": 1,
+      "initialHeapBytes": 10636204,
+      "safetyChecks": "pass",
+      "allZoneScans": 0,
+      "configPuts": 1,
+      "heapBytes": 15624344
+    }
+  ]
+}

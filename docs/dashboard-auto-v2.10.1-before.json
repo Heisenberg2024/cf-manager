@@ -1,0 +1,104 @@
+{
+  "synthetic": true,
+  "baseline": true,
+  "baselineCommit": "b146cf84e5d25dde327c61161d854f2d239b5a28",
+  "report": [
+    {
+      "n": 20,
+      "dark": false,
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "firstContentMs": 228.53470900000002,
+      "autoCloudflareCalls": 0,
+      "autoScanCompletionMs": null,
+      "overviewHttp": {
+        "samples": 40,
+        "p50": 0.45116700000005494,
+        "p95": 1.591083000000026
+      }
+    },
+    {
+      "n": 20,
+      "dark": true,
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "firstContentMs": 173.72133300000007,
+      "autoCloudflareCalls": 0,
+      "autoScanCompletionMs": null,
+      "overviewHttp": {
+        "samples": 40,
+        "p50": 0.44412499999998545,
+        "p95": 0.8305409999999256
+      }
+    },
+    {
+      "n": 60,
+      "dark": false,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "firstContentMs": 166.46604200000002,
+      "autoCloudflareCalls": 0,
+      "autoScanCompletionMs": null,
+      "overviewHttp": {
+        "samples": 40,
+        "p50": 0.6168750000001637,
+        "p95": 1.1697909999998046
+      }
+    },
+    {
+      "n": 60,
+      "dark": true,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "firstContentMs": 164.620042,
+      "autoCloudflareCalls": 0,
+      "autoScanCompletionMs": null,
+      "overviewHttp": {
+        "samples": 40,
+        "p50": 0.4937090000000808,
+        "p95": 0.8099580000000515
+      }
+    },
+    {
+      "n": 120,
+      "dark": false,
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "firstContentMs": 166.63995799999998,
+      "autoCloudflareCalls": 0,
+      "autoScanCompletionMs": null,
+      "overviewHttp": {
+        "samples": 40,
+        "p50": 0.7865409999999429,
+        "p95": 1.2075419999998758
+      }
+    },
+    {
+      "n": 120,
+      "dark": true,
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "firstContentMs": 171.10825,
+      "autoCloudflareCalls": 0,
+      "autoScanCompletionMs": null,
+      "overviewHttp": {
+        "samples": 40,
+        "p50": 0.7357500000000528,
+        "p95": 1.4231250000000273
+      }
+    }
+  ],
+  "extra": []
+}

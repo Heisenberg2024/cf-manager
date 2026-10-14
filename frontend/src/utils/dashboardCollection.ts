@@ -7,3 +7,15 @@ export function confirmedResourceKeys(accounts:DashboardAccount[], summaries:Arr
  return keys;
 }
 export const collectionKey=(account:Pick<DashboardAccount,'account_id'>,metric:ResourceMetric)=>`${account.account_id}:${metric}`;
+
+import type {ScanStatus} from '../shared/dashboardScanTypes';
+const needsPoll=(status:ScanStatus)=>scanIsRunning(status.state)||status.state==='paused'&&!!status.job?.currentResource.length;
+export const scanIsRunning=(state:ScanStatus['state'])=>state==='queued'||state==='running';
+/** Polls only lightweight persisted status. Stop aborts reads and fences late responses, never pauses a job. */
+export function createScanPoller(options:{read:(signal:AbortSignal)=>Promise<ScanStatus>;update:(status:ScanStatus)=>void|Promise<void>;error:(error:unknown)=>void;intervalMs?:number}){
+ let timer:ReturnType<typeof setTimeout>|undefined,controller=new AbortController(),epoch=0;
+ const stop=()=>{epoch++;if(timer)clearTimeout(timer);timer=undefined;controller.abort();controller=new AbortController();};
+ const observe=async(status:ScanStatus)=>{stop();const generation=epoch;await options.update(status);if(generation===epoch&&needsPoll(status))timer=setTimeout(()=>{void poll(generation);},options.intervalMs??4000);};
+ const poll=async(generation:number)=>{try{const value=await options.read(controller.signal);if(generation!==epoch)return;await options.update(value);if(generation===epoch&&needsPoll(value))timer=setTimeout(()=>{void poll(generation);},options.intervalMs??4000);}catch(error){if(generation===epoch&&!controller.signal.aborted)options.error(error);}};
+ return {observe,stop};
+}
