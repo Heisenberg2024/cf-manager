@@ -1,6 +1,7 @@
-// Offline UI regression: built frontend, synthetic API, isolated headless browser.
+// Offline UI regression: built frontend, synthetic API, isolated headless browser, Python 3 for workbook readback.
 // FRONTEND_DIST=/path/to/test-dist PLAYWRIGHT_MODULE=/path/to/playwright node scripts/test-dns-plans-ui.mjs
 import { createServer } from 'node:http';
+import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,7 +33,9 @@ let changeMode = 'normal';
 let failedZonePlans = false;
 let createMode = 'normal';
 let createWrites = [];
+let failedDomainAccount;
 const reset = () => {
+  failedDomainAccount = undefined;
   zones = accounts.map((account, i) => ({ id: `zone-${i + 1}`, name: `existing-${i + 1}.test`, cfAccountId: account.id, credentialId: account.credential_id, accountName: account.name, account: { id: account.account_id }, status: 'active', plan: { legacy_id: ['free', 'enterprise', 'pro'][i], name: ['Free Website', 'Enterprise Website', 'Pro Website'][i] } }));
   posted = undefined; delayFirst = false; failedPlans = false; getPlansCalls = 0;
   planWrites = []; changeMode = 'normal'; failedZonePlans = false;
@@ -110,7 +113,11 @@ const server = createServer(async (req, res) => {
       const results = posted.names.map((name, i) => ({ name, zone_created: true, success: true, requested_plan: posted.plan, zone_id: `new-${offset + i}`, name_servers: ['ns.example.test'], plan: { id: offset + i < 3 ? posted.plan : 'free', name: offset + i < 3 ? 'Enterprise' : 'Free' }, ...(offset + i >= 3 && posted.plan !== 'free' ? { fallback: true, warning: 'Enterprise quota exceeded; using Free' } : {}) }));
       return json({ total: results.length, succeeded: results.length, failed: 0, fallback_count: results.filter(row => row.fallback).length, results }, 201);
     }
-    if (/^\/dns\/accounts\/\d+\/domains$/.test(path)) return json({ zones: zones.filter(zone => zone.cfAccountId === Number(path.split('/')[3])), meta: { state: 'miss' } });
+    if (/^\/dns\/accounts\/\d+\/domains$/.test(path)) {
+      const id = Number(path.split('/')[3]);
+      if (id === failedDomainAccount) return json({ code: 'CF_NETWORK', message: 'Synthetic directory failure' }, 502);
+      return json({ zones: zones.filter(zone => zone.cfAccountId === id), meta: { accountId: id, state: 'miss' } });
+    }
     if (path === '/dns/domains') return json(zones);
     if (path.endsWith('/records')) return json([]);
     if (path.endsWith('/settings')) return json({});
@@ -125,7 +132,127 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const origin = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({ executablePath:process.env.CHROMIUM_EXECUTABLE||undefined, headless: true });
 const errors = [];
+
+async function readDomainWorkbook(download) {
+  assert.match(download.suggestedFilename(), /\.xlsx$/);
+  // Read the Open XML workbook independently of the writer.
+  const output = execFileSync('python3', ['-c', `
+import json, sys, zipfile
+from xml.etree import ElementTree as ET
+
+def cell_text(cell):
+    assert cell.find('{*}f') is None, 'Exported text must not become a formula'
+    if cell.get('t') == 's':
+        return shared[int(cell.findtext('{*}v'))]
+    return ''.join(part.text or '' for part in cell.findall('.//{*}t'))
+
+with zipfile.ZipFile(sys.argv[1]) as book:
+    shared = []
+    if 'xl/sharedStrings.xml' in book.namelist():
+        root = ET.fromstring(book.read('xl/sharedStrings.xml'))
+        shared = [''.join(t.text or '' for t in si.findall('.//{*}t')) for si in root]
+    sheet = ET.fromstring(book.read('xl/worksheets/sheet1.xml'))
+    print(json.dumps([[cell_text(cell) for cell in row] for row in sheet.findall('.//{*}row')]))
+`, await download.path()], { encoding: 'utf8' });
+  return JSON.parse(output);
+}
+
+async function testDomainInventory(theme, width) {
+  reset();
+  const [east, west, otherBinding] = zones;
+  zones = [
+    ...Array.from({ length: 100 }, (_, index) => {
+      const tier = ['enterprise', 'pro'][index % 10] || 'free';
+      const plan = tier === 'enterprise' ? { id: 'opaque', name: 'Enterprise Website' }
+        : tier === 'pro' ? { legacy_id: 'CF_PRO_20_20' } : { id: 'CF_FREE' };
+      return { ...east, id: `east-${index}`, name: `${tier}-${index}.test`, plan };
+    }),
+    { ...west, plan: { legacy_id: 'CF_BIZ' } },
+    { ...west, id: 'west-custom', name: 'custom-west.test', plan: { name: '=1+1' } },
+    { ...west, id: 'west-unknown', name: 'unknown-west.test', plan: undefined },
+    otherBinding,
+  ];
+  const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: theme });
+  try {
+    await context.addInitScript(theme => {
+      localStorage.setItem('app_locale', 'zh-CN');
+      localStorage.setItem('api_token', 'synthetic');
+      localStorage.setItem('dns_selected_account', '1');
+      localStorage.setItem('themeMode', theme);
+    }, theme);
+    const page = await context.newPage();
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(`${origin}${base}/dns`);
+    const rows = page.locator('.dns-zone-list .n-list-item');
+    const planFilter = page.getByLabel('按套餐筛选', { exact: true });
+    const planSort = page.getByLabel('按套餐排序', { exact: true });
+    const exportButton = page.getByRole('button', { name: /导出 Excel/ });
+    const selectMenu = page.locator('.n-base-select-menu:visible');
+    const select = async (control, label) => {
+      await control.click({ timeout: 3000 });
+      await selectMenu.getByText(label, { exact: true }).click();
+    };
+    const download = async label => {
+      await exportButton.click();
+      const downloaded = page.waitForEvent('download');
+      await page.getByText(label, { exact: true }).click();
+      return readDomainWorkbook(await downloaded);
+    };
+
+    await rows.first().getByText('enterprise-0.test', { exact: true }).waitFor();
+    assert.equal(await rows.count(), 100);
+    await select(planSort, '套餐升序');
+    await rows.first().getByText('free-2.test', { exact: true }).waitFor();
+    await rows.nth(80).getByText('pro-1.test', { exact: true }).waitFor();
+    await rows.nth(90).getByText('enterprise-0.test', { exact: true }).waitFor();
+    await select(planSort, '套餐降序');
+    await rows.first().getByText('enterprise-0.test', { exact: true }).waitFor();
+    await rows.nth(10).getByText('pro-1.test', { exact: true }).waitFor();
+
+    await planFilter.click();
+    const tier = name => zh.dns.plans.tiers[name];
+    for (const [key, count] of [['free', 80], ['pro', 10], ['enterprise', 10]]) {
+      await selectMenu.getByText(`${tier(key)} (${count})`, { exact: true }).waitFor();
+    }
+    assert.equal(await selectMenu.getByText(/Business/).count(), 0);
+    await selectMenu.getByText(`${tier('enterprise')} (10)`, { exact: true }).click();
+    await rows.nth(10).waitFor({ state: 'detached' });
+    assert.equal(await rows.count(), 10);
+    await page.getByPlaceholder(zh.dns.searchDomain).fill('enterprise-0.test');
+    await rows.nth(1).waitFor({ state: 'detached' });
+    await rows.first().getByRole('checkbox').check();
+    const [head, ...enterprise] = await download(`导出 ${tier('enterprise')} 域名 (10)`);
+    assert.deepEqual(head, ['域名', '套餐', '状态']);
+    assert.deepEqual(enterprise, Array.from({ length: 10 }, (_, index) => [`enterprise-${index * 10}.test`, tier('enterprise'), zh.dns.statusActive]));
+    const [, ...all] = await download('导出全部域名 (100)');
+    assert.equal(all.length, 100);
+    assert.deepEqual(new Set(all.map(([domain]) => domain)), new Set(zones.slice(0, 100).map(zone => zone.name)));
+    assert.equal(all.filter(([, plan]) => plan === tier('free')).length, 80);
+
+    failedDomainAccount = 1;
+    await page.getByRole('button', { name: zh.common.refresh, exact: true }).first().click();
+    await page.getByText(/Synthetic directory failure/).waitFor();
+    assert(await exportButton.isDisabled(), 'A failed refresh cannot be exported as a complete account directory');
+    await page.getByPlaceholder(zh.dns.searchDomain).fill('');
+    const accountFilter = page.locator('.page-view > .n-space .n-select').first();
+    await select(accountFilter, labels[1]);
+    await rows.getByText('existing-2.test', { exact: true }).waitFor();
+    assert.equal(await rows.count(), 3, 'A different account clears the previous plan filter');
+    const [, ...westRows] = await download('导出全部域名 (3)');
+    assert.deepEqual(westRows.map(([name, plan]) => [name, plan]).sort(), [
+      ['custom-west.test', '=1+1'], ['existing-2.test', tier('business')], ['unknown-west.test', zh.dns.plans.unknown],
+    ]);
+    await select(accountFilter, zh.dns.allAccounts);
+    assert.equal(await exportButton.count(), 0, 'Export requires a single account');
+    assert.equal(getPlansCalls, 0, 'Filtering and export use the zone directory without billing reads');
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+    console.log(`PASS DNS plan sorting, scoped filtering and Excel downloads at ${width}px (${theme})`);
+  } finally { await context.close(); }
+}
+
 try {
+  await testDomainInventory('light', 1440);
+  await testDomainInventory('dark', 390);
   for (const [theme, width] of [['light', 1440], ['light', 390], ['dark', 1440], ['dark', 390]]) {
     reset();
     const context = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: 'reduce', colorScheme: theme });

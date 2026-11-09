@@ -351,6 +351,23 @@
     "selectedCount": "已选择 {count} 个域名",
     "deleteSelected": "删除选中 ({count})",
     "allAccounts": "所有账户",
+    "domainPlans": {
+      "filter": "按套餐筛选",
+      "all": "全部套餐",
+      "option": "{plan} ({count})",
+      "sort": "按套餐排序",
+      "sortDefault": "默认顺序",
+      "sortAsc": "套餐升序",
+      "sortDesc": "套餐降序",
+      "noMatches": "没有符合条件的域名",
+      "export": "导出 Excel",
+      "exportAll": "导出全部域名 ({count})",
+      "exportPlan": "导出 {plan} 域名 ({count})",
+      "exportChoosePlan": "先筛选套餐，再导出该套餐域名",
+      "exportFailed": "Excel 导出失败，请重试",
+      "domain": "域名",
+      "plan": "套餐"
+    },
     "plans": {
       "label": "域名套餐",
       "credential": "凭证",

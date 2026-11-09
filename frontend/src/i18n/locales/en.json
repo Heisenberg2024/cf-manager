@@ -351,6 +351,23 @@
     "selectedCount": "{count} Zones selected",
     "deleteSelected": "Delete selected ({count})",
     "allAccounts": "All Accounts",
+    "domainPlans": {
+      "filter": "Filter by plan",
+      "all": "All plans",
+      "option": "{plan} ({count})",
+      "sort": "Sort by plan",
+      "sortDefault": "Default order",
+      "sortAsc": "Plan ascending",
+      "sortDesc": "Plan descending",
+      "noMatches": "No matching domains",
+      "export": "Export Excel",
+      "exportAll": "Export all domains ({count})",
+      "exportPlan": "Export {plan} domains ({count})",
+      "exportChoosePlan": "Filter by plan to export its domains",
+      "exportFailed": "Excel export failed. Please try again.",
+      "domain": "Domain",
+      "plan": "Plan"
+    },
     "plans": {
       "label": "Zone plan",
       "credential": "Credential",

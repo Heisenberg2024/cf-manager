@@ -32,6 +32,24 @@
         size="small"
         style="width: 320px; max-width: 100%"
       />
+      <n-select
+        v-model:value="selectedPlan"
+        :options="domainPlanOptions"
+        :aria-label="t('dns.domainPlans.filter')"
+        :placeholder="t('dns.domainPlans.all')"
+        :disabled="!domainPlanOptions.length"
+        :consistent-menu-width="false"
+        clearable
+        size="small"
+        style="width: 194px; max-width: 100%"
+      />
+      <n-select
+        v-model:value="planSort"
+        :options="planSortOptions"
+        :aria-label="t('dns.domainPlans.sort')"
+        size="small"
+        style="width: 132px; max-width: 100%"
+      />
     </n-space>
 
     <n-grid class="dns-grid-container" :cols="24" :x-gap="12" :y-gap="12" responsive="screen" item-responsive>
@@ -45,6 +63,13 @@
                 {{ t('dns.selectedCount', { count: selectedDomains.size }) }}
               </n-text>
             </n-space>
+          </template>
+          <template v-if="selectedDnsAccountId" #header-extra>
+            <n-dropdown trigger="click" :options="domainExportOptions" @select="exportDomains">
+              <n-button size="tiny" :loading="exportingDomains" :disabled="!canExportDomains">
+                {{ t('dns.domainPlans.export') }} ▾
+              </n-button>
+            </n-dropdown>
           </template>
           <n-space class="dns-zone-actions" :size="6" align="center" style="margin-bottom: 10px">
             <n-button size="tiny" @click="selectMatchingDomains">{{ t('dns.multi.selectSearch', {count: filteredDomains.filter(d => !isDemoDomain(d)).length}) }}</n-button>
@@ -83,8 +108,8 @@
                 <DnsZoneList :zones="filteredDomains" :selected="selectedDomains" :current-key="`${dnsStore.currentContext.accountId}:${dnsStore.currentContext.zoneId}`" :is-demo="isDemoDomain" :status-label="statusLabel" :status-color="statusColor" :plan-name="domainPlanName" @select="selectDomain" @toggle="(zone, checked) => toggleDomainSelect(zoneKey(zone), checked)" />
               </template>
 
-              <n-empty v-if="!dnsStore.domainsLoading && filteredDomains.length === 0" :description="t('dns.noDomain')" style="margin: 20px 0">
-                <template #extra>
+              <n-empty v-if="!dnsStore.domainsLoading && filteredDomains.length === 0" :description="t(accountDomains.length ? 'dns.domainPlans.noMatches' : 'dns.noDomain')" style="margin: 20px 0">
+                <template v-if="!accountDomains.length" #extra>
                   <n-button size="small" type="primary" @click="openAddDomains">{{ t('dns.addDomainBtn') }}</n-button>
                 </template>
               </n-empty>
@@ -396,7 +421,8 @@ import ZoneBatchSettingsDialog from '../components/ZoneBatchSettingsDialog.vue';
 import type { ZoneOperationTarget } from '../utils/zoneOperations';
 import { useAccountLabels } from '../utils/useAccountLabels';
 import DnsOperationModal from '../components/DnsOperationModal.vue';
-import { dnsPlanOptionLabel, dnsPlanTierLabel } from '../utils/dnsPlanLabel';
+import { compareDnsPlanGroups, dnsPlanGroup, dnsPlanOptionLabel, dnsPlanTierLabel, type DnsPlanGroup } from '../utils/dnsPlanLabel';
+import { createDnsDomainWorkbook, type DnsDomainExportRow } from '../utils/dnsDomainExport';
 import type { BatchAction, BatchZone, BatchSelection } from '../shared/dnsBatch';
 import { dnsApi } from '../api/dns';
 import { accountsApi } from '../api/accounts';
@@ -416,6 +442,13 @@ const dialog = useDialog();
 
 // ===== 账户过滤 =====
 const selectedAccount = ref<string>('');
+const selectedPlan = ref<string | null>(null);
+const planSort = ref<'default' | 'asc' | 'desc'>('default');
+const planSortOptions = computed(() => [
+  { label: t('dns.domainPlans.sortDefault'), value: 'default' },
+  { label: t('dns.domainPlans.sortAsc'), value: 'asc' },
+  { label: t('dns.domainPlans.sortDesc'), value: 'desc' },
+]);
 const searchQuery = ref('');
 const debouncedSearch = ref('');
 let searchTimer: ReturnType<typeof setTimeout>;
@@ -425,6 +458,7 @@ const domainSearchTerms = computed(() => [...new Set(debouncedSearch.value.split
 const accounts = ref<Array<DnsAccountIdentity & { is_enabled?: number; is_active?: number; enabled_features?: string }>>([]);
 const isDnsBindingAvailable = (account: typeof accounts.value[number]) => account.is_enabled !== 0 && account.is_active !== 0 && !!account.account_id && (account.enabled_features ?? 'dns').split(',').includes('dns');
 const dnsAccounts = computed(() => accounts.value.filter(isDnsBindingAvailable));
+const selectedDnsAccountId = computed(() => dnsAccounts.value.find(account => String(account.id) === selectedAccount.value)?.id);
 const accountFilterSearch = ref('');
 const accountCreateSearch = ref('');
 const { accountLabel, loadCredentialNames } = useAccountLabels();
@@ -477,21 +511,81 @@ const allDomains = computed(() =>
   )
 );
 
-const filteredDomains = computed(() => {
-  let list = allDomains.value;
-  // 账户筛选仍使用本地绑定 ID。
-  if (selectedAccount.value && selectedAccount.value !== '__all__') {
-    const opt = accountOptions.value.find(o => o.value === selectedAccount.value);
-    if (opt) {
-      list = list.filter((d: any) => String(d.cfAccountId) === opt.value);
-    }
-  }
-  // 域名搜索过滤
-  if (domainSearchTerms.value.length) {
-    list = list.filter((d: any) => domainSearchTerms.value.some(term => d.name?.toLowerCase().includes(term)));
-  }
-  return list;
+const accountDomains = computed(() => {
+  const account = selectedAccount.value;
+  if (!account || account === '__all__') return allDomains.value;
+  return allDomains.value.filter(domain => String(domain.cfAccountId) === account);
 });
+
+const plannedDomains = computed(() => accountDomains.value.map(domain => ({ domain, plan: dnsPlanGroup(domain.plan, t) })));
+const domainPlanOptions = computed(() => {
+  const groups = new Map<string, { plan: DnsPlanGroup; count: number }>();
+  for (const { plan } of plannedDomains.value) {
+    const group = groups.get(plan.key);
+    if (group) group.count++;
+    else groups.set(plan.key, { plan, count: 1 });
+  }
+  return [...groups.values()]
+    .sort((a, b) => compareDnsPlanGroups(a.plan, b.plan))
+    .map(({ plan, count }) => ({ value: plan.key, label: t('dns.domainPlans.option', { plan: plan.label, count }), planLabel: plan.label, count }));
+});
+watch([domainPlanOptions, () => dnsStore.domainsLoading], ([options, loading]) => {
+  if (!loading && selectedPlan.value && !options.some(option => option.value === selectedPlan.value)) selectedPlan.value = null;
+});
+
+const sortedPlanDomains = computed(() => {
+  if (planSort.value === 'default') return plannedDomains.value;
+  const direction = planSort.value === 'asc' ? 1 : -1;
+  return [...plannedDomains.value].sort((a, b) => direction * compareDnsPlanGroups(a.plan, b.plan));
+});
+const planFilteredDomains = computed(() => selectedPlan.value
+  ? sortedPlanDomains.value.filter(({ plan }) => plan.key === selectedPlan.value)
+  : sortedPlanDomains.value);
+const filteredDomains = computed(() => {
+  const terms = domainSearchTerms.value;
+  return planFilteredDomains.value.map(({ domain }) => domain)
+    .filter(domain => !terms.length || terms.some(term => domain.name?.toLowerCase().includes(term)));
+});
+
+const exportingDomains = ref(false);
+const canExportDomains = computed(() => {
+  const accountId = selectedDnsAccountId.value;
+  if (!accountId || dnsStore.domainsLoading || dnsStore.domainErrors[accountId]) return false;
+  const state = dnsStore.domainStates[accountId];
+  return (state === 'fresh' || state === 'miss') && accountDomains.value.length > 0;
+});
+const domainExportOptions = computed(() => {
+  const plan = domainPlanOptions.value.find(option => option.value === selectedPlan.value);
+  return [
+    { key: 'all', label: t('dns.domainPlans.exportAll', { count: accountDomains.value.length }) },
+    { key: 'plan', label: plan ? t('dns.domainPlans.exportPlan', { plan: plan.planLabel, count: plan.count }) : t('dns.domainPlans.exportChoosePlan'), disabled: !plan },
+  ];
+});
+
+async function exportDomains(scope: string | number) {
+  const accountId = selectedDnsAccountId.value;
+  if (!accountId || !canExportDomains.value || exportingDomains.value) return;
+  if (scope !== 'all' && (scope !== 'plan' || !selectedPlan.value)) return;
+
+  const source = scope === 'all' ? sortedPlanDomains.value : planFilteredDomains.value;
+  const rows = source.map(({ domain, plan }): DnsDomainExportRow => [domain.name, plan.label, statusLabel(domain.status)]);
+  if (!rows.length) return;
+  exportingDomains.value = true;
+  try {
+    const blob = await createDnsDomainWorkbook(t('dns.domainList'), [t('dns.domainPlans.domain'), t('dns.domainPlans.plan'), t('dns.plans.status')], rows);
+    if (!viewActive || selectedDnsAccountId.value !== accountId) return;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `dns-domains-${accountId}-${scope}.xlsx`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch {
+    if (viewActive) message.error(t('dns.domainPlans.exportFailed'));
+  } finally {
+    exportingDomains.value = false;
+  }
+}
 
 const groupedDomains = computed(() => {
   const groups: Record<string, any[]> = {};
@@ -546,6 +640,7 @@ function selectDomain(zone: any) {
 }
 
 function onAccountChange(val: string) {
+  selectedPlan.value = null;
   dnsStore.setDomainScope(val === '__all__' ? dnsAccounts.value.map(account => account.id) : [Number(val)]);
   void dnsStore.fetchDomains();
   saveAccount(val);
@@ -1038,8 +1133,8 @@ async function loadAccounts() {
 watch(groupedDomains, (groups, previous) => {
   if (selectedAccount.value === '__all__') { const old = new Set(previous.map(group => group.accountId)); expandedGroups.value = [...new Set([...expandedGroups.value, ...groups.filter(group => !old.has(group.accountId)).map(group => group.accountId)])]; }
 });
-watch(debouncedSearch, (val) => {
-  if (val && selectedAccount.value === '__all__') {
+watch([debouncedSearch, selectedPlan], ([search, plan]) => {
+  if ((search || plan) && selectedAccount.value === '__all__') {
     expandedGroups.value = groupedDomains.value.map(g => g.accountId);
   }
 });
